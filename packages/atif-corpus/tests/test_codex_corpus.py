@@ -15,11 +15,17 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import Any
 
 import pytest
 from corpus_fixtures import LIVE_NS, NOW_NS, STALE_NS, write_session
 
-from atif_corpus.application.materialize import CorpusAgentMismatchError, materialize
+from atif_corpus.application.materialize import (
+    MaterializationReport,
+    SuspiciousEmptyScanError,
+    materialize,
+    preview_pass,
+)
 from atif_corpus.domain.agents import AgentSource
 from atif_corpus.domain.layout import CorpusLayout
 from atif_corpus.domain.source_layout import CLAUDE_CODE_LAYOUT, CODEX_LAYOUT
@@ -239,109 +245,158 @@ class TestCodexMaterialization:
         assert report.materialized_count == 1
 
 
-class TestOneCorpusHoldsOneAgent:
-    """The corpus's own ``meta.agent`` is a discriminator, not just provenance.
+#: A session of each agent that keeps its source, so a pass whose other
+#: session vanished still scans something.
+KEPT_CLAUDE = "33333333-3333-3333-3333-333333333333"
+KEPT_CODEX = "01a0a000-0000-7000-8000-000000000003"
 
-    Per-agent default roots keep the two agents apart on their own, but an
-    explicit ``--corpus-root`` / ``ATIF_SQL_CORPUS_ROOT`` defeats them. Aimed at
-    the other agent's corpus, every session there is a ghost by construction, so
-    the pass would delete all of them and report it as "source vanished".
+
+def _materialize_claude(
+    source_root: Path, corpus_root: Path, converter: FakeConverter | None = None
+) -> MaterializationReport:
+    """One Claude Code materialization pass with the fake converter and a pinned clock."""
+    return materialize(
+        source_root=source_root,
+        corpus_root=corpus_root,
+        converter=converter or FakeConverter(),
+        materialized_at="2026-09-11T00:00:00Z",
+        harbor_version="0.22.0",
+        converter_version="0.1.0",
+        now_ns=NOW_NS,
+        source_layout=CLAUDE_CODE_LAYOUT,
+    )
+
+
+def _meta(corpus_root: Path, session_id: str) -> Any:
+    return json.loads(CorpusLayout(corpus_root).meta_path(session_id).read_text())
+
+
+class TestSharedCorpus:
+    """Two agents materialize into one corpus root, each owning only its own sessions.
+
+    Every session of the other agent is absent from this pass's scan by
+    construction, so a pass that judged them would mark all of them
+    source-removed; each session's ``meta.agent`` says whose it is.
     """
 
-    def test_a_codex_pass_refuses_a_claude_corpus(
-        self, tmp_path: Path, codex_source_root: Path
-    ) -> None:
-        claude_source = tmp_path / "projects"
-        claude_source.mkdir()
-        write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
-        corpus_root = tmp_path / "corpus"
-        first = materialize(
-            source_root=claude_source,
-            corpus_root=corpus_root,
-            converter=FakeConverter(),
-            materialized_at="2026-09-11T00:00:00Z",
-            harbor_version="0.22.0",
-            converter_version="0.1.0",
-            now_ns=NOW_NS,
-            source_layout=CLAUDE_CODE_LAYOUT,
-        )
-        assert first.materialized_count == 1
+    @pytest.fixture
+    def claude_source(self, tmp_path: Path) -> Path:
+        root = tmp_path / "projects"
+        root.mkdir()
+        return root
 
+    def test_both_agents_share_one_corpus(
+        self, tmp_path: Path, claude_source: Path, codex_source_root: Path
+    ) -> None:
+        corpus_root = tmp_path / "corpus"
+        write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
         write_rollout(codex_source_root, SESSION_B, mtime_ns=STALE_NS)
-        with pytest.raises(CorpusAgentMismatchError) as caught:
-            _materialize_codex(codex_source_root, corpus_root)
 
-        assert "one agent" in str(caught.value)
-        layout = CorpusLayout(corpus_root)
-        assert layout.session_dir(SESSION_A).is_dir(), "the Claude session was deleted"
-        assert not layout.session_dir(SESSION_B).exists(), "the refusal wrote anyway"
+        assert _materialize_claude(claude_source, corpus_root).materialized_count == 1
+        codex = _materialize_codex(codex_source_root, corpus_root)
+        assert codex.materialized_count == 1
+        assert codex.removed_session_ids == ()
+        assert codex.retained_count == 0
 
-    def test_a_claude_pass_refuses_a_codex_corpus(
-        self, tmp_path: Path, codex_source_root: Path
+        claude = _materialize_claude(claude_source, corpus_root)
+        assert claude.materialized_count == 0, "the Codex pass dropped the Claude watermark"
+        assert claude.up_to_date_count == 1
+        assert claude.removed_session_ids == ()
+        assert _materialize_codex(codex_source_root, corpus_root).up_to_date_count == 1
+
+        assert _meta(corpus_root, SESSION_A)["agent"] == "claude-code"
+        assert _meta(corpus_root, SESSION_B)["agent"] == "codex"
+        assert _meta(corpus_root, SESSION_A)["source_present"] is True
+        assert _meta(corpus_root, SESSION_B)["source_present"] is True
+
+    def test_a_pass_marks_only_its_own_agents_vanished_sessions(
+        self, tmp_path: Path, claude_source: Path, codex_source_root: Path
     ) -> None:
         corpus_root = tmp_path / "corpus"
+        claude_main = write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
+        write_session(claude_source, KEPT_CLAUDE, mtime_ns=STALE_NS)
+        rollout = write_rollout(codex_source_root, SESSION_B, mtime_ns=STALE_NS)
+        write_rollout(codex_source_root, KEPT_CODEX, mtime_ns=STALE_NS)
+        _materialize_claude(claude_source, corpus_root)
+        _materialize_codex(codex_source_root, corpus_root)
+
+        rollout.unlink()
+        claude_main.unlink()
+        codex = _materialize_codex(codex_source_root, corpus_root)
+        assert codex.removed_session_ids == (SESSION_B,)
+        assert _meta(corpus_root, SESSION_A)["source_present"] is True
+        assert _materialize_claude(claude_source, corpus_root).removed_session_ids == (SESSION_A,)
+
+    def test_status_retains_only_the_agents_own_sessions(
+        self, tmp_path: Path, claude_source: Path, codex_source_root: Path
+    ) -> None:
+        corpus_root = tmp_path / "corpus"
+        write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
         write_rollout(codex_source_root, SESSION_B, mtime_ns=STALE_NS)
-        assert _materialize_codex(codex_source_root, corpus_root).materialized_count == 1
+        _materialize_claude(claude_source, corpus_root)
+        _materialize_codex(codex_source_root, corpus_root)
 
-        claude_source = tmp_path / "projects"
-        claude_source.mkdir()
-        write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
-        with pytest.raises(CorpusAgentMismatchError):
-            materialize(
-                source_root=claude_source,
-                corpus_root=corpus_root,
-                converter=FakeConverter(),
-                materialized_at="2026-09-11T00:00:00Z",
-                harbor_version="0.22.0",
-                converter_version="0.1.0",
-                now_ns=NOW_NS,
-                source_layout=CLAUDE_CODE_LAYOUT,
-            )
-        assert CorpusLayout(corpus_root).session_dir(SESSION_B).is_dir()
-
-    def test_a_corpus_written_before_the_agent_key_reads_as_claude_code(
-        self, tmp_path: Path, codex_source_root: Path
-    ) -> None:
-        """No corpus predating Codex support can hold Codex sessions.
-
-        So a ``meta.json`` with no ``agent`` key answers ``claude-code`` — which
-        is what protects the corpora that were on disk before this feature.
-        """
-        claude_source = tmp_path / "projects"
-        claude_source.mkdir()
-        write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
-        corpus_root = tmp_path / "corpus"
-        materialize(
-            source_root=claude_source,
+        preview = preview_pass(
+            source_root=codex_source_root,
             corpus_root=corpus_root,
-            converter=FakeConverter(),
-            materialized_at="2026-09-11T00:00:00Z",
-            harbor_version="0.22.0",
             converter_version="0.1.0",
+            source_layout=CODEX_LAYOUT,
             now_ns=NOW_NS,
-            source_layout=CLAUDE_CODE_LAYOUT,
         )
+        assert preview.retained_session_ids == ()
+        assert [s.session_id for s in preview.plan.up_to_date] == [SESSION_B]
+
+    def test_a_session_written_before_the_agent_key_is_claude_codes(
+        self, tmp_path: Path, claude_source: Path, codex_source_root: Path
+    ) -> None:
+        """No session predating Codex support is a Codex one, so a Codex pass leaves it be."""
+        corpus_root = tmp_path / "corpus"
+        write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
+        _materialize_claude(claude_source, corpus_root)
         meta_path = CorpusLayout(corpus_root).meta_path(SESSION_A)
         meta = json.loads(meta_path.read_text())
         del meta["agent"]
         meta_path.write_text(json.dumps(meta))
 
         write_rollout(codex_source_root, SESSION_B, mtime_ns=STALE_NS)
-        with pytest.raises(CorpusAgentMismatchError):
-            _materialize_codex(codex_source_root, corpus_root)
-        assert CorpusLayout(corpus_root).session_dir(SESSION_A).is_dir()
+        assert _materialize_codex(codex_source_root, corpus_root).removed_session_ids == ()
+        assert _meta(corpus_root, SESSION_A)["source_present"] is True
 
-    def test_the_same_agent_twice_is_not_a_mismatch(
-        self, tmp_path: Path, codex_source_root: Path
+    def test_an_empty_scan_is_suspicious_only_over_the_agents_own_sessions(
+        self, tmp_path: Path, claude_source: Path, codex_source_root: Path
     ) -> None:
-        """The guard must not fire on the normal case: two passes, one agent."""
         corpus_root = tmp_path / "corpus"
-        write_rollout(codex_source_root, SESSION_A, mtime_ns=STALE_NS)
-        assert _materialize_codex(codex_source_root, corpus_root).materialized_count == 1
+        claude_main = write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
+        _materialize_claude(claude_source, corpus_root)
+
+        report = _materialize_codex(codex_source_root, corpus_root)
+        assert report.materialized_count == 0
+        assert report.removed_session_ids == ()
+
+        claude_main.unlink()
+        with pytest.raises(SuspiciousEmptyScanError):
+            _materialize_claude(claude_source, corpus_root)
+
+    def test_the_other_agents_empty_sessions_stay_recorded(
+        self, tmp_path: Path, claude_source: Path, codex_source_root: Path
+    ) -> None:
+        corpus_root = tmp_path / "corpus"
+        write_session(claude_source, SESSION_A, mtime_ns=STALE_NS)
+        empty = FakeConverter(empty_sessions=frozenset({SESSION_A}))
+        assert _materialize_claude(claude_source, corpus_root, empty).empty_session_ids == (
+            SESSION_A,
+        )
+        layout = CorpusLayout(corpus_root)
+        recorded = json.loads(layout.empty_sessions_path.read_text())
+        assert recorded[SESSION_A]["agent"] == "claude-code"
+
         write_rollout(codex_source_root, SESSION_B, mtime_ns=STALE_NS)
-        second = _materialize_codex(codex_source_root, corpus_root)
-        assert second.materialized_count == 1
-        assert second.removed_session_ids == ()
+        _materialize_codex(codex_source_root, corpus_root)
+        assert SESSION_A in json.loads(layout.empty_sessions_path.read_text())
+
+        again = _materialize_claude(claude_source, corpus_root, empty)
+        assert again.empty_session_ids == (), "the empty session was converted again"
+        assert again.up_to_date_count == 1
 
 
 def write_rollout_file(

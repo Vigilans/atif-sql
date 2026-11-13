@@ -11,8 +11,8 @@ stated in the README itself: converting once at the boundary, with an explicit a
 policy for what the upstream converter drops, beats re-deriving trajectory semantics inside every
 SQL view (`README.md:17-19`). Which agent a command works on is one flag, `--agent claude-code|codex`, and it
 moves the default source and corpus roots with it
-(`packages/atif-corpus/src/atif_corpus/infrastructure/settings.py`); one corpus holds one agent, and
-the `sessions` view reports which (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1079`).
+(`packages/atif-corpus/src/atif_corpus/infrastructure/settings.py`); a corpus holds one agent's sessions or
+several agents', and the `sessions` view reports each session's (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1079`).
 The reader it serves is an engineer or an agent asking how sessions
 actually went: which tools ran, where tokens went, where a session turned into friction.
 
@@ -50,7 +50,7 @@ materialize use case records the failure against that session and continues, so 
 transcript never aborts a sync (`packages/atif-corpus/src/atif_corpus/domain/ports.py:104-106`).
 
 `atif-duck` reads the corpus root and never imports the packages that wrote it
-(`docs/CONTRACT.md:260`). Its `register` entry point registers raw readers, views, vector search,
+(`docs/CONTRACT.md:263`). Its `register` entry point registers raw readers, views, vector search,
 macros, the authorship views, and the analytics surface in that order, because views bind against
 the raw TEMP tables at CREATE time
 (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2185`); the per-session raw readers
@@ -87,7 +87,7 @@ The direction of those edges is enforced rather than conventional. `[tool.import
 importing each other (`:606`), and a forbidden contract limiting `atif-analytics` to `atif-models`
 alone among the members (`:611`). `atif-cli` is
 the sole composition root, and it imports its siblings lazily inside command bodies
-(`packages/atif-cli/src/atif_cli/app.py:727`, `:1788`, `:1998`) so that `atif-sql schema` pays for
+(`packages/atif-cli/src/atif_cli/app.py:727`, `:1773`, `:1983`) so that `atif-sql schema` pays for
 none of the analytics or vector stack. Failures surface as typed exceptions mapped to stable
 process exit codes at the CLI edge (`packages/atif-cli/src/atif_cli/errors.py:30`).
 

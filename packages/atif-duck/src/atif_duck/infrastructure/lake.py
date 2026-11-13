@@ -112,8 +112,8 @@ if TYPE_CHECKING:
 #: The DuckDB extension that reads and writes the lake.
 DUCKLAKE_EXTENSION: str = "ducklake"
 
-#: The agent a corpus holds when its ``meta.json`` predates the ``agent`` key:
-#: no corpus from before Codex support can hold Codex sessions.
+#: The agent a session's ``meta.json`` names when it predates the ``agent``
+#: key: no session from before Codex support is a Codex one.
 DEFAULT_AGENT: str = "claude-code"
 
 #: Sessions per transaction when materialize hands the sink its published
@@ -216,9 +216,12 @@ class LakeLayout:
 
 @dataclass(frozen=True, slots=True)
 class LakeCorpus:
-    """One corpus the lake holds: its root and the agent it holds."""
+    """One corpus the lake holds: its root and the agents its sessions record."""
 
     root: Path
+    #: The agent each session's ``meta.json`` names, comma-joined in sorted
+    #: order when the corpus is shared by several. A load records what it
+    #: found; the value passed in labels a corpus with no sessions.
     agent: str
 
     @property
@@ -228,10 +231,10 @@ class LakeCorpus:
 
 
 def corpus_agent(corpus_root: Path, *, probe: int = 8) -> str:
-    """The agent a corpus holds, read from its first readable ``meta.json``.
+    """The agent a corpus's first readable ``meta.json`` names: a corpus's label before a load.
 
-    Mirrors atif-corpus's own probe: a meta without the key answers
-    :data:`DEFAULT_AGENT`, and an empty corpus does too.
+    A meta without the key answers :data:`DEFAULT_AGENT`, and an empty corpus
+    does too. A load replaces the label with every agent its sessions record.
     """
     import json
 
@@ -246,6 +249,28 @@ def corpus_agent(corpus_root: Path, *, probe: int = 8) -> str:
         agent = meta.get(AGENT_COLUMN) if isinstance(meta, dict) else None
         return agent if isinstance(agent, str) and agent else DEFAULT_AGENT
     return DEFAULT_AGENT
+
+
+def _session_agent(corpus_root: Path, session_id: str) -> str:
+    """The agent a session's ``meta.json`` names, :data:`DEFAULT_AGENT` when it names none."""
+    import json
+
+    try:
+        meta = json.loads(
+            (corpus_root / "sessions" / session_id / "meta.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return DEFAULT_AGENT
+    agent = meta.get(AGENT_COLUMN) if isinstance(meta, dict) else None
+    return agent if isinstance(agent, str) and agent else DEFAULT_AGENT
+
+
+def _by_agent(corpus_root: Path, session_ids: Sequence[str]) -> dict[str, list[str]]:
+    """``session_ids`` grouped by the agent each session records, agents sorted, ids in order."""
+    groups: dict[str, list[str]] = {}
+    for session_id in session_ids:
+        groups.setdefault(_session_agent(corpus_root, session_id), []).append(session_id)
+    return dict(sorted(groups.items()))
 
 
 def corpus_session_ids(corpus_root: Path) -> list[str]:
@@ -611,12 +636,16 @@ def _load_batch(
     corpus: LakeCorpus,
     session_ids: Sequence[str],
     *,
+    agent: str,
     staging: Staging,
     replace_corpus: bool = False,
     delete: bool = True,
     register_at: str | None = None,
 ) -> None:
     """Replace ``session_ids``' rows (or, with ``replace_corpus``, the corpus's) in one transaction.
+
+    The batch's rows carry ``agent``, the agent every one of its sessions
+    records (:func:`_by_agent`).
 
     ``delete=False`` skips the per-session DELETE for a batch the caller
     knows has no rows yet (a whole-corpus load after its first batch cleared
@@ -634,6 +663,7 @@ def _load_batch(
             con,
             corpus,
             session_ids,
+            agent=agent,
             stage=stage,
             replace_corpus=replace_corpus,
             delete=delete,
@@ -646,6 +676,7 @@ def _insert_batch(
     corpus: LakeCorpus,
     session_ids: Sequence[str],
     *,
+    agent: str,
     stage: Callable[[Sequence[str]], Mapping[str, Path]],
     replace_corpus: bool,
     delete: bool,
@@ -662,7 +693,7 @@ def _insert_batch(
             elif delete:
                 con.execute(DELETE_SESSIONS_SQL[table.name], [corpus.name, list(session_ids)])
             with _source_order(con, table.name):
-                con.execute(INSERT_SQL[table.name], [corpus.name, corpus.agent])
+                con.execute(INSERT_SQL[table.name], [corpus.name, agent])
         if register_at is not None:
             _register_corpus(con, corpus, register_at)
         _commit_message(con, f"{corpus.name}: {len(session_ids)} session(s)")
@@ -675,30 +706,40 @@ def _insert_batch(
 
 def _load_corpus(
     con: duckdb.DuckDBPyConnection, corpus: LakeCorpus, *, batch_size: int, staging: Staging
-) -> int:
+) -> tuple[LakeCorpus, int]:
     """Load a whole corpus in batches; the corpus is registered by the LAST batch's transaction.
 
     The first batch also deletes every row the corpus had, so a corpus a
     crashed load left half-written starts clean. Until the last batch
     commits the corpus is unregistered and a reader falls back to the
-    per-session path for it.
+    per-session path for it. Each batch holds one agent's sessions, and the
+    corpus is registered with every agent they record. Returns the corpus as
+    registered and how many sessions it holds.
     """
     ids = corpus_session_ids(corpus.root)
-    batches = [ids[i : i + batch_size] for i in range(0, len(ids), batch_size)] or [[]]
+    groups = _by_agent(corpus.root, ids)
+    batches = [
+        (agent, group[i : i + batch_size])
+        for agent, group in groups.items()
+        for i in range(0, len(group), batch_size)
+    ] or [(corpus.agent, [])]
+    if groups:
+        corpus = dataclasses.replace(corpus, agent=",".join(groups))
     registered_at = _now_iso()
     with _stage_pool(staging) as pooled:
-        for index, batch in enumerate(batches):
+        for index, (agent, batch) in enumerate(batches):
             _load_batch(
                 con,
                 corpus,
                 batch,
+                agent=agent,
                 staging=pooled,
                 replace_corpus=index == 0,
                 delete=False,
                 register_at=registered_at if index == len(batches) - 1 else None,
             )
     logger.info("lake: loaded corpus {} ({} session(s))", corpus.name, len(ids))
-    return len(ids)
+    return corpus, len(ids)
 
 
 # ---------------------------------------------------------------------------
@@ -779,13 +820,13 @@ def _rebuild_locked(
             _attach(con, build.catalog_path, build.data_dir, read_only=False)
             _create_schema(con)
             for corpus in ordered:
-                count = _load_corpus(
+                registered, count = _load_corpus(
                     con,
                     corpus,
                     batch_size=batch_size,
                     staging=Staging.beside(layout, workers=stage_workers),
                 )
-                loaded.append((corpus.name, corpus.agent, count))
+                loaded.append((registered.name, registered.agent, count))
             # A load in batches leaves several small files per partition.
             with _file_maintenance(con):
                 con.execute(f"CALL ducklake_merge_adjacent_files({sql_literal(LAKE_ALIAS)});")
@@ -922,7 +963,8 @@ class DuckLakeSessionSink:
                     if len(ids) <= self.stage_workers:
                         staging = Staging(staging.root)
                     with _stage_pool(staging) as pooled:
-                        _load_batch(con, corpus, ids, staging=pooled)
+                        for group_agent, group in _by_agent(corpus.root, ids).items():
+                            _load_batch(con, corpus, group, agent=group_agent, staging=pooled)
                 _detach(con)
             _publish_reader_catalog(self.layout)
             self.writes += 1

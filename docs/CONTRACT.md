@@ -77,12 +77,15 @@ proofs are out of scope for the workspace.
 - meta.agent: the AgentSource value ("claude-code" or "codex") the session was
   materialized from. A corpus written before this key existed reads as NULL in
   SQL and is still valid; nothing may require it to be present.
-- One corpus holds ONE agent, and meta.agent is the DISCRIMINATOR that enforces
-  it: materialize reads it before marking any session and before any write, and
-  a disagreement fails the pass (exit 78) with nothing touched. A meta.json with
-  no agent key answers claude-code, because no corpus predating Codex support
-  can hold Codex sessions. Per-agent default roots keep the two apart without
-  anyone thinking about it; an explicit corpus_root is what this guard covers.
+- A corpus root may hold several agents' sessions, and meta.agent names each
+  session's agent. A meta.json with no agent key answers claude-code, because no
+  session predating Codex support is a Codex one. A materialize pass owns only
+  the sessions of the agent it scans: it marks, retains and re-converts those
+  alone, records its agent in each empty_sessions.json entry it writes (another
+  agent's pass keeps such an entry as it is), and carries watermark.json entries
+  outside its source_root forward untouched. Per-agent default roots keep the
+  agents apart; an explicit corpus_root shared by both brings them together.
+  The lake's agent column comes from each session's meta.agent.
 - Source discovery MUST include subagents/agent-*.jsonl AND
   subagents/workflows/wf_*/agent-*.jsonl (and any deeper future nesting: use
   rglob over the session dir filtered to *.jsonl, excluding *.meta.json).

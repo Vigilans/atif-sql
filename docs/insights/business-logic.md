@@ -37,8 +37,8 @@ per run, per pipeline) is stated per row.
 | A user step and a user text record pair up only while the record's harbor-derived text equals the step's message | Conversion | `packages/atif-converter/src/atif_converter/domain/enrichment.py:347-360`; test `packages/atif-converter/tests/test_enrichment.py:372` | refuse: same truncation marker, WARNING logged |
 | A session materializes only once its newest source mtime is at least `quiesce_seconds` old (default 300 seconds of source silence, per session) | Corpus | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:88` and `packages/atif-corpus/src/atif_corpus/domain/sessions.py:236-237`; tests `packages/atif-corpus/tests/test_domain.py:40` (inclusive boundary) and `packages/atif-corpus/tests/test_domain.py:98` | deferred into `skipped_live`; revisited next pass |
 | A source mtime in the FUTURE never satisfies the quiescence threshold | Corpus | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:110-118`; test `packages/atif-corpus/tests/test_domain.py:45` | stays skipped, plus a WARNING every pass once the mtime is more than `future_warn_seconds` (1 second) ahead, so the starvation is visible |
-| `watermark.json` must parse as a mapping of path to int | Corpus | `packages/atif-corpus/src/atif_corpus/application/materialize.py:424-452` | degrade to empty (one full re-materialization pass), WARNING logged, never a refusal to sync |
-| A scan finding zero sessions while the corpus holds materialized ones (with every source directory listed) is not a deletion | Corpus | `packages/atif-corpus/src/atif_corpus/application/materialize.py:179` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1681-1687`; test `packages/atif-corpus/tests/test_materialize.py:380` | raise `SuspiciousEmptyScanError`; nothing is marked source-removed |
+| `watermark.json` must parse as a mapping of path to int | Corpus | `packages/atif-corpus/src/atif_corpus/application/materialize.py:415-443` | degrade to empty (one full re-materialization pass), WARNING logged, never a refusal to sync |
+| A scan finding zero sessions while the corpus holds materialized sessions of its agent (with every source directory listed) is not a deletion | Corpus | `packages/atif-corpus/src/atif_corpus/application/materialize.py:187` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1677-1687`; test `packages/atif-corpus/tests/test_materialize.py:380` | raise `SuspiciousEmptyScanError`; nothing is marked source-removed |
 | Only a genuine `FileNotFoundError` proves a source vanished; any other `OSError` means unreadable | Corpus | `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:131-143` and `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:284-293`; test `packages/atif-corpus/tests/test_materialize.py:909` | session lands in `SourceScan.unreadable`, is never ghosted, and its watermark entries are retained |
 | A `pipeline` added to the retry queue must be one of the contract names in `PIPELINE_NAMES` (the tuple the checkpoint module defines) | Analytics | `packages/atif-analytics/src/atif_analytics/infrastructure/sqlite_state/retry_queue.py:96-98`, `packages/atif-analytics/src/atif_analytics/infrastructure/sqlite_state/checkpointer.py:37-42`; tests `packages/atif-analytics/tests/test_state.py:145` and `packages/atif-analytics/tests/test_state.py:150` | raise `ValueError` |
 | Every LLM-output `confidence` is bounded to the closed interval 0.0 to 1.0 (dimensionless, per emitted row) | Analytics | `packages/atif-analytics/src/atif_analytics/domain/models.py:66-69`, `packages/atif-analytics/src/atif_analytics/domain/models.py:146-149`, `packages/atif-analytics/src/atif_analytics/domain/models.py:238-241`, `packages/atif-analytics/src/atif_analytics/domain/models.py:342-345` | pydantic `ValidationError` at `model_validate`, translated to `ProviderUnavailable` by either adapter (`packages/atif-models/src/atif_models/infrastructure/openai_bedrock.py:242-246`, `packages/atif-models/src/atif_models/infrastructure/anthropic_bedrock.py:284-288`); the unit goes to the retry queue |
@@ -62,8 +62,8 @@ per run, per pipeline) is stated per row.
 | Every macro parameter name must have an `ARG_EXEMPLARS` entry | SQL surface | `packages/atif-duck/src/atif_duck/domain/examples.py:59-76`, `packages/atif-duck/src/atif_duck/domain/examples.py:161-171`; test `packages/atif-duck/tests/test_examples.py:218` | `build_examples()` raises; the drift test fails with it |
 | Every catalog object must yield a runnable example or carry a documented `EXCLUSIONS` entry | SQL surface | `packages/atif-duck/src/atif_duck/domain/examples.py:95-100`; test `packages/atif-duck/tests/test_examples.py:190` | drift test fails |
 | A materialized session dir with no `meta.json` is incomplete | SQL surface | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:678-683`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:742-748`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:566-571`; test `packages/atif-duck/tests/test_duck_views.py:690` | excluded from every view, plus one WARNING per skipped dir so the exclusion is observable |
-| A real `embed` run needs an explicit scope: `--limit N` or `--all` | CLI | `packages/atif-cli/src/atif_cli/app.py:2003-2013` | exit 64 with the hint naming both flags and `--dry-run` |
-| `search` against an empty embeddings store is not a zero-result query | CLI | `packages/atif-cli/src/atif_cli/app.py:2255-2283` | exit 2 with the hint `atif-sql embed --all --no-dry-run` |
+| A real `embed` run needs an explicit scope: `--limit N` or `--all` | CLI | `packages/atif-cli/src/atif_cli/app.py:1988-1998` | exit 64 with the hint naming both flags and `--dry-run` |
+| `search` against an empty embeddings store is not a zero-result query | CLI | `packages/atif-cli/src/atif_cli/app.py:2240-2268` | exit 2 with the hint `atif-sql embed --all --no-dry-run` |
 
 Notes on two rows above. The strict-JSON transform in
 `packages/atif-models/src/atif_models/domain/schema.py:6-11` is a *rewriting* validation
@@ -99,17 +99,17 @@ pinned by `packages/atif-models/tests/test_anthropic_provider.py:112` and
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| A reader never observes a torn artifact SET: all the artifacts are written into `<corpus_root>/.staging/` and the whole directory is swapped in by rename | Application code | `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:165-204`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:639-644`; tests `packages/atif-corpus/tests/test_atomic.py:85`, `packages/atif-corpus/tests/test_materialize.py:435` |
-| `meta.json` is written LAST inside the staging directory, and it is the marker `atif-duck` gates every reader on | Application code, both sides | `packages/atif-corpus/src/atif_corpus/application/materialize.py:726-751`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:742-748`; test `packages/atif-duck/tests/test_duck_views.py:690` |
+| A reader never observes a torn artifact SET: all the artifacts are written into `<corpus_root>/.staging/` and the whole directory is swapped in by rename | Application code | `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:165-204`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:630-635`; tests `packages/atif-corpus/tests/test_atomic.py:85`, `packages/atif-corpus/tests/test_materialize.py:435` |
+| `meta.json` is written LAST inside the staging directory, and it is the marker `atif-duck` gates every reader on | Application code, both sides | `packages/atif-corpus/src/atif_corpus/application/materialize.py:717-739`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:742-748`; test `packages/atif-duck/tests/test_duck_views.py:690` |
 | Persistence order matches write order: each artifact is fsynced before the rename that publishes it, and the parent directory after | Application code | `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:72-103`, `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:51-69`; tests `packages/atif-corpus/tests/test_atomic.py:131`, `packages/atif-corpus/tests/test_atomic.py:149`, `packages/atif-corpus/tests/test_atomic.py:194` |
-| A kill inside the swap window leaves the session dir MISSING rather than torn, and the next pass force-replans it | Application code | `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:180-189`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1037-1072`; tests `packages/atif-corpus/tests/test_materialize.py:881`, `packages/atif-corpus/tests/test_domain.py:216` |
-| Only sessions that materialized successfully (or converted to nothing) advance their watermark entries, so a failed session stays stale and is retried | Application code | `packages/atif-corpus/src/atif_corpus/application/materialize.py:1330-1377`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1796-1799`; test `packages/atif-corpus/tests/test_materialize.py:422` |
-| A VANISHED source path keeps its watermark entry unless the owning session succeeded this pass or left the scan entirely; the retained entry IS the staleness signal | Application code | `packages/atif-corpus/src/atif_corpus/application/materialize.py:1361-1372`; tests `packages/atif-corpus/tests/test_materialize.py:218` and `packages/atif-corpus/tests/test_materialize.py:254` |
+| A kill inside the swap window leaves the session dir MISSING rather than torn, and the next pass force-replans it | Application code | `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:180-189`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1025-1060`; tests `packages/atif-corpus/tests/test_materialize.py:881`, `packages/atif-corpus/tests/test_domain.py:216` |
+| Only sessions that materialized successfully (or converted to nothing) advance their watermark entries, so a failed session stays stale and is retried | Application code | `packages/atif-corpus/src/atif_corpus/application/materialize.py:1318-1376`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1797-1800`; test `packages/atif-corpus/tests/test_materialize.py:422` |
+| A VANISHED source path keeps its watermark entry unless the owning session succeeded this pass or left the scan entirely; the retained entry IS the staleness signal. An entry outside the pass's source root belongs to another agent's pass and is carried forward as it is | Application code | `packages/atif-corpus/src/atif_corpus/application/materialize.py:1355-1371`; tests `packages/atif-corpus/tests/test_materialize.py:218` and `packages/atif-corpus/tests/test_materialize.py:254` |
 | `owns_path` is the single definition of a session's watermark scope, so staleness and retention can never disagree about which entries belong to a session | Application code | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:143`; tests `packages/atif-corpus/tests/test_domain.py:191`, `packages/atif-corpus/tests/test_domain.py:202`, `packages/atif-corpus/tests/test_domain.py:207` |
 | Only an exactly equal `mtime_ns` counts as unchanged; an mtime that moved BACKWARDS is `modified` | Application code | `packages/atif-corpus/src/atif_corpus/domain/watermark.py:61-76`; test `packages/atif-corpus/tests/test_domain.py:86` |
-| A staging entry is removed only when EVERY pid its name carries is proven gone; only `ProcessLookupError` proves that | Application code | `packages/atif-corpus/src/atif_corpus/application/materialize.py:964-1034`; tests `packages/atif-corpus/tests/test_materialize.py:518`, `packages/atif-corpus/tests/test_materialize.py:546`, `packages/atif-corpus/tests/test_materialize.py:570` |
-| One broken transcript never aborts a corpus sync: the port may raise anything, and the pass records the failure and continues | Application code | `packages/atif-corpus/src/atif_corpus/domain/ports.py:101-107`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:813-818`; test `packages/atif-corpus/tests/test_materialize.py:405` |
-| The domain reads no clock: `now_ns` is always passed in, so identical inputs always yield an identical plan | Application code | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:18-21`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:104-110`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1645`; test `packages/atif-corpus/tests/test_domain.py:145` |
+| A staging entry is removed only when EVERY pid its name carries is proven gone; only `ProcessLookupError` proves that | Application code | `packages/atif-corpus/src/atif_corpus/application/materialize.py:952-1022`; tests `packages/atif-corpus/tests/test_materialize.py:518`, `packages/atif-corpus/tests/test_materialize.py:546`, `packages/atif-corpus/tests/test_materialize.py:570` |
+| One broken transcript never aborts a corpus sync: the port may raise anything, and the pass records the failure and continues | Application code | `packages/atif-corpus/src/atif_corpus/domain/ports.py:101-107`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:801-806`; test `packages/atif-corpus/tests/test_materialize.py:405` |
+| The domain reads no clock: `now_ns` is always passed in, so identical inputs always yield an identical plan | Application code | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:18-21`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:112-118`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1651`; test `packages/atif-corpus/tests/test_domain.py:145` |
 | Every plan partition is sorted by session id, so the same scan yields the same work order, log output, and failure ordering | Application code | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:125-127`, `packages/atif-corpus/src/atif_corpus/domain/sessions.py:230`; test `packages/atif-corpus/tests/test_domain.py:145` |
 | The corpus root `~/.claude` maps to the reserved slug `default` and `~/.codex/sessions` to `codex`; every other root is `<sanitized-dirname>-<8 hex of sha256 of the resolved path>` | Application code | `packages/atif-corpus/src/atif_corpus/domain/slug.py:32`, `packages/atif-corpus/src/atif_corpus/domain/slug.py:40`, `packages/atif-corpus/src/atif_corpus/domain/slug.py:65-72`; tests `packages/atif-corpus/tests/test_slug.py:25`, `packages/atif-corpus/tests/test_slug.py:30`, `packages/atif-corpus/tests/test_slug.py:44`, `packages/atif-corpus/tests/test_slug.py:52` |
 | The per-session artifact filenames and the watermark filename are fixed by the contract | Application code | `packages/atif-corpus/src/atif_corpus/domain/layout.py:18-25`; test `packages/atif-corpus/tests/test_domain.py:245` |
@@ -159,7 +159,7 @@ pinned by `packages/atif-models/tests/test_anthropic_provider.py:112` and
 | Both `cost_estimate` counters filter on `model_name IS NOT NULL`, because user steps carry no model and would otherwise make every session look like a pricing gap | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2033-2038`; test `packages/atif-duck/tests/test_duck_views.py:425` |
 | An absent or unattachable Lance store degrades to an empty `message_embeddings` TABLE with the right schema, so `semantic_search` always binds | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1730-1761`; tests `packages/atif-duck/tests/test_vss.py:209` and `packages/atif-duck/tests/test_vss.py:345` |
 | Exit codes are a stable wire contract: `EXIT_CODES` is the workspace's one table, atif-converter carries no codes of its own (`convert` translates its typed errors), and no number is ever reassigned, so the retired `harbor_missing` keeps 127 | Application code | `packages/atif-cli/src/atif_cli/errors.py:5-17`, `packages/atif-cli/src/atif_cli/errors.py:29-66` |
-| `terminal` versus transient decides the `embed` exit code, so an unattended lane can stop retrying instead of burning identical ticks | Application code | `packages/atif-embed/src/atif_embed/domain/errors.py:17-26`, `packages/atif-cli/src/atif_cli/app.py:2040-2054` |
+| `terminal` versus transient decides the `embed` exit code, so an unattended lane can stop retrying instead of burning identical ticks | Application code | `packages/atif-embed/src/atif_embed/domain/errors.py:17-26`, `packages/atif-cli/src/atif_cli/app.py:2025-2039` |
 
 ## Calculations
 
@@ -224,7 +224,7 @@ perceived pipeline admits a session only at 2 or more pairs
   explicit-scope gate under Embeddings and the SQL surface is what keeps a mistyped `embed`
   from spending. `packages/atif-analytics/src/atif_analytics/application/analyze.py:42`,
   `packages/atif-analytics/src/atif_analytics/application/use_cases/perceived.py:366`,
-  `packages/atif-cli/src/atif_cli/app.py:1731`,
+  `packages/atif-cli/src/atif_cli/app.py:1716`,
   `packages/atif-embed/src/atif_embed/application/embed.py:71`.
 - **Session ceiling:** each LLM pipeline admits at most `llm_max_sessions_per_run`
   sessions per run (default 50, newest-first so fresh sessions win), enforced DURING the
@@ -300,18 +300,18 @@ perceived pipeline admits a session only at 2 or more pairs
   vanished keeps its artifacts and is marked `source_present: false`; when ANY source
   directory could not be listed, marking is skipped entirely for the pass, because absence
   is not evidence of deletion without a complete picture of what exists.
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:1688-1710`; tests
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:1688-1711`; tests
   `packages/atif-corpus/tests/test_materialize.py:698` and `packages/atif-corpus/tests/test_materialize.py:736`.
 - **A `--sessions` filter never widens marking:** source-removal marking keys off the FULL
   scan, so an unplanned session is never marked just because it was not planned.
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:1583-1591`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1699-1710`; test `packages/atif-corpus/tests/test_materialize.py:368`.
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:1590-1598`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1699-1711`; test `packages/atif-corpus/tests/test_materialize.py:368`.
 - **Staging sweep errs toward keeping:** a signal delivered, a `PermissionError`, or any
   unexpected `OSError` all answer "do not delete", and a recycled pid only means the sweep
-  skips debris a later pass collects. `packages/atif-corpus/src/atif_corpus/application/materialize.py:973-988`; test
+  skips debris a later pass collects. `packages/atif-corpus/src/atif_corpus/application/materialize.py:961-976`; test
   `packages/atif-corpus/tests/test_materialize.py:570`.
 - **Corrupt state degrades, never refuses:** an unreadable or wrong-shaped
   `watermark.json` is treated as unmaterialized, costing one full pass, which is always
-  safe. `packages/atif-corpus/src/atif_corpus/application/materialize.py:424-452`.
+  safe. `packages/atif-corpus/src/atif_corpus/application/materialize.py:415-443`.
 
 ### Embeddings and the SQL surface
 
@@ -320,10 +320,10 @@ perceived pipeline admits a session only at 2 or more pairs
   so an unattended lane exits 78 and suppresses retries instead of burning identical
   ticks. `packages/atif-embed/src/atif_embed/domain/embedding_guard.py:3-18`,
   `packages/atif-embed/src/atif_embed/domain/errors.py:29-41`,
-  `packages/atif-cli/src/atif_cli/app.py:2040-2054`.
+  `packages/atif-cli/src/atif_cli/app.py:2025-2039`.
 - **Embed requires an explicit scope:** a bare `atif-sql embed` is a real run and exits 64,
   so a full backfill cannot happen from a mistyped command; `--dry-run` needs no scope
-  because it spends nothing. `packages/atif-cli/src/atif_cli/app.py:1959-1963`, `packages/atif-cli/src/atif_cli/app.py:2003-2013`.
+  because it spends nothing. `packages/atif-cli/src/atif_cli/app.py:1944-1948`, `packages/atif-cli/src/atif_cli/app.py:1988-1998`.
 - **`skip_vss` escape hatch:** registration can skip both the `message_embeddings` view
   and the `semantic_search` macro, because the backfill writes the store the view reads
   and binding it first would be circular. `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2223-2229`;

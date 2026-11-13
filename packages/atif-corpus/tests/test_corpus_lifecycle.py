@@ -306,7 +306,7 @@ class TestEmptySessions:
         layout = CorpusLayout(corpus_root=corpus_root)
         assert not layout.session_dir(SESSION_A).exists()
         assert read_empty_sessions(layout.empty_sessions_path) == {
-            SESSION_A: {"converter_version": "0.1.0"}
+            SESSION_A: {"converter_version": "0.1.0", "agent": "claude-code"}
         }
 
     def test_a_recorded_empty_session_is_not_retried_while_nothing_moves(

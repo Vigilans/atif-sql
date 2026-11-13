@@ -5,8 +5,9 @@ ATIF-native analytics over agent trajectories from Claude Code
 (`~/.codex/sessions/**/rollout-*.jsonl`).
 Instead of SQL views over raw JSONL, this stack converts sessions to ATIF
 (Harbor's Agent Trajectory Interchange Format), materializes a corpus of ATIF
-documents, and layers DuckDB views on top. One corpus holds one agent, and
-`sessions.agent` names it.
+documents, and layers DuckDB views on top. Each agent defaults to its own
+corpus, one corpus root can also hold both side by side, and `sessions.agent`
+names the agent of each session.
 
 ## Workspace layout
 
@@ -157,9 +158,9 @@ Rules of the road:
   at CONSTRUCTION, not copied in afterwards: both default roots derive from
   it, and only roots absent from `model_fields_set` re-derive, so an explicit
   `ATIF_SQL_SOURCE_ROOT` or `ATIF_SQL_CORPUS_ROOT` still wins. That override is
-  also the one way to aim a pass at the other agent's corpus, which
-  `meta.agent` catches: materialize refuses (exit 78) rather than marking the
-  other agent's sessions as source-removed.
+  also how two agents share one corpus: each session's `meta.agent` names its
+  agent, and a pass marks, retains and re-converts only its own agent's
+  sessions, so it never marks the other agent's as source-removed.
 - The corpus never deletes a session. When a source transcript disappears
   (Claude Code and Codex expire old ones), materialize keeps the session's
   artifacts and rewrites its `meta.json` once with `source_present: false` and

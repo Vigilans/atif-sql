@@ -21,7 +21,7 @@ from typing import Any
 
 import duckdb
 import pytest
-from duck_fixtures import SESSION_IDS, build_corpus, write_codex_session
+from duck_fixtures import CODEX_SESSION_ID, SESSION_IDS, build_corpus, write_codex_session
 from test_columnar import add_columnar
 
 from atif_duck.domain import lake as lake_domain
@@ -236,6 +236,60 @@ class TestLoad:
         register_raw(con, root, session_ids=[])
         for relation in ("v_raw_meta", "v_raw_steps", "v_raw_edges", "v_raw_loss_reports"):
             assert _rows(con, f"SELECT count(*) FROM {relation}") == [(0,)], relation
+
+
+class TestSharedCorpus:
+    """A corpus two agents share: each lake row carries the agent its session records."""
+
+    @staticmethod
+    def _shared(root: Path) -> LakeCorpus:
+        build_corpus(root)
+        write_codex_session(root)
+        return LakeCorpus(root=root, agent="claude-code")
+
+    @staticmethod
+    def _agents(con: duckdb.DuckDBPyConnection) -> list[Any]:
+        return _rows(
+            con,
+            f"SELECT DISTINCT session_id, agent FROM {LAKE_ALIAS}.session_meta ORDER BY 1",
+        )
+
+    def test_a_load_partitions_each_session_by_its_own_agent(self, tmp_path: Path) -> None:
+        corpus = self._shared(tmp_path / "shared")
+        layout = _lake(tmp_path, corpus)
+        expected = sorted(
+            [*((sid, "claude-code") for sid in SESSION_IDS), (CODEX_SESSION_ID, "codex")]
+        )
+        assert self._agents(_writer(layout)) == expected
+        files = [
+            str(row[0])
+            for row in _rows(
+                _writer(layout),
+                "SELECT data_file FROM ducklake_list_files(?, 'session_meta')",
+                [LAKE_ALIAS],
+            )
+        ]
+        assert {f.split("/corpus=")[0].rsplit("agent=", 1)[1] for f in files} == {
+            "claude-code",
+            "codex",
+        }
+        state = lake_status(layout)
+        assert [(name, agent, n) for name, agent, _, n in state.corpora] == [
+            ("shared", "claude-code,codex", 3)
+        ]
+        assert verify_lake(layout).clean
+
+    def test_a_sync_batch_of_both_agents_keeps_each_sessions_agent(self, tmp_path: Path) -> None:
+        corpus = self._shared(tmp_path / "shared")
+        layout = _lake(tmp_path, corpus)
+        before = self._agents(_writer(layout))
+        DuckLakeSessionSink(layout).sync_sessions(
+            corpus_root=corpus.root,
+            agent="codex",
+            session_ids=[CODEX_SESSION_ID, SESSION_IDS[0]],
+        )
+        assert self._agents(_writer(layout)) == before
+        assert verify_lake(layout).clean
 
 
 # ---------------------------------------------------------------------------

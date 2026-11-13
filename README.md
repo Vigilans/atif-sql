@@ -155,9 +155,10 @@ atif-sql status --agent codex
 atif-sql query --agent codex "SELECT agent, count(*) FROM sessions GROUP BY 1"
 ```
 
-One corpus holds one agent, so a Codex corpus and a Claude Code corpus stay
-separate directories, and one `query` reads one of them. Pass `--corpus-root` to
-pick which, or `--agent codex` to get the Codex default. `--all-corpora` reads
+Each agent defaults to its own corpus directory, and one `query` reads one
+corpus. Pass `--corpus-root` to pick which, or `--agent codex` to get the Codex
+default. Given the same `--corpus-root`, both agents' `materialize` passes share
+one corpus, and `sessions.agent` tells their sessions apart. `--all-corpora` reads
 every corpus the lake holds at once, and `sessions.corpus` says which one a
 row came from.
 

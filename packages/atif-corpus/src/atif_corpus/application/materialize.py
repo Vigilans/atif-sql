@@ -58,8 +58,9 @@ One pass = sweep → scan → plan → convert → write → advance watermark:
    ``FileNotFoundError`` counts, and such a session is reported in
    ``unreadable_session_ids``; a pass that could not list a source directory
    marks nothing; and when the scan found ZERO sessions while the corpus holds
-   some, that smells like a wrong ``source_root`` and the pass fails loud
-   (:class:`SuspiciousEmptyScanError`) instead of flagging the whole corpus.
+   some of this agent's, that smells like a wrong ``source_root`` and the pass
+   fails loud (:class:`SuspiciousEmptyScanError`) instead of flagging the
+   whole corpus.
 5. Sync the session sink, when one is injected
    (:class:`~atif_corpus.domain.ports.SessionSink`; atif-cli plugs in the
    DuckLake writer): every session published or marked this pass, plus any
@@ -97,6 +98,13 @@ Three more rules decide what a pass converts:
   watermark entries advance, and it is reported under ``empty_session_ids``
   rather than ``failures``. A later write to the transcript (the watermark
   moves) or a new converter schema (the generation moves) tries it again.
+
+A corpus root may hold several agents' sessions. Each session's ``meta.json``
+names its agent (a meta without the key is ``claude-code``), and a pass owns
+only the sessions of the agent it scans: it marks, retains and re-converts
+those alone, an ``empty_sessions.json`` entry carries its agent so another
+agent's pass keeps it, and ``watermark.json`` entries outside this pass's
+``source_root`` are carried forward untouched.
 
 A failing session is recorded in the report and skipped — one broken
 transcript must never abort a corpus sync.
@@ -177,7 +185,7 @@ if TYPE_CHECKING:
 
 
 class SuspiciousEmptyScanError(RuntimeError):
-    """The scan found zero sessions while the corpus holds materialized ones.
+    """The scan found zero sessions while the corpus holds this agent's materialized ones.
 
     Almost always a wrong ``source_root`` (typo, unmounted disk, env var
     pointing elsewhere) — proceeding would mark the ENTIRE corpus as
@@ -186,23 +194,6 @@ class SuspiciousEmptyScanError(RuntimeError):
     pass fails loud instead; an operator who really emptied the source tree
     can point ``source_root`` at an empty directory on purpose and delete the
     corpus by hand if that is what they want.
-    """
-
-
-class CorpusAgentMismatchError(RuntimeError):
-    """The corpus at this root was materialized from a DIFFERENT agent.
-
-    One corpus holds one agent's sessions (``docs/CONTRACT.md``), and the
-    per-agent default roots keep that true without anyone thinking about it.
-    An EXPLICIT root defeats them: ``--corpus-root <claude corpus> --agent
-    codex``, or ``ATIF_SQL_CORPUS_ROOT`` left pointing at one corpus while the
-    agent moves, aims a Codex pass at a corpus full of Claude Code sessions.
-    No Codex scan will ever name any of them, so the pass would mark every one
-    source-removed and then start writing Codex sessions beside them.
-
-    So the corpus's own ``meta.agent`` is a DISCRIMINATOR, not just provenance:
-    it is read before any session is marked and before any write, and a
-    disagreement fails the pass with nothing touched.
     """
 
 
@@ -734,11 +725,8 @@ def _write_session(
                 **({} if converter_schema is None else {_CONVERTER_SCHEMA_KEY: converter_schema}),
                 "materialized_at": materialized_at,
                 # WHICH agent wrote the transcript this artifact set came from.
-                # A corpus root holds one agent's sessions by construction (the
-                # slug derives from the source root), so this is provenance
-                # rather than a discriminator — but a corpus copied out of place
-                # keeps saying what it is, and an operator reading one
-                # meta.json does not have to infer the agent from a path shape.
+                # A shared corpus holds several agents' sessions, and this is
+                # how a pass tells its own from the others' (`_session_agent`).
                 "agent": agent,
                 **{
                     key: job.source_meta[key]
@@ -1156,35 +1144,31 @@ def _sessions_under_unlistable_dirs(
     return resolved
 
 
-#: How many existing session dirs to open looking for the corpus's agent. One
-#: is normally enough; a handful covers a corpus whose first dirs are mid-swap
-#: or unreadable, and the cap keeps the probe O(1) on a 3,700-session corpus.
-_AGENT_PROBE_LIMIT = 8
+def _session_agent(meta: Mapping[str, Any]) -> str:
+    """The agent a session's ``meta.json`` says wrote it.
 
-
-def _corpus_agent(layout: CorpusLayout, session_dir_names: Sequence[str]) -> str | None:
-    """The agent a materialized corpus says it holds, or ``None`` if it cannot say.
-
-    Reads at most :data:`_AGENT_PROBE_LIMIT` ``meta.json`` files and returns the
-    first answer. A ``meta.json`` with NO ``agent`` key still answers
-    ``claude-code``: the key landed with Codex support, and this workspace could
-    not read a Codex rollout before then, so a corpus written without it holds
-    Claude Code sessions. Unreadable or unparseable meta files are skipped
-    rather than treated as an answer — a permission blip must not be able to
-    relabel a corpus.
+    A meta with NO ``agent`` key answers ``claude-code``: the key landed with
+    Codex support, and this workspace could not read a Codex rollout before
+    then, so a session written without it is a Claude Code session.
     """
-    for name in list(session_dir_names)[:_AGENT_PROBE_LIMIT]:
-        try:
-            meta = json.loads(layout.meta_path(name).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(meta, dict):
-            continue
-        agent = meta.get("agent")
-        if isinstance(agent, str) and agent:
-            return agent
-        return CLAUDE_CODE_LAYOUT.agent.value
-    return None
+    agent = meta.get("agent")
+    return agent if isinstance(agent, str) and agent else CLAUDE_CODE_LAYOUT.agent.value
+
+
+def _holds_agent_sessions(
+    layout: CorpusLayout, session_dir_names: Sequence[str], agent: str
+) -> bool:
+    """Whether any of the corpus's session dirs is ``agent``'s.
+
+    A dir whose ``meta.json`` cannot be read counts: which agent it belongs to
+    is unknown, and this answers the suspicious-empty-scan guard, which must
+    fail loud rather than quiet when it cannot tell.
+    """
+    for name in session_dir_names:
+        meta = _read_meta(layout, name)
+        if meta is None or _session_agent(meta) == agent:
+            return True
+    return False
 
 
 def _sourceless_session_ids(
@@ -1234,11 +1218,12 @@ def _retain_sourceless_sessions(
     layout: CorpusLayout,
     sourceless_ids: Sequence[str],
     *,
+    agent: str,
     removed_at: str,
     mark: bool,
     before_mark: Callable[[Sequence[str]], None] | None = None,
 ) -> tuple[tuple[str, ...], dict[str, dict[str, Any]]]:
-    """Keep every sourceless session; mark the ones not yet marked. Nothing is deleted.
+    """Keep every sourceless session of ``agent``; mark the ones not yet marked. Nothing is deleted.
 
     Returns ``(newly_marked_ids, retained)`` where ``retained`` maps every
     session now recorded ``source_present: false`` to its ``meta.json``. The
@@ -1248,22 +1233,25 @@ def _retain_sourceless_sessions(
     could not list part of the source tree, so absence proves nothing) no meta
     is rewritten and only sessions marked on an earlier pass are returned.
 
-    A session whose ``meta.json`` cannot be read is left exactly as it is: no
-    mark, and it is not reported as retained, because its provenance cannot be
-    trusted enough to rewrite.
+    A session another agent wrote is not this pass's to judge: its sources
+    live under that agent's source root, so it is neither marked nor
+    returned. A session whose ``meta.json`` cannot be read is left exactly as
+    it is: no mark, and it is not reported as retained, because its
+    provenance cannot be trusted enough to rewrite.
     """
     newly_marked: list[str] = []
     retained: dict[str, dict[str, Any]] = {}
     metas = {session_id: _read_meta(layout, session_id) for session_id in sourceless_ids}
+    own_ids = [sid for sid, meta in metas.items() if meta is None or _session_agent(meta) == agent]
     if mark and before_mark is not None:
         before_mark(
             [
                 sid
-                for sid, meta in metas.items()
-                if meta is not None and meta.get("source_present") is not False
+                for sid in own_ids
+                if (meta := metas[sid]) is not None and meta.get("source_present") is not False
             ]
         )
-    for session_id in sourceless_ids:
+    for session_id in own_ids:
         meta = metas[session_id]
         if meta is None:
             logger.warning(
@@ -1331,6 +1319,8 @@ def _advance_watermark(
     previous: dict[str, int],
     scan: SourceScan,
     succeeded: tuple[SessionSource, ...],
+    *,
+    source_root: Path,
 ) -> dict[str, int]:
     """The next ``watermark.json`` contents.
 
@@ -1356,7 +1346,12 @@ def _advance_watermark(
     as stale and is converted again from the live file. The other could not
     be READ (a stat failure, which is not evidence about what its sources
     are): its entries are retained wholesale, exactly as if it had failed.
+
+    An entry outside ``source_root`` was recorded by a pass over another
+    source root (another agent's, in a shared corpus), and is carried forward
+    as it is.
     """
+    root_prefix = f"{str(source_root).rstrip('/')}/"
     current_paths = {path for session in scan.sessions for path in session.source_mtimes}
     succeeded_ids = {session.session_id for session in succeeded}
     unresolved_mains = [
@@ -1369,7 +1364,11 @@ def _advance_watermark(
     def _retain(path: str) -> bool:
         # The membership test carries almost every entry; only a genuinely
         # vanished path reaches the per-session scope scan.
-        return path in current_paths or any(owns_path(main, path) for main in unresolved_mains)
+        return (
+            path in current_paths
+            or not path.startswith(root_prefix)
+            or any(owns_path(main, path) for main in unresolved_mains)
+        )
 
     advanced = {path: mtime for path, mtime in previous.items() if _retain(path)}
     for session in succeeded:
@@ -1384,23 +1383,27 @@ def _next_empty_record(
     attempted_ids: Collection[str],
     newly_empty: Collection[str],
     expected: Mapping[str, object],
+    agent: str,
 ) -> dict[str, dict[str, object]]:
     """The next ``empty_sessions.json``: drop what moved on, add what came back empty.
 
     A recorded session keeps its entry while it is still around
     (``keep_ids``: scanned or merely unreadable) and was not attempted this
     pass. An attempt replaces the entry: empty again records the current
-    generation, anything else (success or a real failure) removes it.
+    generation and ``agent``, anything else (success or a real failure)
+    removes it. An entry another agent recorded is that agent's pass's to
+    judge and is kept as it is; one with no ``agent`` is this pass's.
     """
     attempted = set(attempted_ids)
     keep = set(keep_ids)
     record = {
         session_id: dict(generation)
         for session_id, generation in previous.items()
-        if session_id in keep and session_id not in attempted
+        if generation.get("agent", agent) != agent
+        or (session_id in keep and session_id not in attempted)
     }
     for session_id in newly_empty:
-        record[session_id] = dict(expected)
+        record[session_id] = {**expected, "agent": agent}
     return dict(sorted(record.items()))
 
 
@@ -1501,7 +1504,11 @@ def preview_pass(
     retained: dict[str, dict[str, Any]] = {}
     for session_id in sourceless:
         meta = _read_meta(layout, session_id)
-        if meta is not None and (not scan.unlistable_dirs or meta.get("source_present") is False):
+        if (
+            meta is not None
+            and _session_agent(meta) == source_layout.agent.value
+            and (not scan.unlistable_dirs or meta.get("source_present") is False)
+        ):
             retained[session_id] = meta
     archive = _archive_jobs(retained, expected, force=False, wanted=None)
     scanned_ids = {s.session_id for s in scan.sessions} | scan.unreadable_session_ids
@@ -1619,9 +1626,8 @@ def materialize(
     ------
     SuspiciousEmptyScanError
         The scan found zero sessions while the corpus holds materialized
-        ones — almost always a wrong ``source_root``. Nothing is touched.
-    CorpusAgentMismatchError
-        The corpus holds another agent's sessions. Nothing is touched.
+        ones of this agent — almost always a wrong ``source_root``. Nothing
+        is touched.
     ValueError
         ``workers`` is below ``1``, ``sink_batch_size`` is below ``1``, or
         ``expected_meta`` contradicts the stamped converter key.
@@ -1661,28 +1667,22 @@ def materialize(
         if layout.sessions_dir.is_dir()
         else []
     )
-    # Agent check FIRST: it is the one condition under which every existing
-    # session dir is sourceless by construction, so it has to run before the
-    # emptiness tripwire and before the first write.
-    corpus_agent = _corpus_agent(layout, existing_session_dirs)
-    if corpus_agent is not None and corpus_agent != source_layout.agent.value:
-        msg = (
-            f"the corpus at {corpus_root} holds {corpus_agent} sessions but this "
-            f"pass is materializing {source_layout.agent.value} from {source_root} "
-            f"— refusing: one corpus holds one agent, and continuing would mark "
-            f"all {len(existing_session_dirs)} of them source-removed"
-        )
-        raise CorpusAgentMismatchError(msg)
-    # Empty-scan guard: an empty scan over a non-empty corpus smells like a
-    # wrong source_root. Fail loud instead of flagging every session, UNLESS an
-    # unlistable directory already explains the emptiness: that is a diagnosed
-    # permission problem, and failing the pass every ten minutes over it adds
-    # nothing the warning did not already say.
-    if not sessions and existing_session_dirs and not scan.unlistable_dirs:
+    agent = source_layout.agent.value
+    # Empty-scan guard: an empty scan over a corpus holding this agent's
+    # sessions smells like a wrong source_root. Fail loud instead of flagging
+    # every session, UNLESS an unlistable directory already explains the
+    # emptiness: that is a diagnosed permission problem, and failing the pass
+    # every ten minutes over it adds nothing the warning did not already say.
+    # Another agent's sessions say nothing about this agent's source root.
+    if (
+        not sessions
+        and not scan.unlistable_dirs
+        and _holds_agent_sessions(layout, existing_session_dirs, agent)
+    ):
         msg = (
             f"scan of {source_root} found 0 sessions but the corpus at "
-            f"{corpus_root} holds {len(existing_session_dirs)} materialized "
-            f"session(s) — refusing to mark them source-removed; check source_root"
+            f"{corpus_root} holds materialized {agent} session(s) — refusing to "
+            f"mark them source-removed; check source_root"
         )
         raise SuspiciousEmptyScanError(msg)
     if scan.unlistable_dirs:
@@ -1704,6 +1704,7 @@ def materialize(
             scan.unreadable_session_ids,
             scan.rejected_session_ids,
         ),
+        agent=agent,
         removed_at=materialized_at,
         mark=not scan.unlistable_dirs,
         before_mark=ledger.intend,
@@ -1740,7 +1741,7 @@ def materialize(
         harbor_version=harbor_version,
         converter_version=converter_version,
         converter_schema=converter_schema,
-        agent=source_layout.agent.value,
+        agent=agent,
         artifact_producer=artifact_producer,
         convert_clock=convert_clock,
     )
@@ -1788,14 +1789,14 @@ def materialize(
     published = [session.session_id for session in succeeded if session.session_id not in empty_ids]
     sink_synced, sink_pending, sink_error, sink_seconds = ledger.sync(
         [*published, *archived_ok, *removed_ids],
-        agent=source_layout.agent.value,
+        agent=agent,
         batch_size=sink_batch_size,
     )
 
     layout.corpus_root.mkdir(parents=True, exist_ok=True)
     write_json_atomic(
         layout.watermark_path,
-        _advance_watermark(previous_watermark, scan, tuple(succeeded)),
+        _advance_watermark(previous_watermark, scan, tuple(succeeded), source_root=source_root),
     )
     next_empty = _next_empty_record(
         previous_empty,
@@ -1803,6 +1804,7 @@ def materialize(
         attempted_ids={s.session_id for s in plan.to_materialize},
         newly_empty=empty,
         expected=expected,
+        agent=agent,
     )
     if next_empty or layout.empty_sessions_path.exists():
         write_json_atomic(layout.empty_sessions_path, next_empty, indent=2)

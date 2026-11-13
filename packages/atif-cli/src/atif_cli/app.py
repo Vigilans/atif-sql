@@ -36,10 +36,10 @@ Two agents
 ``convert``, ``materialize`` and ``status`` take ``--agent claude-code|codex``.
 The flag picks three things at once and they must move together: which
 converter reads a transcript, which discovery layout finds one, and which
-source root and corpus slug the settings default to. One corpus root therefore
-holds exactly one agent's sessions, which is what lets everything downstream —
-the DuckDB views, the analytics pipelines, the embedding store — stay unaware
-that a second agent exists.
+source root and corpus slug the settings default to, so each agent gets its own
+corpus unless ``--corpus-root`` names one for both. Each session's ``meta.json``
+and trajectory name its agent, which is what downstream readers (the DuckDB
+views, the lake's ``agent`` column) read, per session.
 
 Agent-friendly defaults
 -----------------------
@@ -941,7 +941,6 @@ def materialize(
     from atif_converter.domain.atif import UPSTREAM_VERSION as ATIF_MODELS_VERSION
     from atif_converter.domain.schema_version import CONVERTER_SCHEMA_VERSION
     from atif_corpus.application.materialize import (
-        CorpusAgentMismatchError,
         SuspiciousEmptyScanError,
         materialize as materialize_use_case,
     )
@@ -1010,20 +1009,6 @@ def materialize(
             ),
             sink_batch_size=lake_settings.lake_sync_batch_size,
         )
-    except CorpusAgentMismatchError as exc:
-        # One corpus holds one agent. Nothing was removed and nothing written —
-        # the same posture as a suspicious scan, and the same exit code, because
-        # an unattended lane must branch on it rather than retry.
-        emit_error(
-            ClassifiedError(
-                kind="terminal_state",
-                exit_code=EXIT_CODES["terminal_state"],
-                message=str(exc),
-                hint="point --corpus-root / ATIF_SQL_CORPUS_ROOT at this agent's own corpus",
-            ),
-            fmt,
-        )
-        raise SystemExit(EXIT_CODES["terminal_state"]) from exc
     except SuspiciousEmptyScanError as exc:
         # The corpus's loudest data-loss tripwire, so it gets a code an
         # unattended lane can branch on. Uncaught it would exit 1, which a
@@ -1509,7 +1494,7 @@ def query(
 
     ``--agent codex`` selects the Codex corpus root the way ``materialize``
     selects it, so the corpus a Codex materialize wrote is queryable without
-    spelling its path. One corpus holds one agent; ``--corpus-root`` still wins.
+    spelling its path. ``--corpus-root`` still wins.
     """
     if examples_flag:
         examples(category=category, requires=requires, fmt=fmt)

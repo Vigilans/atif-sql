@@ -5,8 +5,8 @@
 One lake holds every corpus (both Claude Code corpora and the Codex one). Each
 lake table is the registry's raw reader of the same artifact kind
 (:mod:`atif_duck.domain.raw_readers`) with two identity columns in front,
-``corpus`` (the corpus directory's name) and ``agent`` (the agent the corpus
-holds). The per-session artifacts stay the source of truth: the lake is
+``corpus`` (the corpus directory's name) and ``agent`` (the agent the
+session's ``meta.json`` names). The per-session artifacts stay the source of truth: the lake is
 loaded FROM the registry's raw relations over them, so a lake row is by
 construction the row the per-session path would have produced, and the views
 bind over either with no change.
@@ -21,8 +21,9 @@ Partitioning: every table is partitioned by ``agent`` and ``corpus`` first,
 then by month where a row has a time. ``corpus`` is there because a query is
 scoped to one corpus by default, and a corpus-pure file is what lets that scope
 skip the other corpora's files. It also keeps compaction from merging two
-corpora's rows into one file. ``agent`` is implied by ``corpus`` (one corpus
-holds one agent), so it adds no files, only a readable directory level. The
+corpora's rows into one file. ``agent`` comes from each session, so a corpus
+two agents share splits into one directory per agent; a corpus of one agent
+gets no extra files from it, only a readable directory level. The
 two one-row-per-session tables (``loss_reports``, ``session_meta``) have no
 time column and stay at ``agent``/``corpus``: splitting a few thousand small
 rows by month would multiply files without pruning anything a query asks for.

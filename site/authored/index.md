@@ -10,8 +10,8 @@ over that corpus. Converting once at the boundary, with an explicit and tested f
 what the upstream adapter drops, replaces re-deriving trajectory semantics inside every SQL view.
 
 Pick the agent with `--agent claude-code|codex` on `convert`, `materialize`, `status` and `query`.
-One corpus holds one agent, the two default to separate roots, and `sessions.agent` names which one a
-row came from.
+The two agents default to separate corpus roots, one root can also hold both, and `sessions.agent`
+names which one a row came from.
 
 It is a uv Python workspace, Apache-2.0, and it replaces `claude-sql`.
 
