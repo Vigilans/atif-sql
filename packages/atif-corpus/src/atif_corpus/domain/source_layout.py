@@ -16,15 +16,34 @@ derived from a path's TEXT.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from atif_corpus.domain.agents import AgentSource
 
-#: A Codex rollout filename's fixed prefix, and the number of hyphen-separated
-#: groups its trailing uuid occupies: ``rollout-<ts>-<8>-<4>-<4>-<4>-<12>.jsonl``.
-_ROLLOUT_PREFIX = "rollout-"
-_UUID_GROUPS = 5
+#: A Codex rollout filename: ``rollout-<ts>-<thread-uuid>.jsonl``, optionally
+#: zstd-compressed (``.jsonl.zst``). The uuid is five hyphen-separated groups,
+#: and the timestamp takes everything before it.
+_ROLLOUT_NAME = re.compile(r"^rollout-.+-(?P<thread>[^-_/]+(?:-[^-_/]+){4})\.jsonl(?P<zst>\.zst)?$")
+
+
+@dataclass(frozen=True, slots=True)
+class RolloutName:
+    """What a Codex rollout filename says about the rollout it holds."""
+
+    #: The thread the rollout belongs to.
+    thread_id: str
+    #: Whether the file is the zstd-compressed ``.jsonl.zst`` form.
+    compressed: bool
+
+
+def parse_rollout_name(name: str) -> RolloutName | None:
+    """The thread id a rollout filename carries, or ``None`` for any other name."""
+    match = _ROLLOUT_NAME.match(name)
+    if match is None:
+        return None
+    return RolloutName(thread_id=match.group("thread"), compressed=match.group("zst") is not None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,29 +69,24 @@ class SourceLayout:
 
     def is_transcript(self, name: str) -> bool:
         """Whether a filename in a transcript directory is one of this agent's."""
-        if not name.endswith(".jsonl"):
-            return False
         if self.agent is AgentSource.CODEX:
-            return name.startswith(_ROLLOUT_PREFIX)
-        return True
+            return parse_rollout_name(name) is not None
+        return name.endswith(".jsonl")
 
     def session_id(self, name: str) -> str | None:
         """The session id a transcript filename carries, or ``None`` if it carries none.
 
         Claude Code names the file after the session, so the stem IS the id.
-        Codex prefixes a timestamp, so the id is the stem's trailing uuid — and
-        a name whose shape does not yield one is not a session this layout can
-        materialize, which the caller must skip rather than guess at.
+        Codex prefixes a timestamp, so the id is the filename's trailing uuid —
+        and a name whose shape does not yield one is not a session this layout
+        can materialize, which the caller must skip rather than guess at.
         """
         if not self.is_transcript(name):
             return None
-        stem = name.removesuffix(".jsonl")
-        if self.agent is not AgentSource.CODEX:
-            return stem or None
-        parts = stem.split("-")
-        if len(parts) < _UUID_GROUPS + 1:
-            return None
-        return "-".join(parts[-_UUID_GROUPS:])
+        if self.agent is AgentSource.CODEX:
+            parsed = parse_rollout_name(name)
+            return None if parsed is None else parsed.thread_id
+        return name.removesuffix(".jsonl") or None
 
     def session_from_watermark_path(self, source_root: str, path: str) -> tuple[str, str] | None:
         """``(session_id, main transcript path)`` for a recorded watermark path.
@@ -114,8 +128,8 @@ CLAUDE_CODE_LAYOUT = SourceLayout(
     has_side_files=True,
 )
 
-#: Codex CLI: `<source_root>/<YYYY>/<MM>/<DD>/rollout-<ts>-<uuid>.jsonl`, one
-#: file per session and no side-files.
+#: Codex CLI: `<source_root>/<YYYY>/<MM>/<DD>/rollout-<ts>-<uuid>.jsonl[.zst]`,
+#: one file per session and no side-files.
 CODEX_LAYOUT = SourceLayout(
     agent=AgentSource.CODEX,
     transcript_depth=3,

@@ -469,6 +469,21 @@ class TestSessionIdFromFilename:
             codex_session_id(Path(name))
 
 
+class TestCompressedRollout:
+    def test_a_compressed_rollout_converts_as_its_plain_form(
+        self, codex_rollout: Path, tmp_path: Path
+    ) -> None:
+        import zstandard
+
+        compressed = tmp_path / "compressed" / f"{codex_rollout.name}.zst"
+        compressed.parent.mkdir()
+        compressed.write_bytes(zstandard.ZstdCompressor().compress(codex_rollout.read_bytes()))
+        plain, _ = convert_codex_and_audit(codex_rollout)
+        packed, _ = convert_codex_and_audit(compressed)
+        assert packed.trajectory == plain.trajectory
+        assert codex_session_id(compressed) == codex_session_id(codex_rollout)
+
+
 def test_edges_helper_returns_ready_to_write_lines() -> None:
     """The public helper the corpus writer consumes: strings, no trailing newlines."""
     records: list[tuple[dict[str, Any], str]] = [

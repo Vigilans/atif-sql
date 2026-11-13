@@ -29,6 +29,9 @@ shape. Discovery follows CONTRACT.md exactly:
   always alone and looking for siblings would be a stat per session for a
   directory that cannot exist.
 
+A Codex rollout is plain JSONL or zstd-compressed ``.jsonl.zst``; when both
+forms of one rollout are present, the plain file is the one read.
+
 A scan reports two kinds of absence and they must never be conflated. A
 session whose main transcript is genuinely GONE is marked source-removed:
 its corpus dir is kept and its meta says the source is gone. A session whose
@@ -200,7 +203,14 @@ def _transcripts(transcript_dir: Path, layout: SourceLayout) -> list[Path] | Non
     entries = _list_dir(transcript_dir)
     if entries is None:
         return None
-    return [entry for entry in entries if layout.is_transcript(entry.name)]
+    transcripts = [entry for entry in entries if layout.is_transcript(entry.name)]
+    names = {entry.name for entry in transcripts}
+    # The plain form of a rollout wins over its compressed copy.
+    return [
+        entry
+        for entry in transcripts
+        if not (entry.name.endswith(".zst") and entry.name.removesuffix(".zst") in names)
+    ]
 
 
 def scan_sources(

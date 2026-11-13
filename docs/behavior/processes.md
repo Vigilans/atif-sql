@@ -29,7 +29,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
 4. Scan the source root for main transcripts and every side-file, then fold
    sessions living under a directory that would not list into the unreadable
    set using the watermark as the only record of what lived there:
-   `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:206`,
+   `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:216`,
    `packages/atif-corpus/src/atif_corpus/application/materialize.py:1112`.
 5. Guard, then retain sourceless sessions: a corpus whose `meta.json` names
    another agent raises `CorpusAgentMismatchError` before anything is touched,
@@ -79,9 +79,9 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
 
 Entry point: `packages/atif-cli/src/atif_cli/app.py:690`
 
-1. Reject a path that is not an existing `.jsonl` file before the fingerprint
-   snapshot reads anything, which the CLI maps to exit 64:
-   `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:73-75`.
+1. Reject a path that is not an existing `.jsonl` file (or a Codex `.jsonl.zst`)
+   before the fingerprint snapshot reads anything, which the CLI maps to exit 64:
+   `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:76-78`.
 2. Read every source file once: the main transcript and each discovered
    side-file under `<stem>/`, workflow-nested ones included. Each file is
    stat'ed, then streamed through a sha256 digest into the JSON parser, so the
@@ -126,7 +126,7 @@ the audit never read the session separately.
 ### Related
 
 - `packages/atif-converter/src/atif_converter/infrastructure/census.py:57`
-- `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:78`
+- `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:81`
 - `packages/atif-converter/src/atif_converter/domain/errors.py:47`
 - `packages/atif-converter/src/atif_converter/domain/fidelity.py:55`
 - `packages/atif-cli/src/atif_cli/errors.py:30`

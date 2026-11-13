@@ -15,6 +15,7 @@ from atif_corpus.domain.source_layout import (
     CLAUDE_CODE_LAYOUT,
     CODEX_LAYOUT,
     layout_for,
+    parse_rollout_name,
 )
 
 CODEX_ROLLOUT = "rollout-2026-09-11T17-27-01-01a09182-2858-7f42-936b-7f027b341fdf.jsonl"
@@ -45,6 +46,17 @@ class TestTranscriptNames:
         assert CODEX_LAYOUT.is_transcript(CODEX_ROLLOUT)
         assert not CODEX_LAYOUT.is_transcript(f"{CLAUDE_SESSION}.jsonl")
         assert CODEX_LAYOUT.session_id(CODEX_ROLLOUT) == CODEX_SESSION
+
+    def test_codex_takes_a_compressed_rollout(self) -> None:
+        name = f"{CODEX_ROLLOUT}.zst"
+        assert CODEX_LAYOUT.is_transcript(name)
+        assert CODEX_LAYOUT.session_id(name) == CODEX_SESSION
+        parsed = parse_rollout_name(name)
+        assert parsed is not None
+        assert parsed.compressed
+
+    def test_claude_code_takes_no_compressed_transcript(self) -> None:
+        assert not CLAUDE_CODE_LAYOUT.is_transcript(f"{CLAUDE_SESSION}.jsonl.zst")
 
     @pytest.mark.parametrize("name", ["notes.md", "session.json", "history.jsonl.bak"])
     def test_non_jsonl_is_never_a_transcript(self, name: str) -> None:

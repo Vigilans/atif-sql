@@ -33,7 +33,11 @@ from typing import Any
 
 from atif_converter.domain.atif import Trajectory
 from atif_converter.domain.codex_conversion import convert_codex_records
-from atif_converter.infrastructure.raw_records import LoadedSession, parse_jsonl_records
+from atif_converter.infrastructure.raw_records import (
+    LoadedSession,
+    parse_jsonl_records,
+    text_stream,
+)
 
 
 def read_codex_rollout(rollout_jsonl: Path) -> list[dict[str, Any]]:
@@ -47,7 +51,7 @@ def read_codex_rollout(rollout_jsonl: Path) -> list[dict[str, Any]]:
     ------
         OSError: the file cannot be opened or read.
     """
-    with rollout_jsonl.open(encoding="utf-8") as handle:
+    with rollout_jsonl.open("rb") as raw, text_stream(raw, rollout_jsonl) as handle:
         return parse_jsonl_records(handle, rollout_jsonl)
 
 

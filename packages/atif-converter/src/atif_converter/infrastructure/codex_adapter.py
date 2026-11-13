@@ -42,7 +42,7 @@ _ROLLOUT_PREFIX = "rollout-"
 def codex_session_id(rollout_jsonl: Path) -> str:
     """The session id a rollout filename carries.
 
-    ``rollout-<ISO-ish timestamp>-<uuid>.jsonl`` — the uuid is the last five
+    ``rollout-<ISO-ish timestamp>-<uuid>.jsonl[.zst]`` — the uuid is the last five
     hyphen-separated groups of the stem, and it equals the ``id`` inside the
     file's ``session_meta`` record (verified 2026-09-11 over the local
     rollouts). Read from the NAME rather than the contents because discovery
@@ -52,7 +52,7 @@ def codex_session_id(rollout_jsonl: Path) -> str:
     ------
         InvalidSessionInput: the name is not a rollout filename.
     """
-    stem = rollout_jsonl.stem
+    stem = Path(rollout_jsonl.name.removesuffix(".zst")).stem
     if not stem.startswith(_ROLLOUT_PREFIX):
         msg = f"not a Codex rollout filename (expected rollout-<ts>-<uuid>.jsonl): {rollout_jsonl}"
         raise InvalidSessionInput(msg)
@@ -75,7 +75,7 @@ def convert_codex_session(rollout_jsonl: Path) -> ConversionResult:
     """
     from atif_converter.infrastructure.codex_converter import convert_codex_rollout
 
-    if rollout_jsonl.suffix != ".jsonl" or not rollout_jsonl.is_file():
+    if not rollout_jsonl.name.endswith((".jsonl", ".jsonl.zst")) or not rollout_jsonl.is_file():
         msg = f"not a rollout JSONL file: {rollout_jsonl}"
         raise InvalidSessionInput(msg)
 

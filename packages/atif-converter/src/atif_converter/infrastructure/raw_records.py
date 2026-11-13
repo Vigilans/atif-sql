@@ -7,8 +7,9 @@ the enrichment pass share. Discovery mirrors the contract: rglob over the
 session's sibling dir filtered to ``*.jsonl`` (``*.meta.json`` excluded by the
 suffix filter), which includes workflow-nested
 ``subagents/workflows/wf_*/agent-*.jsonl``. A Codex session's other rollouts
-are named by the caller instead (``extra_files``). File reads only: no
-harbor, no env, no network.
+are named by the caller instead (``extra_files``). A ``.jsonl.zst`` file is
+parsed through zstd decompression, and its fingerprint is of the compressed
+bytes on disk. File reads only: no harbor, no env, no network.
 
 ONE READ, ONE PARSE. :func:`load_session` opens each discovered file once and
 streams its bytes through a digest on the way to the JSON parser, so the
@@ -48,6 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, override
 
+import zstandard
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -69,6 +71,14 @@ def session_base(session_jsonl: Path, files: Iterable[Path] = ()) -> Path:
         while base not in path.parents and base != base.parent:
             base = base.parent
     return base
+
+
+def text_stream(binary: io.RawIOBase | io.BufferedIOBase, path: Path) -> io.TextIOWrapper:
+    """``binary`` as UTF-8 text, through zstd decompression for a ``.zst`` file."""
+    stream: Any = binary
+    if path.name.endswith(".zst"):
+        stream = zstandard.ZstdDecompressor().stream_reader(stream, read_across_frames=True)
+    return io.TextIOWrapper(io.BufferedReader(stream, _HASH_CHUNK_BYTES), encoding="utf-8")
 
 
 def discover_session_files(session_jsonl: Path) -> list[Path]:
@@ -230,10 +240,7 @@ def _read_and_fingerprint(path: Path) -> tuple[FileFingerprint, list[Any]]:
     digest = _new_digest()
     with (
         path.open("rb", buffering=0) as raw,
-        io.TextIOWrapper(
-            io.BufferedReader(_DigestingReader(raw, digest), _HASH_CHUNK_BYTES),
-            encoding="utf-8",
-        ) as handle,
+        text_stream(_DigestingReader(raw, digest), path) as handle,
     ):
         records = parse_jsonl_records(handle, path)
     fingerprint = FileFingerprint(
@@ -405,7 +412,7 @@ def read_snapshot_records(snapshot: SessionSnapshot) -> list[tuple[dict[str, Any
     pairs: list[tuple[dict[str, Any], str]] = []
     for path in snapshot.files:
         source_file = path.relative_to(base).as_posix()
-        with path.open(encoding="utf-8") as handle:
+        with path.open("rb") as raw, text_stream(raw, path) as handle:
             records = parse_jsonl_records(handle, path)
         pairs.extend((record, source_file) for record in records if isinstance(record, dict))
     return pairs

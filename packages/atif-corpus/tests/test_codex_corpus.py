@@ -342,3 +342,44 @@ class TestOneCorpusHoldsOneAgent:
         second = _materialize_codex(codex_source_root, corpus_root)
         assert second.materialized_count == 1
         assert second.removed_session_ids == ()
+
+
+def write_rollout_file(
+    sessions_root: Path,
+    name: str,
+    meta: dict[str, object],
+    *,
+    mtime_ns: int = STALE_NS,
+    day: tuple[str, str, str] = ("2026", "09", "11"),
+    compressed: bool = False,
+) -> Path:
+    """One rollout named ``name`` whose first record is ``session_meta`` with ``meta``."""
+    import zstandard
+
+    day_dir = sessions_root.joinpath(*day)
+    day_dir.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps({"type": "session_meta", "payload": meta}) + "\n").encode()
+    path = day_dir / (f"{name}.zst" if compressed else name)
+    path.write_bytes(zstandard.ZstdCompressor().compress(data) if compressed else data)
+    os.utime(path, ns=(mtime_ns, mtime_ns))
+    return path
+
+
+class TestCompressedRollouts:
+    def test_the_plain_form_of_a_rollout_wins_over_its_compressed_copy(
+        self, codex_source_root: Path
+    ) -> None:
+        plain = write_rollout(codex_source_root, SESSION_A, mtime_ns=STALE_NS)
+        write_rollout_file(codex_source_root, plain.name, {"id": SESSION_A}, compressed=True)
+        (session,) = scan_source_root(codex_source_root, CODEX_LAYOUT)
+        assert session.source_files == (str(plain),)
+
+    def test_a_compressed_rollout_alone_is_a_session(self, codex_source_root: Path) -> None:
+        path = write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-11T00-00-00-{SESSION_A}.jsonl",
+            {"id": SESSION_A},
+            compressed=True,
+        )
+        (session,) = scan_source_root(codex_source_root, CODEX_LAYOUT)
+        assert session.session_jsonl == str(path)

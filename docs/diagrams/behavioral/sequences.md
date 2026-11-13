@@ -33,14 +33,14 @@ Sources, in dispatch order:
   `read_watermark` at `:424` called from `:1640`, `scan_sources` called at `:1642`, `build_plan` called
   at `:1716`, `_write_session` at `:624` called from `:797`, watermark advanced at `:1796-1799`, report
   built at `:1811`.
-- scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:206`.
+- scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:216`.
 - build_plan: `packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`.
 - RealConverter: `packages/atif-cli/src/atif_cli/converter_adapter.py:82`, calling
   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220`.
 - converter: our ported Claude Code converter,
   `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:981`, reached from the
-  seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:133`; the ATIF
-  data classes and the validator the seam checks with (`:78`) are harbor's, vendored under
+  seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:136`; the ATIF
+  data classes and the validator the seam checks with (`:81`) are harbor's, vendored under
   `atif_converter.domain.atif`.
 - corpus artifacts: path arithmetic in
   `packages/atif-corpus/src/atif_corpus/domain/layout.py:65`; the artifacts written and the

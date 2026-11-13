@@ -30,9 +30,9 @@ catalog copy.
 2. One pass through the corpus use case runs scan, plan, convert, and write in that order and
    returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`).
 3. The scanner discovers every session under the raw transcript root and separates unreadable
-   sessions from absent ones, so a `stat` failure is never mistaken for a deletion (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:206`). It walks whichever layout the
+   sessions from absent ones, so a `stat` failure is never mistaken for a deletion (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:216`). It walks whichever layout the
    agent selects, descending exactly `transcript_depth` directories and reporting an unlistable one at
-   any level (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:176`).
+   any level (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:179`).
 4. The pure planner partitions the scan into to-materialize, up-to-date, and skipped-live using
    the previous watermark and the quiescence policy; `force` overrides staleness but never
    liveness (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`).

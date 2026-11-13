@@ -534,7 +534,7 @@ def scan_source_root(
 The sessions found under `source_root`, discarding the per-scan diagnostics that the fuller
 `scan_sources` returns.
 
-`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:302-316`
+`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:312-326`
 
 ### TrajectoryValidationError
 

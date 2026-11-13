@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import zstandard
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -66,11 +67,13 @@ def require_transcript_file(path: Path) -> None:
     ``FileNotFoundError`` — exit 1 from the CLI, indistinguishable from a crash
     — instead of the terminal input verdict the caller can act on.
 
+    A Codex rollout may also be the zstd-compressed ``.jsonl.zst``.
+
     Raises
     ------
-        InvalidSessionInput: the path is absent, or not a ``.jsonl`` file.
+        InvalidSessionInput: the path is absent, or not a ``.jsonl`` or ``.jsonl.zst`` file.
     """
-    if path.suffix != ".jsonl" or not path.is_file():
+    if not path.name.endswith((".jsonl", ".jsonl.zst")) or not path.is_file():
         msg = f"not a session JSONL file: {path}"
         raise InvalidSessionInput(msg)
 
@@ -105,12 +108,12 @@ def read_session(session_jsonl: Path, extra_files: Sequence[Path] = ()) -> Loade
     Raises
     ------
         InvalidSessionInput: ``session_jsonl`` is not an existing ``.jsonl`` file.
-        ConversionError: a discovered file is not UTF-8.
+        ConversionError: a discovered file is not UTF-8, or not valid zstd.
     """
     require_transcript_file(session_jsonl)
     try:
         return load_session(session_jsonl, extra_files)
-    except UnicodeDecodeError as exc:
+    except (UnicodeDecodeError, zstandard.ZstdError) as exc:
         msg = f"conversion failed for {session_jsonl}"
         raise ConversionError(msg) from exc
 

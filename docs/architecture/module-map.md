@@ -239,8 +239,8 @@ marked, and records the ones it hasn't taken yet in `sink_pending.json` so a fai
 hand-over is retried by the next pass. What counts as a transcript, and how deep
 under the source root it sits, is one value object per agent (depth 1 for Claude Code's
 `<project>/<session>.jsonl`, depth 3 for Codex's `<YYYY>/<MM>/<DD>` nesting;
-`packages/atif-corpus/src/atif_corpus/domain/source_layout.py:111-124`), so the scanner walks either
-layout without branching on the agent, and `layout_for` refuses an agent that has none (`:141-143`).
+`packages/atif-corpus/src/atif_corpus/domain/source_layout.py:125-137`), so the scanner walks either
+layout without branching on the agent, and `layout_for` refuses an agent that has none (`:155-157`).
 The agent enum itself is an AST-pinned twin of the converter's, since the independence contract
 forbids the import (`packages/atif-corpus/src/atif_corpus/domain/agents.py:25`).
 
@@ -251,7 +251,7 @@ forbids the import (`packages/atif-corpus/src/atif_corpus/domain/agents.py:25`).
   member stats the source corpus
   (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:5`); `SourceScan` keeps a
   genuinely absent transcript separate from a failed `stat`, so a transient error never marks a live
-  session as source-removed (`:67`).
+  session as source-removed (`:70`).
 - `packages/atif-corpus/src/atif_corpus/domain/sessions.py`: `SessionSource`
   (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:42`), `QuiescencePolicy` (`:71`),
   `MaterializationPlan` (`:118`), and `build_plan` (`:169`).
@@ -283,7 +283,7 @@ public ATIF data classes (`packages/atif-converter/src/atif_converter/domain/cla
 reached through `convert_loaded_claude_code_session`, which takes the records the use case already
 read (`packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:72`), and
 validated with the vendored copy of harbor's `TrajectoryValidator`
-(`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:78`). The Codex path is
+(`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:81`). The Codex path is
 the same shape one module over: `convert_codex_and_audit`
 (`packages/atif-converter/src/atif_converter/application/convert_codex.py:148`) over
 `convert_codex_records` (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:924`),
@@ -327,7 +327,7 @@ table doesn't price is NULL. litellm is a dev dependency, for the identity test 
   imports it (`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:5-7`).
 - `packages/atif-converter/src/atif_converter/infrastructure/raw_records.py`: the one raw
   reader the census, edges emitter, and enrichment share, with `mutated_files` as the race check
-  (`packages/atif-converter/src/atif_converter/infrastructure/raw_records.py:320`, `:414`).
+  (`packages/atif-converter/src/atif_converter/infrastructure/raw_records.py:327`, `:421`).
 - `packages/atif-converter/src/atif_converter/application/convert_and_audit.py`: the use
   case (`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220`) and its
   refusal on any mid-window mutation (`:199`).

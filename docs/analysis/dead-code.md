@@ -165,7 +165,7 @@ intra-module use site is named after the table.
 | `REPORTED_COST_SOURCE_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:339` | 2026-09-27 |
 | `REPORTED_UNKNOWN_MODEL_COST_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:340` | 2026-09-27 |
 | `REPORTED_COST_SOURCE_COST_STATE` | `packages/atif-converter/src/atif_converter/domain/session_events.py:342` | 2026-09-27 |
-| `read_codex_rollout` | `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:39` | 2026-09-11 |
+| `read_codex_rollout` | `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:43` | 2026-09-11 |
 | `ARCHIVE_ZSTD_LEVEL` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:49` | 2026-09-27 |
 | `ArchivedSourceFile` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:63` | 2026-09-27 |
 | `Compressed` | `packages/atif-corpus/src/atif_corpus/infrastructure/compress_artifacts.py:57` | 2026-09-28 |
@@ -274,7 +274,7 @@ numbers follow it as plain numbers.
   `REPORTED_COST_SOURCE_COST_STATE` make up the dict entry at `:367`, and
   `REPORTED_UNKNOWN_MODEL_COST_KEY` is the key written at `:371`.
 - `read_codex_rollout` is called at
-  `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:66`.
+  `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:70`.
 - `ARCHIVE_ZSTD_LEVEL` sets the compressor level at
   `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:113`;
   `ArchivedSourceFile` annotates `:87` and is constructed at `:122`.
@@ -355,7 +355,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
   (`TABLE_FILENAME`).
 - `packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:46`
   (`staged_side_name`) and
-  `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:60`
+  `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:61`
   (`require_transcript_file`).
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:210`
   (`MaterializationFailure`), `:321` (`DEFAULT_SINK_BATCH_SIZE`), and `:1434`
@@ -367,7 +367,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
   (`SourceDelta`).
 - `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:36`
   (`COMPACT_SEPARATORS`),
-  `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:60`
+  `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:63`
   (`WATCHED_SIDE_FILE_GLOBS`), and
   `packages/atif-corpus/src/atif_corpus/infrastructure/source_archive.py:51`
   (`ARCHIVE_CODEC`) with `:122` (`read_manifest`).

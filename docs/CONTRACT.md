@@ -179,8 +179,9 @@ proofs are out of scope for the workspace.
 - Claude Code layout: <source_root>/<project>/<session>.jsonl, transcript depth
   1, side files present (subagents/, *.meta.json).
 - Codex layout: $CODEX_HOME/sessions/<YYYY>/<MM>/<DD>/rollout-<ts>-<uuid>.jsonl,
-  transcript depth 3, no side files. session_id is the trailing UUID of the
-  rollout filename, so it survives the date nesting.
+  or the same name zstd-compressed as .jsonl.zst (the plain file wins when both
+  exist), transcript depth 3, no side files. session_id is the trailing UUID of
+  the rollout filename, so it survives the date nesting.
 - One Codex rollout converts to one trajectory, by construction: the converter
   reads the one file it is given.
 - Codex fidelity gaps are their own enum (CodexFidelityGap), all values
