@@ -193,12 +193,12 @@ sequenceDiagram
    other commands share, and stamps explicit `--max-sessions` / `--max-cost-usd` ceilings over the
    env defaults so a crontab line carries its spend cap visibly (`packages/atif-cli/src/atif_cli/app.py:1785-1790`).
 2. The command opens the lake's session source when the lake holds the corpus
-   (`packages/atif-cli/src/atif_cli/app.py:1792`, `packages/atif-cli/src/atif_cli/lake_sessions.py:111`),
+   (`packages/atif-cli/src/atif_cli/app.py:1792`, `packages/atif-cli/src/atif_cli/lake_sessions.py:108`),
    and the pipeline runner builds one shared `CorpusReader` over it (or over the file source)
    for every stage and loops the LLM stages (classify, conflicts, friction, perceived); the
    `skip_*` flags subtract stages (`packages/atif-analytics/src/atif_analytics/application/analyze.py:62`).
 3. On the lake, a session whose lake rows match its current `meta.json` is read with batched
-   statements over the step-level tables (`packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:80`),
+   statements over the step-level tables (`packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:72`),
    reading ahead in the newest-first walk order, and every other session from its files. Without
    a lake, rows are read with stdlib `json` over `<corpus_root>/sessions/<id>/trajectory.json.zst` (or the plain file on an old-layout session);
    atif-analytics declares no DuckDB dependency, and the `forbidden` import contract puts atif-duck

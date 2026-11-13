@@ -48,6 +48,7 @@ from atif_analytics.infrastructure.corpus_reader import (
     last_edge_ts,
     trajectory_mtime,
 )
+from atif_duck.domain.lake_sessions import is_current
 from atif_duck.infrastructure.lake_sessions import LakeReadError
 
 if TYPE_CHECKING:
@@ -56,8 +57,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from atif_analytics.domain.ports import SessionBounds
+    from atif_duck.domain.lake_sessions import SessionFreshness
     from atif_duck.infrastructure.lake import LakeLayout, LakeUnavailable
-    from atif_duck.infrastructure.lake_sessions import LakeSessionReader, SessionFreshness
+    from atif_duck.infrastructure.lake_sessions import LakeSessionReader
 
 #: Sessions per gate-level lake read. One read costs about the same for one
 #: session as for this many (it scans the same row groups' metadata), and the
@@ -81,12 +83,7 @@ def _is_current(session_dir: Path, recorded: SessionFreshness | None) -> bool:
         meta = json.loads((session_dir / META_FILENAME).read_text())
     except (OSError, ValueError):
         return False
-    if not isinstance(meta, dict):
-        return False
-    return bool(
-        meta.get("materialized_at") == recorded.materialized_at
-        and meta.get("source_mtime_ns") == recorded.source_mtime_ns
-    )
+    return is_current(meta, recorded)
 
 
 class LakeSessionSource:

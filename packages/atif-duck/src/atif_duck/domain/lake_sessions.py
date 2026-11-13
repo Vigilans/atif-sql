@@ -21,10 +21,16 @@ merges keep the numbers). The writer inserts the step-level tables
 (:data:`atif_duck.domain.lake.SOURCE_ORDERED_TABLES`) on one thread so that order is the source
 order; the statements below sort by ``step_id`` and then ``rowid``.
 
-Pure constants: no duckdb import, no filesystem access.
+Whether the lake's rows for a session are its current ones is
+:func:`is_current`: the session's ``meta.json`` against what
+:data:`SESSION_FRESHNESS_SQL` reads back.
+
+Pure: no duckdb import, no filesystem access.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from atif_duck.domain.lake import LAKE_ALIAS, SESSION_KEY
 from atif_duck.domain.raw_readers import CORPUS_COLUMN
@@ -48,6 +54,25 @@ LAST_EDGE_TS_SQL: SqlFragment = SqlFragment(
     f"SELECT {SESSION_KEY}, max(ts) FROM {LAKE_ALIAS}.edges "  # noqa: S608  # nosec B608 - constants only; corpus is bound
     f"WHERE {CORPUS_COLUMN} = ? GROUP BY 1"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SessionFreshness:
+    """What a session's ``meta.json`` said when the lake loaded it."""
+
+    materialized_at: str | None
+    source_mtime_ns: int | None
+
+
+def is_current(meta: object, recorded: SessionFreshness | None) -> bool:
+    """True when the lake's row for a session is its current ``meta.json``'s (``meta``, parsed)."""
+    if recorded is None or not isinstance(meta, dict):
+        return False
+    return bool(
+        meta.get("materialized_at") == recorded.materialized_at
+        and meta.get("source_mtime_ns") == recorded.source_mtime_ns
+    )
+
 
 #: Every step of a batch of sessions without its tool payloads (params:
 #: corpus, ids): ``(session_id, step_id, ts, source, message, is_sidechain,
@@ -94,4 +119,6 @@ __all__ = [
     "TOOL_CALLS_SQL",
     "TOOL_RESULTS_SQL",
     "TURNS_SQL",
+    "SessionFreshness",
+    "is_current",
 ]

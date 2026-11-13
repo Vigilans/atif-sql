@@ -294,7 +294,7 @@ forbidden_modules = ["atif_converter", "atif_corpus", "atif_duck", "atif_embed",
   modules that are themselves only ever imported inside a command body:
   `packages/atif-cli/src/atif_cli/converter_adapter.py:64-75`,
   `packages/atif-cli/src/atif_cli/duck_errors.py:27`,
-  `packages/atif-cli/src/atif_cli/lake_sessions.py:43-51`, and
+  `packages/atif-cli/src/atif_cli/lake_sessions.py:43-52`, and
   `packages/atif-cli/src/atif_cli/embed_lake.py:19`. A line-anchored grep of `src/` for another
   package's `^from atif_` finds only those four; the atif-cli and atif-analytics test suites do
   import siblings at module scope. That's why every count in this file comes from an unanchored
@@ -988,7 +988,7 @@ rather than skipping a file that no longer contains the current version; the gua
   atif-analytics' `SessionSource` (`packages/atif-analytics/src/atif_analytics/domain/ports.py:40`),
   which `TrajectoryFileSource`
   (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:271`) and atif-cli's
-  `LakeSessionSource` (`packages/atif-cli/src/atif_cli/lake_sessions.py:92`) fit.
+  `LakeSessionSource` (`packages/atif-cli/src/atif_cli/lake_sessions.py:89`) fit.
 
 ## See also
 

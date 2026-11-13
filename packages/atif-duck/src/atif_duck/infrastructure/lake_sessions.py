@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,6 +35,7 @@ from atif_duck.domain.lake_sessions import (
     TOOL_CALLS_SQL,
     TOOL_RESULTS_SQL,
     TURNS_SQL,
+    SessionFreshness,
 )
 from atif_duck.domain.sql_literal import sql_literal
 from atif_duck.infrastructure.lake import (
@@ -62,14 +62,6 @@ _READER_THREADS: int = 4
 
 class LakeReadError(RuntimeError):
     """A read on an open :class:`LakeSessionReader` failed (the lake moved under it)."""
-
-
-@dataclass(frozen=True, slots=True)
-class SessionFreshness:
-    """What a session's ``meta.json`` said when the lake loaded it."""
-
-    materialized_at: str | None
-    source_mtime_ns: int | None
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -190,5 +182,4 @@ __all__ = [
     "DEFAULT_READER_MEMORY_BYTES",
     "LakeReadError",
     "LakeSessionReader",
-    "SessionFreshness",
 ]
