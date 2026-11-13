@@ -336,8 +336,13 @@ def _sync_sink(
     return synced, (), None, time.perf_counter() - started
 
 
-def read_watermark(path: Path) -> dict[str, int]:
-    """Load ``watermark.json`` (``{path: mtime_ns}``); empty on first run.
+#: ``watermark.json`` as stored: an integer value is an ordinary pass's
+#: ``path: mtime_ns`` entry, an object value one host's block of them.
+_WatermarkDocument = dict[str, int | dict[str, int]]
+
+
+def _read_watermark_document(path: Path) -> _WatermarkDocument:
+    """Load ``watermark.json`` whole: flat entries and host blocks; empty on first run.
 
     A corrupt watermark degrades to empty — the cost is one full
     re-materialization pass, which is always safe, versus refusing to sync.
@@ -353,7 +358,14 @@ def read_watermark(path: Path) -> dict[str, int]:
         logger.warning("watermark {} has wrong shape; treating corpus as unmaterialized", path)
         return {}
     try:
-        return {str(key): int(value) for key, value in raw.items()}
+        return {
+            str(key): (
+                {str(k): int(v) for k, v in value.items()}
+                if isinstance(value, dict)
+                else int(value)
+            )
+            for key, value in raw.items()
+        }
     except (TypeError, ValueError):
         # A non-numeric mtime is corruption of the same kind as unparseable
         # JSON and takes the same exit: degrade, do not raise. Inside the
@@ -364,6 +376,41 @@ def read_watermark(path: Path) -> dict[str, int]:
             "watermark {} holds a non-numeric mtime; treating corpus as unmaterialized", path
         )
         return {}
+
+
+def _watermark_entries(document: _WatermarkDocument, host: str | None) -> dict[str, int]:
+    """The ``{path: mtime_ns}`` entries a pass on ``host`` reads and writes.
+
+    An ordinary pass (``host=None``) owns the flat entries, a relocatable pass
+    its host's block: machines sharing a corpus record their own sources,
+    even at identical absolute paths, without reading each other's.
+    """
+    if host is None:
+        return {key: value for key, value in document.items() if isinstance(value, int)}
+    block = document.get(host)
+    return dict(block) if isinstance(block, dict) else {}
+
+
+def _with_watermark_entries(
+    document: _WatermarkDocument, host: str | None, entries: dict[str, int]
+) -> _WatermarkDocument:
+    """``document`` with the part a pass on ``host`` owns replaced by ``entries``."""
+    if host is None:
+        return {
+            **entries,
+            **{key: value for key, value in document.items() if isinstance(value, dict)},
+        }
+    return {**document, host: entries}
+
+
+def read_watermark(path: Path, *, host: str | None = None) -> dict[str, int]:
+    """Load the ``{path: mtime_ns}`` entries a pass on ``host`` uses; empty on first run.
+
+    ``host`` is ``None`` for an ordinary pass and the machine's
+    :func:`~atif_corpus.infrastructure.hostname.machine_hostname` for a
+    relocatable one.
+    """
+    return _watermark_entries(_read_watermark_document(path), host)
 
 
 def read_empty_sessions(path: Path) -> dict[str, dict[str, Any]]:
@@ -1413,7 +1460,8 @@ def preview_pass(
     pass, which retains and re-converts only this machine's sessions.
     """
     layout = CorpusLayout(corpus_root=corpus_root)
-    watermark = read_watermark(layout.watermark_path)
+    host = machine_hostname() if relocatable else None
+    watermark = read_watermark(layout.watermark_path, host=host)
     empties = read_empty_sessions(layout.empty_sessions_path)
     scan = scan_sources(source_root, source_layout)
     scan = scan.with_unreadable(
@@ -1442,7 +1490,6 @@ def preview_pass(
         scan.unreadable_session_ids,
         scan.rejected_session_ids,
     )
-    host = machine_hostname() if relocatable else None
     retained: dict[str, dict[str, Any]] = {}
     for session_id in sourceless:
         meta = _read_meta(layout, session_id)
@@ -1584,7 +1631,12 @@ def materialize(
 
     layout = CorpusLayout(corpus_root=corpus_root)
     _sweep_staging(layout)
-    previous_watermark = read_watermark(layout.watermark_path)
+    # A relocatable pass owns the sessions its machine converted (meta.host)
+    # and its host's watermark block, an ordinary pass the sessions with no
+    # host and the flat entries.
+    host = machine_hostname() if relocatable else None
+    watermark_document = _read_watermark_document(layout.watermark_path)
+    previous_watermark = _watermark_entries(watermark_document, host)
     previous_empty = read_empty_sessions(layout.empty_sessions_path)
     scan = scan_sources(source_root, source_layout)
     # "Now" comes AFTER the scan: a transcript written while the scan ran must
@@ -1609,9 +1661,6 @@ def materialize(
         else []
     )
     agent = source_layout.agent.value
-    # A relocatable pass owns the sessions its machine converted (meta.host),
-    # an ordinary pass the ones with no host.
-    host = machine_hostname() if relocatable else None
     # Empty-scan guard: an empty scan over a corpus holding this pass's
     # sessions smells like a wrong source_root. Fail loud instead of flagging
     # every session, UNLESS an unlistable directory already explains the
@@ -1738,7 +1787,11 @@ def materialize(
     layout.corpus_root.mkdir(parents=True, exist_ok=True)
     write_json_atomic(
         layout.watermark_path,
-        _advance_watermark(previous_watermark, scan, tuple(succeeded), source_root=source_root),
+        _with_watermark_entries(
+            watermark_document,
+            host,
+            _advance_watermark(previous_watermark, scan, tuple(succeeded), source_root=source_root),
+        ),
     )
     next_empty = _next_empty_record(
         previous_empty,

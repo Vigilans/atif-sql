@@ -67,7 +67,7 @@ The limits of this derivation, stated because no index backs it:
   imports sit *inside* command bodies:
   `packages/atif-cli/src/atif_cli/app.py:727`,
   `packages/atif-cli/src/atif_cli/app.py:954`, and
-  `packages/atif-cli/src/atif_cli/app.py:1543` are all indented. The import graph
+  `packages/atif-cli/src/atif_cli/app.py:1547` are all indented. The import graph
   uses `ast.walk`, which descends into function
   bodies, and the reference regex is unanchored, so a deferred import counts as
   an inbound edge.
@@ -358,7 +358,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
   `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:61`
   (`require_transcript_file`).
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:207`
-  (`MaterializationFailure`) and `:1474` (`PassPreview`).
+  (`MaterializationFailure`) and `:1521` (`PassPreview`).
 - `packages/atif-corpus/src/atif_corpus/domain/layout.py:25`
   (`WATERMARK_FILENAME`) and `:27` (`EMPTY_SESSIONS_FILENAME`), and
   `packages/atif-corpus/src/atif_corpus/domain/watermark.py:26`
@@ -372,7 +372,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
 
 The rest sit in modules that do declare an `__all__` and are deliberately
 absent from it, which is the module saying they aren't exported:
-`packages/atif-cli/src/atif_cli/app.py:2331` (`search_rows`),
+`packages/atif-cli/src/atif_cli/app.py:2335` (`search_rows`),
 `packages/atif-cli/src/atif_cli/corpus.py:71` (`SessionLayout`) and `:158`
 (`CorpusSlimReport`), and
 `packages/atif-duck/src/atif_duck/infrastructure/lake.py:121`
@@ -469,12 +469,12 @@ write, over every tracked file:
 
 Every real consumer bypasses the facade for the deep module:
 
-- `packages/atif-cli/src/atif_cli/app.py:1543` and
-  `packages/atif-cli/src/atif_cli/app.py:2193-2197` import `register` from
+- `packages/atif-cli/src/atif_cli/app.py:1547` and
+  `packages/atif-cli/src/atif_cli/app.py:2197-2201` import `register` from
   `atif_duck.infrastructure.registry`.
-- `packages/atif-cli/src/atif_cli/app.py:2400`:
+- `packages/atif-cli/src/atif_cli/app.py:2404`:
   `from atif_duck.domain.examples import (...)`.
-- `packages/atif-cli/src/atif_cli/app.py:2482`:
+- `packages/atif-cli/src/atif_cli/app.py:2486`:
   `from atif_duck.domain.catalog import (...)`, which takes `MACRO_SIGNATURES`
   and `VIEW_SCHEMA` with their analytics counterparts.
 - `packages/atif-cli/src/atif_cli/duck_errors.py:27`,

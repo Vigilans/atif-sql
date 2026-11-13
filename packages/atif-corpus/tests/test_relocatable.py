@@ -6,6 +6,8 @@ Each session a relocatable pass converts records the machine that converted
 it as ``meta.host``, beside the same artifacts an ordinary pass writes. A
 pass marks, retains, re-converts from an archive and guards only its own
 machine's sessions; an ordinary pass keeps the host-less ones.
+``watermark.json`` holds an ordinary pass's flat entries beside one block per
+host.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from atif_corpus.application.materialize import (
     SuspiciousEmptyScanError,
     materialize,
     preview_pass,
+    read_watermark,
 )
 from atif_corpus.domain.layout import CorpusLayout
 from atif_corpus.infrastructure.fake_converter import FakeConverter
@@ -276,3 +279,75 @@ class TestTheEmptyScanGuard:
         delete_session_source(source_a, SESSION_A)
         with pytest.raises(SuspiciousEmptyScanError, match="refusing to mark them"):
             run_on("host-a", monkeypatch, source_a, corpus_root)
+
+
+def watermark_of(corpus_root: Path) -> dict[str, Any]:
+    document = json.loads(CorpusLayout(corpus_root=corpus_root).watermark_path.read_text())
+    assert isinstance(document, dict)
+    return document
+
+
+class TestWatermarkHostBlocks:
+    def test_the_first_relocatable_pass_reconverts_every_live_session(
+        self, source_root: Path, corpus_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_session(source_root, SESSION_A, mtime_ns=STALE_NS)
+        write_session(source_root, SESSION_B, mtime_ns=STALE_NS)
+        run(source_root, corpus_root, relocatable=False)
+        flat = watermark_of(corpus_root)
+
+        report = run_on("host-a", monkeypatch, source_root, corpus_root)
+
+        assert report.materialized_count == 2
+        assert {meta_of(corpus_root, sid)["host"] for sid in (SESSION_A, SESSION_B)} == {"host-a"}
+        assert watermark_of(corpus_root) == {**flat, "host-a": flat}
+
+    def test_an_ordinary_pass_keeps_host_blocks(
+        self, source_root: Path, corpus_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_session(source_root, SESSION_A, mtime_ns=STALE_NS)
+        run_on("host-a", monkeypatch, source_root, corpus_root)
+        block = watermark_of(corpus_root)["host-a"]
+        write_session(source_root, SESSION_B, mtime_ns=STALE_NS)
+
+        assert run(source_root, corpus_root, relocatable=False).materialized_count == 2
+        assert watermark_of(corpus_root)["host-a"] == block
+        assert run_on("host-a", monkeypatch, source_root, corpus_root).materialized_count == 1
+
+    def test_machines_with_identical_source_paths_keep_separate_entries(
+        self, source_root: Path, corpus_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # host-a and host-b both keep transcripts under the same absolute path.
+        write_session(source_root, SESSION_A, mtime_ns=STALE_NS)
+        write_session(source_root, SESSION_C, mtime_ns=STALE_NS)
+        run_on("host-a", monkeypatch, source_root, corpus_root)
+        on_a = {
+            sid: CorpusLayout(corpus_root=corpus_root).meta_path(sid).read_bytes()
+            for sid in (SESSION_A, SESSION_C)
+        }
+        delete_session_source(source_root, SESSION_A)
+        delete_session_source(source_root, SESSION_C)
+        write_session(source_root, SESSION_B, mtime_ns=STALE_NS)
+
+        assert run_on("host-b", monkeypatch, source_root, corpus_root).removed_session_ids == ()
+        document = watermark_of(corpus_root)
+        assert all(SESSION_B in path for path in document["host-b"])
+        assert all(SESSION_B not in path for path in document["host-a"])
+
+        delete_session_source(source_root, SESSION_B)
+        write_session(source_root, SESSION_A, mtime_ns=STALE_NS)
+        write_session(source_root, SESSION_C, mtime_ns=STALE_NS)
+        report = run_on("host-a", monkeypatch, source_root, corpus_root)
+        assert (report.materialized_count, report.removed_session_ids) == (0, ())
+        assert {
+            sid: CorpusLayout(corpus_root=corpus_root).meta_path(sid).read_bytes()
+            for sid in (SESSION_A, SESSION_C)
+        } == on_a
+
+
+def test_read_watermark_reads_the_flat_entries_or_one_hosts_block(tmp_path: Path) -> None:
+    path = tmp_path / "watermark.json"
+    path.write_text(json.dumps({"/s/a.jsonl": 1, "host-a": {"/s/a.jsonl": 2}}))
+    assert read_watermark(path) == {"/s/a.jsonl": 1}
+    assert read_watermark(path, host="host-a") == {"/s/a.jsonl": 2}
+    assert read_watermark(path, host="host-b") == {}

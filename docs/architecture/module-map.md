@@ -133,8 +133,8 @@ The composition root: it declares five of its six siblings as `==`-pinned depend
 (`packages/atif-cli/pyproject.toml:32-36`) and wires every cross-package seam: the `ConverterPort`
 adapter, the clock, version pins, the DuckDB connection (`packages/atif-cli/src/atif_cli/app.py:7-9`).
 The commands hang off one cyclopts `App`: `@app.command` functions from `convert`
-(`packages/atif-cli/src/atif_cli/app.py:690`) to `schema` (`:2465`), plus the `cron`, `lake`, and
-`corpus` sub-apps registered at `:104-109`, with `main` (`:2539`) exposed as the single console
+(`packages/atif-cli/src/atif_cli/app.py:690`) to `schema` (`:2469`), plus the `cron`, `lake`, and
+`corpus` sub-apps registered at `:104-109`, with `main` (`:2543`) exposed as the single console
 script named `atif-sql` (`pyproject.toml:74`). Heavy imports (duckdb, the ATIF models through
 atif-converter, pydantic through atif-corpus) are deferred into the command bodies that use them so
 `schema`, `--help`, and `--version` stay on a lean import graph that a fresh-interpreter test pins
@@ -223,7 +223,7 @@ per-session reader otherwise.
 ## atif-corpus
 
 One materialization pass is sweep, scan, plan, convert, write, advance watermark, and `materialize` is
-that pass (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1467`). The decision half
+that pass (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1514`). The decision half
 is pure: the domain never stats a file and never reads a clock, so `build_plan` partitions scanned
 sessions into to-materialize, up-to-date, and skipped-live deterministically from mtimes in epoch
 nanoseconds plus an injected now (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:187`). The
@@ -245,7 +245,7 @@ The agent enum itself is an AST-pinned twin of the converter's, since the indepe
 forbids the import (`packages/atif-corpus/src/atif_corpus/domain/agents.py:25`).
 
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py`: the pass itself
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1467`), the report value object
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1514`), the report value object
   (`:217`), and the public `read_watermark` its consumers call (`:339`).
 - `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py`: the only place this
   member stats the source corpus

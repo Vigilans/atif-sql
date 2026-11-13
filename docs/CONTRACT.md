@@ -46,7 +46,8 @@ proofs are out of scope for the workspace.
     tool_results.parquet, session_events.parquet         #  artifacts, see below
   blobs/sha256/<ab>/<sha256>.<ext> # inline attachments (images, PDFs), content-addressed,
                                    #  shared by every session, written 0444
-  watermark.json                   # {path: mtime_ns} across source corpus
+  watermark.json                   # {path: mtime_ns} across source corpus, beside
+                                   #  {host: {path: mtime_ns}} per relocatable host
   empty_sessions.json              # {session_id: {converter_schema, ...}} for
                                    #  transcripts with nothing to convert
 
@@ -136,9 +137,13 @@ proofs are out of scope for the workspace.
   a relocatable pass owns the sessions whose meta.host names its machine, and
   an ordinary pass the ones with no host: each marks, retains and re-converts
   from an archive its own alone, and only its own trip the empty-scan guard.
-  Machines sharing a corpus each keep their own sessions' source_present
-  current; another machine's sessions arrive through whatever syncs the
-  corpus.
+  It likewise reads and writes only its own part of watermark.json: an
+  ordinary pass the flat entries, a relocatable pass its host's block, so
+  machines keep transcripts at identical absolute paths apart. A first
+  relocatable pass finds its block empty and converts every live session
+  again under its host. Machines sharing a corpus each keep their own
+  sessions' source_present current; another machine's sessions arrive
+  through whatever syncs the corpus.
 - Empty sessions: a transcript with no convertible record is recorded in
   empty_sessions.json keyed by session id with the generation it was checked
   under; its watermark advances and it's reported as `empty`, not `failed`.

@@ -58,11 +58,11 @@ The sections below aren't ranked; "Other contracts" at the end collects the smal
   `meta.json` and opens each stored trajectory with its own DuckDB connection.
 - `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:72-74`: declares
   `TRAJECTORY_FILENAME` / `EDGES_FILENAME` / `META_FILENAME` again as its own constants.
-- `packages/atif-corpus/src/atif_corpus/application/materialize.py:627-668`: the writer side, the
+- `packages/atif-corpus/src/atif_corpus/application/materialize.py:674-715`: the writer side, the
   only place the artifacts are produced.
 - `packages/atif-cli/tests/test_artifact_names_twin_pin.py:29`: pins the writer's names against
   every reader's copy, and `:19` pins the `.zst` suffix.
-- `docs/CONTRACT.md:22-58`: the hand-written specification all of them agree to.
+- `docs/CONTRACT.md:22-59`: the hand-written specification all of them agree to.
 
 **Shape:**
 
@@ -106,10 +106,10 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   dirs where `v_raw_meta` has a row (the trajectory list is built from `v_raw_meta` too); `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:175-180` skips a dir with no `meta.json`;
   `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:178-191` does the same and logs a warning. Nothing in the file layout expresses
   this: it's a write-ORDER promise made at
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:563-566`.
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:610-613`.
 - **No reader ever sees a partially written directory**, because the writer stages every
   per-session artifact under `<corpus_root>/.staging/` and swaps the whole dir into place
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:584` and `:670`), and `.staging` is deliberately outside `sessions/` so a DuckDB glob
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:631` and `:717`), and `.staging` is deliberately outside `sessions/` so a DuckDB glob
   can't reach it (`packages/atif-corpus/src/atif_corpus/domain/layout.py:86-91`). A `SIGKILL` or power loss inside the swap leaves the session missing rather than torn.
 - **`trajectory.json` is ONE JSON document, `edges.jsonl` is newline-delimited.** atif-duck encodes
   that split in its reader choice at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:25-28`, and in its read bounds: the bound for a
@@ -127,15 +127,15 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   `VARCHAR` (`packages/atif-duck/src/atif_duck/domain/raw_readers.py:105`); the CLI supplies it (`packages/atif-cli/src/atif_cli/app.py:983`).
 
 **The hand-written contract and the manifests split the job.** Its CLI heading
-(`docs/CONTRACT.md:328`) names atif-cli the package that composes the others. The atif-cli
+(`docs/CONTRACT.md:333`) names atif-cli the package that composes the others. The atif-cli
 manifest declares five siblings (`packages/atif-cli/pyproject.toml:32-36`) and the CLI imports
 every one of them; atif-models reaches it through atif-analytics, which imports atif-models
 (`packages/atif-analytics/pyproject.toml:23`) as the import-linter contracts permit.
 `docs/CONTRACT.md:17-19` leaves VSS/`semantic_search` and the analytics pipelines to
 `docs/CONTRACT-V2.md` rather than ruling them out; both are shipped commands (the `atif-analytics`
 and `atif-embed` pins at `packages/atif-cli/pyproject.toml:32` and `:36`, plus the `analyze`,
-`embed`, and `search` commands at `packages/atif-cli/src/atif_cli/app.py:1726`, `:1894`, and
-`:2124`). Read `docs/CONTRACT.md:22-58` as authoritative for the layout (that's the part the
+`embed`, and `search` commands at `packages/atif-cli/src/atif_cli/app.py:1730`, `:1898`, and
+`:2128`). Read `docs/CONTRACT.md:22-58` as authoritative for the layout (that's the part the
 packages actually implement) and the manifests as authoritative for who imports whom.
 
 **Drift risk:** a new artifact, a renamed file, or a new `meta.json` key must be applied in every
@@ -155,12 +155,12 @@ write side. Any layout change starts there and then greps the reader modules nam
 
 **Consumers:**
 
-- `packages/atif-cli/src/atif_cli/app.py:2465-2517`: the `schema` command reads `VIEW_SCHEMA`,
+- `packages/atif-cli/src/atif_cli/app.py:2469-2521`: the `schema` command reads `VIEW_SCHEMA`,
   `MACRO_SIGNATURES`, `ANALYTICS_VIEW_SCHEMA`, and `ANALYTICS_MACRO_SIGNATURES`, tags each object
   with its `requires` value, and answers with no DuckDB connection.
 - `packages/atif-duck/src/atif_duck/domain/examples.py:35-44`: the examples generator imports every
   catalog and derives one runnable query per object.
-- `packages/atif-cli/src/atif_cli/app.py:2424`: the `examples` command calls
+- `packages/atif-cli/src/atif_cli/app.py:2428`: the `examples` command calls
   `build_examples()`.
 - `packages/atif-duck/tests/test_duck_views.py:51` and `:67`: the `DESCRIBE`-vs-`VIEW_SCHEMA` and
   DDL-vs-`MACRO_SIGNATURES` drift tests.
@@ -212,7 +212,7 @@ MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
   `SELECT * FROM name(args)` for a member and `SELECT name(args)` otherwise, so a macro whose DDL
   gains or loses `AS TABLE` breaks every derived example, pinned by the regex test at
   `packages/atif-duck/tests/test_examples.py:227`.
-- **The catalog is answerable without a corpus.** `packages/atif-cli/src/atif_cli/app.py:2474-2476` states the sub-50 ms,
+- **The catalog is answerable without a corpus.** `packages/atif-cli/src/atif_cli/app.py:2478-2480` states the sub-50 ms,
   no-DuckDB-bind guarantee the `schema` command rests on; a runtime `DESCRIBE` would violate it.
 - **The raw readers are deliberately NOT in `VIEW_NAMES`** (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:141-142`), so a
   consumer enumerating `VIEW_NAMES` does not see `v_raw_trajectories` and friends.
@@ -429,7 +429,7 @@ a mismatched adapter fails the typecheck gate.
   `_EDGE_COLUMNS`), the same keys in the same order with DuckDB types.
 - `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:249-268`: reads the
   `uuid` field for the conflicts pipeline's returned-uuid validity guard.
-- `packages/atif-corpus/src/atif_corpus/application/materialize.py:631-634`: writes the lines and
+- `packages/atif-corpus/src/atif_corpus/application/materialize.py:678-681`: writes the lines and
   owns line termination.
 - `packages/atif-duck/src/atif_duck/domain/catalog.py:94`: the `messages` view publishes this
   surface, every key but `tool_use_ids`, plus `session_id`.
@@ -456,7 +456,7 @@ EDGE_FIELDS: tuple[str, ...] = (
 - **The producer emits lines WITHOUT trailing newlines and the writer adds them.** Stated on the
   port's `edges_lines` field at
   `packages/atif-corpus/src/atif_corpus/domain/ports.py:74-77` and honoured at
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:631-634`; a producer that terminated its own lines would double them.
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:678-681`; a producer that terminated its own lines would double them.
 - **`parent_uuid` is a nullable string, and atif-duck declares it `VARCHAR` outright** rather than
   letting JSON union inference decide; the reason is recorded at `packages/atif-duck/src/atif_duck/domain/raw_readers.py:57-61`.
 - **`tool_use_ids` means two different things by record type**: tool_use block ids for assistant
@@ -549,7 +549,7 @@ class TextRowsPort(Protocol):
   yielded with `replaces_existing=True` (`packages/atif-embed/src/atif_embed/domain/ports.py:108-111`), and the caller must delete before
   appending or the uuid fans out to two vectors
   (`packages/atif-embed/src/atif_embed/application/embed.py:219-226`).
-- **The CLI injects only the text-rows port.** `packages/atif-cli/src/atif_cli/app.py:2033-2039` calls
+- **The CLI injects only the text-rows port.** `packages/atif-cli/src/atif_cli/app.py:2037-2043` calls
   `run_backfill` with `corpus_root`, `settings`, `text_rows` (`DuckDbTextRows`, wrapped in
   `LakeTextRows` unless `--no-lake` is passed), `limit`, and `dry_run`; the use case constructs the
   default store and embedder itself under deferred imports (`packages/atif-embed/src/atif_embed/application/embed.py:114-117`, `packages/atif-embed/src/atif_embed/application/embed.py:173-176`),
@@ -584,7 +584,7 @@ construction from settings: `packages/atif-embed/src/atif_embed/infrastructure/c
 **Consumers:**
 
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:186`: imports the port;
-  annotated at `packages/atif-corpus/src/atif_corpus/application/materialize.py:542` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1471`.
+  annotated at `packages/atif-corpus/src/atif_corpus/application/materialize.py:589` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1518`.
 - `packages/atif-cli/src/atif_cli/converter_adapter.py:82-160`: `RealConverter`, the production
   adapter and the only module importing both atif-converter and atif-corpus at module scope.
 - `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:81`: the test adapter
@@ -646,7 +646,7 @@ class ConverterPort(Protocol):
   (`packages/atif-cli/src/atif_cli/converter_adapter.py:141-142`, reasoning at `packages/atif-cli/src/atif_cli/converter_adapter.py:49-53`).
 - **`trajectory_dict` is the ENRICHED trajectory and is NOT yet compact-serialized.** The writer
   owns `separators=(",", ":")`; the mapping decision is stated at `packages/atif-cli/src/atif_cli/converter_adapter.py:30-31` and
-  the writer applies it at `packages/atif-corpus/src/atif_corpus/application/materialize.py:627-629`.
+  the writer applies it at `packages/atif-corpus/src/atif_corpus/application/materialize.py:674-676`.
 - **`loss_report_dict` is `LossReport.to_json()`-shaped with enum members flattened to strings**
   (`packages/atif-cli/src/atif_cli/converter_adapter.py:32-33`), which is what makes it readable by atif-duck's
   `LOSS_REPORT_COLUMNS` projection at `packages/atif-duck/src/atif_duck/domain/raw_readers.py:77-90`.
@@ -914,7 +914,7 @@ rather than skipping a file that no longer contains the current version; the gua
   `record_counts` and `gaps_observed` stay `JSON` because they are an enum-keyed dict and a sorted
   list of enum values.
 - **The `meta.json` provenance record**: written at
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:642-668`, projected at
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:689-715`, projected at
   `packages/atif-duck/src/atif_duck/domain/raw_readers.py:99-121`. `harbor_version` (the vendored
   models' upstream release) and `converter_version` (the `atif-sql` release) are supplied by the
   CLI (`packages/atif-cli/src/atif_cli/app.py:986` and `:991`), so the corpus records which

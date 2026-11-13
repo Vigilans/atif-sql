@@ -1276,6 +1276,7 @@ def status(
     from atif_corpus.application.materialize import preview_pass, read_watermark
     from atif_corpus.domain.layout import CorpusLayout
     from atif_corpus.domain.source_layout import layout_for
+    from atif_corpus.infrastructure.hostname import machine_hostname
     from atif_duck.domain.columnar import COLUMNAR_SCHEMA_VERSION
     from atif_duck.infrastructure.columnar import columnar_coverage
 
@@ -1283,7 +1284,10 @@ def status(
     layout = CorpusLayout(corpus_root=settings.corpus_root)
     quiesce = quiesce_seconds if quiesce_seconds is not None else settings.quiesce_seconds
 
-    watermark = read_watermark(layout.watermark_path)
+    relocatable_pass = relocatable if relocatable is not None else settings.relocatable
+    watermark = read_watermark(
+        layout.watermark_path, host=machine_hostname() if relocatable_pass else None
+    )
     # Planned as a default `materialize` would plan it.
     preview = preview_pass(
         source_root=settings.source_root,
@@ -1292,7 +1296,7 @@ def status(
         converter_schema=CONVERTER_SCHEMA_VERSION,
         quiesce_seconds=quiesce,
         source_layout=layout_for(settings.agent),
-        relocatable=relocatable if relocatable is not None else settings.relocatable,
+        relocatable=relocatable_pass,
     )
     plan = preview.plan
     source_sessions = (*plan.to_materialize, *plan.up_to_date, *plan.skipped_live)

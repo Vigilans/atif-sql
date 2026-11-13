@@ -326,7 +326,7 @@ The console-script entry point behind the `atif-sql` command; it replaces loguru
 with WARNING-and-up (`ATIF_SQL_LOG_LEVEL` widens it) so routine reads keep stderr quiet, then hands
 off to the cyclopts app and turns a cyclopts usage error into exit `64`.
 
-`packages/atif-cli/src/atif_cli/app.py:2539-2572`
+`packages/atif-cli/src/atif_cli/app.py:2543-2576`
 
 ### materialize
 
@@ -362,7 +362,7 @@ atif-converter.
 `converter` into each worker; `worker_setup` is the composition root's per-process hook (atif-cli
 uses it to install its stderr log sink). The default `1` is the inline path.
 
-`packages/atif-corpus/src/atif_corpus/application/materialize.py:1467-1790`
+`packages/atif-corpus/src/atif_corpus/application/materialize.py:1514-1843`
 
 ### MaterializationReport
 
