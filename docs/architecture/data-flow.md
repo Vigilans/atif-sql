@@ -2,17 +2,17 @@
 
 The distribution declares exactly one entry point, the console script
 `atif-sql = "atif_cli.app:main"` (`pyproject.toml:74`), and the `main` it names
-installs a WARNING-and-up loguru sink and hands control to cyclopts (`packages/atif-cli/src/atif_cli/app.py:2529`).
+installs a WARNING-and-up loguru sink and hands control to cyclopts (`packages/atif-cli/src/atif_cli/app.py:2534`).
 Every process below therefore begins as a CLI invocation; there is no HTTP, RPC, or queue surface
 to enter through.
 
 The flows below either produce the corpus or consume it: `materialize` fills
-`<corpus_root>/sessions/` (`:878`), `analyze` fills `<corpus_root>/analytics/` (`:1716`), and
-`query` binds both and runs caller SQL over them (`:1375`). The other commands are subsets of
-these flows: `convert` (`:690`) is one iteration of flow 1's inner loop, `search` (`:2114`)
-re-enters flow 2's registration at `:2217` and adds one kNN statement, `embed` (`:1884`) writes the
-vector store that flow 2 and `search` read, `schema` (`:2455`) and `examples` (`:2363`) answer
-from static catalog data, and `status` (`:1197`) replays materialize's plan and reads the lake's
+`<corpus_root>/sessions/` (`:878`), `analyze` fills `<corpus_root>/analytics/` (`:1721`), and
+`query` binds both and runs caller SQL over them (`:1380`). The other commands are subsets of
+these flows: `convert` (`:690`) is one iteration of flow 1's inner loop, `search` (`:2119`)
+re-enters flow 2's registration at `:2222` and adds one kNN statement, `embed` (`:1889`) writes the
+vector store that flow 2 and `search` read, `schema` (`:2460`) and `examples` (`:2368`) answer
+from static catalog data, and `status` (`:1202`) replays materialize's plan and reads the lake's
 vitals without writing anything.
 
 `materialize` also keeps the DuckLake beside the corpora current (flow 1, step 10), and `query`
@@ -26,9 +26,9 @@ catalog copy.
 1. The `materialize` command resolves `CorpusSettings` (pydantic-settings, env prefix
    `ATIF_SQL_`), then injects what the pure use case will not own: the
    `ConverterPort` adapter, the wall-clock instant, and the harbor / converter version pins
-   stamped into every `meta.json` (`packages/atif-cli/src/atif_cli/app.py:973-986`).
+   stamped into every `meta.json` (`packages/atif-cli/src/atif_cli/app.py:977-990`).
 2. One pass through the corpus use case runs scan, plan, convert, and write in that order and
-   returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1430`).
+   returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1447`).
 3. The scanner discovers every session under the raw transcript root and separates unreadable
    sessions from absent ones, so a `stat` failure is never mistaken for a deletion (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:224`). It walks whichever layout the
    agent selects, descending exactly `transcript_depth` directories and reporting an unlistable one at
@@ -37,9 +37,9 @@ catalog copy.
    the previous watermark and the quiescence policy; `force` overrides staleness but never
    liveness (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:187`).
 5. For each planned session the use case calls `converter.convert` across the port; one session's
-   exception is caught and recorded so a single bad transcript cannot abort the sync (`packages/atif-corpus/src/atif_corpus/application/materialize.py:716`).
+   exception is caught and recorded so a single bad transcript cannot abort the sync (`packages/atif-corpus/src/atif_corpus/application/materialize.py:728`).
    By default the sessions are spread over a process pool (`--workers`, default `min(8, cpu_count)`)
-   whose workers each hold a pickled copy of the adapter; the pool changes no output byte (`:854`).
+   whose workers each hold a pickled copy of the adapter; the pool changes no output byte (`:871`).
 6. The adapter that satisfies `ConverterPort` lives in atif-cli because the independence contract
    forbids atif-corpus from importing atif-converter; it raises rather than returning an invalid
    trajectory (`packages/atif-cli/src/atif_cli/converter_adapter.py:141-142`).
@@ -56,8 +56,8 @@ catalog copy.
    decompressing to the plain file an earlier version wrote). No per-session parquet is written; the CLI wires no
    `ArtifactProducer`. `meta.json` is written last and the whole directory swaps into
    `sessions/<id>/`, so a reader sees one complete generation or the other
-   (`packages/atif-corpus/src/atif_corpus/application/materialize.py:632-656`); the watermark advances
-   only for sessions that succeeded (`:1693`).
+   (`packages/atif-corpus/src/atif_corpus/application/materialize.py:638-666`); the watermark advances
+   only for sessions that succeeded (`:1716`).
 10. After the swaps, still in the parent process, the pass calls the `SessionSink` (atif-duck's
    `DuckLakeSessionSink`, plugged in by the CLI unless `--no-lake`) once. The sink compares every
    session's `meta.json` with the lake's `session_meta` row and replaces, in batches, the rows of
@@ -110,9 +110,9 @@ sequenceDiagram
 
 1. The `query` command resolves the corpus root and reads the active embedder's `(model_id, dim)`
    without constructing the embedder, so the vector store's stamped identity can be checked before
-   anything binds over it (`packages/atif-cli/src/atif_cli/app.py:1537`).
+   anything binds over it (`packages/atif-cli/src/atif_cli/app.py:1542`).
 2. A DuckDB connection is opened with no path or URI, so the engine runs in-process against
-   memory (`:1550`).
+   memory (`:1555`).
 3. Registration builds the whole catalog on that connection in a fixed order (raw TEMP tables,
    base views, VSS, macros, the authorship macro and views, analytics views, analytics macros),
    because each later stage binds against the earlier one at `CREATE` time (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2261-2282`).
@@ -190,9 +190,9 @@ sequenceDiagram
 
 1. The `analyze` command loads `AnalyticsSettings`, reuses the same corpus-root resolution the
    other commands share, and stamps explicit `--max-sessions` / `--max-cost-usd` ceilings over the
-   env defaults so a crontab line carries its spend cap visibly (`packages/atif-cli/src/atif_cli/app.py:1791-1796`).
+   env defaults so a crontab line carries its spend cap visibly (`packages/atif-cli/src/atif_cli/app.py:1796-1801`).
 2. The command opens the lake's session source when the lake holds the corpus
-   (`packages/atif-cli/src/atif_cli/app.py:1798`, `packages/atif-cli/src/atif_cli/lake_sessions.py:109`),
+   (`packages/atif-cli/src/atif_cli/app.py:1803`, `packages/atif-cli/src/atif_cli/lake_sessions.py:109`),
    and the pipeline runner builds one shared `CorpusReader` over it (or over the file source)
    for every stage and loops the LLM stages (classify, conflicts, friction, perceived); the
    `skip_*` flags subtract stages (`packages/atif-analytics/src/atif_analytics/application/analyze.py:62`).

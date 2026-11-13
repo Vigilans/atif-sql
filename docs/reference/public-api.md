@@ -181,7 +181,7 @@ class CorpusSettings(BaseSettings):
 
 Env-driven settings for corpus materialization, read under the `ATIF_SQL_` prefix.
 
-`packages/atif-corpus/src/atif_corpus/infrastructure/settings.py:88-130`
+`packages/atif-corpus/src/atif_corpus/infrastructure/settings.py:88-133`
 
 ### DomainError
 
@@ -326,7 +326,7 @@ The console-script entry point behind the `atif-sql` command; it replaces loguru
 with WARNING-and-up (`ATIF_SQL_LOG_LEVEL` widens it) so routine reads keep stderr quiet, then hands
 off to the cyclopts app and turns a cyclopts usage error into exit `64`.
 
-`packages/atif-cli/src/atif_cli/app.py:2529-2562`
+`packages/atif-cli/src/atif_cli/app.py:2534-2567`
 
 ### materialize
 
@@ -350,6 +350,7 @@ def materialize(
     expected_meta: Mapping[str, object] | None = None,
     converter_schema: int | None = None,
     session_sink: SessionSink | None = None,
+    relocatable: bool = False,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> MaterializationReport:
 ```
@@ -361,7 +362,7 @@ atif-converter.
 `converter` into each worker; `worker_setup` is the composition root's per-process hook (atif-cli
 uses it to install its stderr log sink). The default `1` is the inline path.
 
-`packages/atif-corpus/src/atif_corpus/application/materialize.py:1430-1742`
+`packages/atif-corpus/src/atif_corpus/application/materialize.py:1447-1765`
 
 ### MaterializationReport
 
@@ -374,7 +375,7 @@ What one materialization pass did, for logs and the CLI status line. `convert_se
 per-session sum and `workers` the pool size the pass used, so with several workers
 `convert_seconds` can exceed `total_seconds`, the wall clock.
 
-`packages/atif-corpus/src/atif_corpus/application/materialize.py:207-305`
+`packages/atif-corpus/src/atif_corpus/application/materialize.py:212-310`
 
 ### message_prompt
 

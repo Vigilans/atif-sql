@@ -885,6 +885,7 @@ def materialize(
     sessions: str | None = None,
     workers: int | None = None,
     lake: Annotated[bool, cyclopts.Parameter(negative="--no-lake")] = True,
+    relocatable: bool | None = None,
     fmt: Annotated[OutputFormat, cyclopts.Parameter(name="--format")] = OutputFormat.AUTO,
 ) -> None:
     """Sync the materialized corpus with the raw transcript corpus.
@@ -935,6 +936,9 @@ def materialize(
         with the sessions this pass published in ``lake_pending``, and the
         next pass with the lake syncs whatever is still behind. ``--no-lake``
         skips the lake; ``status`` counts the sessions that leaves behind.
+    relocatable
+        Write a corpus several machines can share: each session records this machine as
+        ``meta.host``. Default from ``ATIF_SQL_RELOCATABLE``.
     fmt
         Report format; ``auto`` = human lines on TTY, JSON on a pipe.
     """
@@ -1009,6 +1013,7 @@ def materialize(
                 if lake
                 else None
             ),
+            relocatable=relocatable if relocatable is not None else settings.relocatable,
         )
     except SuspiciousEmptyScanError as exc:
         # The corpus's loudest data-loss tripwire, so it gets a code an

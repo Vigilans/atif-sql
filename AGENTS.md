@@ -161,6 +161,9 @@ Rules of the road:
   also how two agents share one corpus: each session's `meta.agent` names its
   agent, and a pass marks, retains and re-converts only its own agent's
   sessions, so it never marks the other agent's as source-removed.
+  `materialize --relocatable` (`ATIF_SQL_RELOCATABLE`) writes a corpus several
+  machines can share: each session it converts records its machine as
+  `meta.host`.
 - The corpus never deletes a session. When a source transcript disappears
   (Claude Code and Codex expire old ones), materialize keeps the session's
   artifacts and rewrites its `meta.json` once with `source_present: false` and

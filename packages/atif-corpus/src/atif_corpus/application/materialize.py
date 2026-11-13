@@ -103,6 +103,10 @@ those alone, an ``empty_sessions.json`` entry carries its agent so another
 agent's pass keeps it, and ``watermark.json`` entries outside this pass's
 ``source_root`` are carried forward untouched.
 
+A relocatable pass (``relocatable=True``) writes a corpus several machines can
+share. It records the machine it runs on as ``meta.host``, which with
+``agent`` and ``session_id`` names the original transcript.
+
 A failing session is recorded in the report and skipped — one broken
 transcript must never abort a corpus sync.
 
@@ -162,6 +166,7 @@ from atif_corpus.infrastructure.atomic import (
     write_json_zstd_atomic,
     write_text_zstd_atomic,
 )
+from atif_corpus.infrastructure.hostname import machine_hostname
 from atif_corpus.infrastructure.scanner import scan_sources
 from atif_corpus.infrastructure.source_archive import (
     META_SOURCE_ARCHIVE_KEY,
@@ -537,6 +542,7 @@ def _write_session(
     converter_version: str,
     converter_schema: int | None = None,
     agent: str,
+    host: str | None = None,
     artifact_producer: ArtifactProducer | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> tuple[float, float]:
@@ -643,6 +649,10 @@ def _write_session(
                 # A shared corpus holds several agents' sessions, and this is
                 # how a pass tells its own from the others' (`_session_agent`).
                 "agent": agent,
+                # The machine a relocatable pass ran on, which the session's
+                # paths belong to; with agent and session_id it names the
+                # original transcript.
+                **({} if host is None else {"host": host}),
                 **{
                     key: job.source_meta[key]
                     for key in ("source_present", "source_removed_at")
@@ -692,6 +702,7 @@ def _attempt_session(
     converter_version: str,
     converter_schema: int | None = None,
     agent: str,
+    host: str | None = None,
     artifact_producer: ArtifactProducer | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> _SessionOutcome:
@@ -706,6 +717,7 @@ def _attempt_session(
             converter_version=converter_version,
             converter_schema=converter_schema,
             agent=agent,
+            host=host,
             artifact_producer=artifact_producer,
             convert_clock=convert_clock,
         )
@@ -764,6 +776,7 @@ def _worker_attempt(
     converter_version: str,
     converter_schema: int | None = None,
     agent: str,
+    host: str | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> _SessionOutcome:
     """Pool task: convert and write one session with this worker's converter."""
@@ -779,6 +792,7 @@ def _worker_attempt(
         converter_version=converter_version,
         converter_schema=converter_schema,
         agent=agent,
+        host=host,
         artifact_producer=_worker_artifact_producer,
         convert_clock=convert_clock,
     )
@@ -792,6 +806,7 @@ class _Provenance(TypedDict):
     converter_version: str
     converter_schema: int | None
     agent: str
+    host: str | None
 
 
 def _attempt_sessions(
@@ -806,6 +821,7 @@ def _attempt_sessions(
     converter_version: str,
     converter_schema: int | None = None,
     agent: str,
+    host: str | None = None,
     artifact_producer: ArtifactProducer | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> tuple[list[_SessionOutcome], int]:
@@ -837,6 +853,7 @@ def _attempt_sessions(
         "converter_version": converter_version,
         "converter_schema": converter_schema,
         "agent": agent,
+        "host": host,
     }
     pool_size = min(workers, len(jobs))
     if pool_size <= 1:
@@ -1446,6 +1463,7 @@ def materialize(
     expected_meta: Mapping[str, object] | None = None,
     converter_schema: int | None = None,
     session_sink: SessionSink | None = None,
+    relocatable: bool = False,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> MaterializationReport:
     """Run one materialization pass; see the module docstring for the shape.
@@ -1523,6 +1541,10 @@ def materialize(
         after the swaps and in this process to bring its copy in step with the
         corpus. A sink failure is reported (``sink_error``,
         ``sink_pending_session_ids``), never raised.
+    relocatable
+        Write a corpus several machines can share: every session it writes
+        records :func:`~atif_corpus.infrastructure.hostname.machine_hostname`
+        as ``meta.host``.
 
     Raises
     ------
@@ -1638,6 +1660,7 @@ def materialize(
         converter_version=converter_version,
         converter_schema=converter_schema,
         agent=agent,
+        host=machine_hostname() if relocatable else None,
         artifact_producer=artifact_producer,
         convert_clock=convert_clock,
     )

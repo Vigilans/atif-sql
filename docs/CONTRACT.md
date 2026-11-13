@@ -36,7 +36,7 @@ proofs are out of scope for the workspace.
     meta.json                      # {session_id, source_mtime_ns, source_files: [...],
                                    #  harbor_version, converter_version, converter_schema,
                                    #  materialized_at,
-                                   #  agent, source_present, source_removed_at?,
+                                   #  agent, host?, source_present, source_removed_at?,
                                    #  source_archive?, columnar_schema? (old layout)}
     source/<path>.zst              # raw source archive: one zstd file per source file,
                                    #  <path> relative to the main transcript's parent
@@ -128,6 +128,11 @@ proofs are out of scope for the workspace.
   from its restored archive (reported as `from_archive`), keeping its original
   source_* keys and its archive. A session retained before archives existed
   keeps its artifacts and can't be re-converted.
+- meta.host: the machine a relocatable pass converted the session on: the
+  short host name joined to its DNS domain, or alone when the domain is
+  missing, .local or .localdomain; with meta.agent and session_id it
+  identifies which machine holds the original transcript. Only a
+  relocatable pass (`materialize --relocatable`) writes it.
 - Empty sessions: a transcript with no convertible record is recorded in
   empty_sessions.json keyed by session id with the generation it was checked
   under; its watermark advances and it's reported as `empty`, not `failed`.

@@ -106,6 +106,9 @@ class CorpusSettings(BaseSettings):
     #: Processes for a materialize pass's convert+write stage
     #: (``ATIF_SQL_MATERIALIZE_WORKERS``). ``1`` is the inline reference path.
     materialize_workers: int = Field(default_factory=default_materialize_workers, ge=1)
+    #: Write a corpus several machines can share (``ATIF_SQL_RELOCATABLE``):
+    #: each session records this machine as ``meta.host``.
+    relocatable: bool = False
 
     @model_validator(mode="after")
     def _apply_agent_defaults(self) -> CorpusSettings:
