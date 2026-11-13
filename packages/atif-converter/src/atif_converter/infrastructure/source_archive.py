@@ -63,7 +63,7 @@ _CHUNK_BYTES = 1024 * 1024
 class ArchivedSourceFile:
     """One archived file: where it came from, and what its uncompressed bytes were."""
 
-    #: POSIX path relative to the main transcript's parent directory.
+    #: POSIX path relative to the writer's ``base``.
     relative_path: str
     #: Uncompressed size in bytes.
     size: int
@@ -74,10 +74,11 @@ class ArchivedSourceFile:
 class SourceArchiveWriter:
     """Collects one session's archive under ``archive_dir``.
 
-    ``base`` is the main transcript's parent directory; every member's name is
-    its path relative to ``base``, so the archive restores to the same shape
-    (``<session>.jsonl`` beside ``<session>/subagents/...``) the converter
-    discovers side files from.
+    ``base`` is the main transcript's parent directory, or for a session whose
+    files span several directories (a Codex thread's rollouts) the deepest one
+    holding them all; every member's name is its path relative to ``base``, so
+    the archive restores to the same shape (``<session>.jsonl`` beside
+    ``<session>/subagents/...``) the converter discovers side files from.
     """
 
     def __init__(self, archive_dir: Path, *, base: Path) -> None:

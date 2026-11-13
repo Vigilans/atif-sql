@@ -162,7 +162,7 @@ atif-converter, pydantic through atif-corpus) are deferred into the command bodi
   `duckdb.Error` (`packages/atif-cli/src/atif_cli/duck_errors.py:32`).
 - `packages/atif-cli/src/atif_cli/converter_adapter.py`: `RealConverter` adapts
   atif-converter's two use cases, one per agent, to atif-corpus's port, the one place allowed to
-  import both (`packages/atif-cli/src/atif_cli/converter_adapter.py:80`).
+  import both (`packages/atif-cli/src/atif_cli/converter_adapter.py:82`).
 - `packages/atif-cli/src/atif_cli/errors.py`: `EXIT_CODES` and the `ClassifiedError` shape,
   pure and free of any `atif_*` import (`packages/atif-cli/src/atif_cli/errors.py:30`, `:70`).
 - `packages/atif-cli/src/atif_cli/__main__.py`: `python -m atif_cli` reaching the same `main`
@@ -223,7 +223,7 @@ per-session reader otherwise.
 ## atif-corpus
 
 One materialization pass is sweep, scan, plan, convert, write, advance watermark, and `materialize` is
-that pass (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1497`). The decision half
+that pass (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`). The decision half
 is pure: the domain never stats a file and never reads a clock, so `build_plan` partitions scanned
 sessions into to-materialize, up-to-date, and skipped-live deterministically from mtimes in epoch
 nanoseconds plus an injected now (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`). The
@@ -245,7 +245,7 @@ The agent enum itself is an AST-pinned twin of the converter's, since the indepe
 forbids the import (`packages/atif-corpus/src/atif_corpus/domain/agents.py:25`).
 
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py`: the pass itself
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1497`), the report value object
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`), the report value object
   (`:220`), and the public `read_watermark` its consumers call (`:424`).
 - `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py`: the only place this
   member stats the source corpus
@@ -283,9 +283,9 @@ public ATIF data classes (`packages/atif-converter/src/atif_converter/domain/cla
 reached through `convert_loaded_claude_code_session`, which takes the records the use case already
 read (`packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:72`), and
 validated with the vendored copy of harbor's `TrajectoryValidator`
-(`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:76`). The Codex path is
+(`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:78`). The Codex path is
 the same shape one module over: `convert_codex_and_audit`
-(`packages/atif-converter/src/atif_converter/application/convert_codex.py:144`) over
+(`packages/atif-converter/src/atif_converter/application/convert_codex.py:148`) over
 `convert_codex_records` (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:924`),
 one rollout in and one trajectory out by construction. harbor's own private converters are the
 parity ORACLE, reached from the tests only (`packages/atif-converter/tests/harbor_oracle.py:118`, `:135`),
@@ -327,7 +327,7 @@ table doesn't price is NULL. litellm is a dev dependency, for the identity test 
   imports it (`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:5-7`).
 - `packages/atif-converter/src/atif_converter/infrastructure/raw_records.py`: the one raw
   reader the census, edges emitter, and enrichment share, with `mutated_files` as the race check
-  (`packages/atif-converter/src/atif_converter/infrastructure/raw_records.py:320`, `:382`).
+  (`packages/atif-converter/src/atif_converter/infrastructure/raw_records.py:320`, `:414`).
 - `packages/atif-converter/src/atif_converter/application/convert_and_audit.py`: the use
   case (`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220`) and its
   refusal on any mid-window mutation (`:199`).

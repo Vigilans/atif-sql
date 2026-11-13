@@ -117,7 +117,7 @@ process exit codes at the CLI edge (`packages/atif-cli/src/atif_cli/errors.py:30
 
 Nodes are the uv workspace members. Every edge is an import confirmed at an import site.
 There is no `atif-corpus` to `atif-converter` edge: the independence contract forbids it, and
-`RealConverter` in `packages/atif-cli/src/atif_cli/converter_adapter.py:80` satisfies
+`RealConverter` in `packages/atif-cli/src/atif_cli/converter_adapter.py:82` satisfies
 `ConverterPort` by importing both from the composition root (`:64`, `:69`). `atif-duck`,
 `atif-analytics`, and `atif-embed` exchange data through corpus files on disk, never through an
 import.

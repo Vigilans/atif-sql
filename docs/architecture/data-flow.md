@@ -28,7 +28,7 @@ catalog copy.
    `ConverterPort` adapter, the wall-clock instant, and the harbor / converter version pins
    stamped into every `meta.json` (`packages/atif-cli/src/atif_cli/app.py:973-986`).
 2. One pass through the corpus use case runs scan, plan, convert, and write in that order and
-   returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1497`).
+   returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`).
 3. The scanner discovers every session under the raw transcript root and separates unreadable
    sessions from absent ones, so a `stat` failure is never mistaken for a deletion (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:206`). It walks whichever layout the
    agent selects, descending exactly `transcript_depth` directories and reporting an unlistable one at
@@ -37,14 +37,14 @@ catalog copy.
    the previous watermark and the quiescence policy; `force` overrides staleness but never
    liveness (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`).
 5. For each planned session the use case calls `converter.convert` across the port; one session's
-   exception is caught and recorded so a single bad transcript cannot abort the sync (`packages/atif-corpus/src/atif_corpus/application/materialize.py:793`).
+   exception is caught and recorded so a single bad transcript cannot abort the sync (`packages/atif-corpus/src/atif_corpus/application/materialize.py:813`).
    By default the sessions are spread over a process pool (`--workers`, default `min(8, cpu_count)`)
-   whose workers each hold a pickled copy of the adapter; the pool changes no output byte (`:931`).
+   whose workers each hold a pickled copy of the adapter; the pool changes no output byte (`:951`).
 6. The adapter that satisfies `ConverterPort` lives in atif-cli because the independence contract
    forbids atif-corpus from importing atif-converter; it raises rather than returning an invalid
-   trajectory (`packages/atif-cli/src/atif_cli/converter_adapter.py:129-130`).
+   trajectory (`packages/atif-cli/src/atif_cli/converter_adapter.py:141-142`).
 7. Under `--agent codex` the same step runs `convert_codex_and_audit`, which reads the one rollout it
-   is given and converts it with our ported Codex converter (`packages/atif-converter/src/atif_converter/application/convert_codex.py:144`).
+   is given and converts it with our ported Codex converter (`packages/atif-converter/src/atif_converter/application/convert_codex.py:148`).
 8. `convert_and_audit` reads the source files once (fingerprinted and parsed in the same pass,
    `harbor_adapter.read_session`), converts those records with our ported converter through the
    seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py`
@@ -56,8 +56,8 @@ catalog copy.
    decompressing to the plain file an earlier version wrote). No per-session parquet is written; the CLI wires no
    `ArtifactProducer`. `meta.json` is written last and the whole directory swaps into
    `sessions/<id>/`, so a reader sees one complete generation or the other
-   (`packages/atif-corpus/src/atif_corpus/application/materialize.py:706-733`); the watermark advances
-   only for sessions that succeeded (`:1778`).
+   (`packages/atif-corpus/src/atif_corpus/application/materialize.py:726-753`); the watermark advances
+   only for sessions that succeeded (`:1798`).
 10. Before the first swap, the pass records every session it may publish or mark in
    `<corpus>/sink_pending.json`. After the swaps, still in the parent process, it hands the
    `SessionSink` (atif-duck's `DuckLakeSessionSink`, plugged in by the CLI unless `--no-lake`) every

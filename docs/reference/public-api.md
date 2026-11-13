@@ -362,7 +362,7 @@ atif-converter.
 `converter` into each worker; `worker_setup` is the composition root's per-process hook (atif-cli
 uses it to install its stderr log sink). The default `1` is the inline path.
 
-`packages/atif-corpus/src/atif_corpus/application/materialize.py:1497-1826`
+`packages/atif-corpus/src/atif_corpus/application/materialize.py:1517-1846`
 
 ### MaterializationReport
 

@@ -129,7 +129,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Mapping, Sequence
+    from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 
 from atif_corpus.domain.generation import generation_matches
 from atif_corpus.domain.layout import (
@@ -142,7 +142,7 @@ from atif_corpus.domain.layout import (
     CorpusLayout,
     stored_filename,
 )
-from atif_corpus.domain.ports import EmptySourceError
+from atif_corpus.domain.ports import EmptySourceError, source_base
 from atif_corpus.domain.sessions import (
     MaterializationPlan,
     QuiescencePolicy,
@@ -542,16 +542,27 @@ class _Job:
     source_meta: dict[str, Any]
     source_dir: str
     session_jsonl: str | None = None
+    #: The session's other transcripts outside the main one's side dir (a
+    #: Codex thread's other rollouts), handed to the converter as its
+    #: ``source_files``.
+    source_files: tuple[str, ...] = ()
     #: The previous archive manifest, carried forward by an archive job. Plain
     #: dicts rather than read-only mappings because a job is pickled into the
     #: pool, and ``MappingProxyType`` does not pickle.
     previous_archive: dict[str, Any] | None = None
 
 
+def _other_transcripts(main: Path, paths: Iterable[Path]) -> tuple[Path, ...]:
+    """``paths`` minus ``main`` and everything under its side dir, sorted."""
+    side_dir = main.parent / main.stem
+    return tuple(sorted(path for path in paths if path != main and side_dir not in path.parents))
+
+
 def _live_job(session: SessionSource, source_root: Path) -> _Job:
     main = Path(session.session_jsonl)
+    others = _other_transcripts(main, (Path(path) for path in session.source_files))
     try:
-        source_dir = main.parent.relative_to(source_root).as_posix()
+        source_dir = source_base(main, others).relative_to(source_root).as_posix()
     except ValueError:
         # Only reachable with a scanner that yields paths outside its root;
         # fall back to the one component the converters read.
@@ -559,6 +570,7 @@ def _live_job(session: SessionSource, source_root: Path) -> _Job:
     return _Job(
         session_id=session.session_id,
         session_jsonl=session.session_jsonl,
+        source_files=tuple(str(path) for path in others),
         source_dir=source_dir,
         source_meta={
             "source_mtime_ns": session.newest_mtime_ns,
@@ -665,22 +677,30 @@ def _write_session(
             session_jsonl = restore_session_sources(
                 layout.session_dir(job.session_id), restore_root
             )
+            restored = _other_transcripts(
+                session_jsonl, (path for path in restore_root.rglob("*") if path.is_file())
+            )
             _link_or_copy_tree(layout.source_archive_dir(job.session_id), archive_dir)
             convert_started = convert_clock()
-            output = converter.convert(session_jsonl)
+            output = converter.convert(session_jsonl, source_files=restored)
             convert_elapsed = convert_clock() - convert_started
             archive_meta = {META_SOURCE_ARCHIVE_KEY: dict(job.previous_archive or {})}
         else:
             session_jsonl = Path(job.session_jsonl)
+            others = tuple(Path(path) for path in job.source_files)
             archive_dir.mkdir()
             convert_started = convert_clock()
-            output = converter.convert(session_jsonl, archive_dir=archive_dir)
+            output = converter.convert(session_jsonl, source_files=others, archive_dir=archive_dir)
             convert_elapsed = convert_clock() - convert_started
             if output.source_archive:
                 verify_archive_on_disk(archive_dir, output.source_archive)
                 archive_meta = {
                     META_SOURCE_ARCHIVE_KEY: archive_manifest(
-                        output.source_archive, source_dir=job.source_dir, main=session_jsonl.name
+                        output.source_archive,
+                        source_dir=job.source_dir,
+                        main=session_jsonl.relative_to(
+                            source_base(session_jsonl, others)
+                        ).as_posix(),
                     )
                 }
             else:

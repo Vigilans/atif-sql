@@ -276,8 +276,8 @@ numbers follow it as plain numbers.
 - `read_codex_rollout` is called at
   `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:66`.
 - `ARCHIVE_ZSTD_LEVEL` sets the compressor level at
-  `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:112`;
-  `ArchivedSourceFile` annotates `:86` and is constructed at `:121`.
+  `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:113`;
+  `ArchivedSourceFile` annotates `:87` and is constructed at `:122`.
 - `Compressed` is the return type of `measure_compressed` at
   `packages/atif-corpus/src/atif_corpus/infrastructure/compress_artifacts.py:114`
   and of `compress_in_place` on line 121, and is constructed at `:118` and
@@ -355,10 +355,10 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
   (`TABLE_FILENAME`).
 - `packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:46`
   (`staged_side_name`) and
-  `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:58`
+  `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:60`
   (`require_transcript_file`).
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:210`
-  (`MaterializationFailure`), `:321` (`DEFAULT_SINK_BATCH_SIZE`), and `:1414`
+  (`MaterializationFailure`), `:321` (`DEFAULT_SINK_BATCH_SIZE`), and `:1434`
   (`PassPreview`).
 - `packages/atif-corpus/src/atif_corpus/domain/layout.py:25`
   (`WATERMARK_FILENAME`), `:27` (`EMPTY_SESSIONS_FILENAME`), and `:30`

@@ -174,8 +174,10 @@ class TestSubagentLinks:
         sidecar = raw_records.discover_sidecar_files(parallel_subagent_session)[0]
         real_load = raw_records.load_session
 
-        def load_then_touch(session: Path) -> raw_records.LoadedSession:
-            loaded = real_load(session)
+        def load_then_touch(
+            session: Path, extra_files: tuple[Path, ...] = ()
+        ) -> raw_records.LoadedSession:
+            loaded = real_load(session, extra_files)
             sidecar.write_text(json.dumps({"agentType": "rewritten"}), encoding="utf-8")
             return loaded
 

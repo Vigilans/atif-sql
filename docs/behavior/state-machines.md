@@ -55,15 +55,15 @@ stateDiagram-v2
 - `failures --> to_materialize` is the retry, and it works only because `_advance_watermark` retains
   the failed session's entries. Staleness is "recorded set differs from scanned set", so the retained
   entry *is* the retry signal; dropping it would classify the session `up_to_date` forever
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1324-1331`).
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1344-1351`).
 - `up_to_date --> to_materialize: _unmaterialized_session_ids` is the crash-recovery edge. It is
   reachable exactly one way: a pass killed inside the directory swap, after the previous generation
   was renamed aside and before the new one landed. The watermark records source mtimes only and cannot
-  express a missing artifact directory, so the directory check is what force-replans it (`:1025-1031`).
+  express a missing artifact directory, so the directory check is what force-replans it (`:1045-1051`).
 - `empty_session_ids` isn't a failure state. A converter that raises `EmptySourceError` found a
   well-formed transcript with nothing to convert, so its watermark entries advance and
   `empty_sessions.json` records the generation it was checked under
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1742-1745`, `:1360-1384`). The
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1762-1765`, `:1380-1404`). The
   next pass counts it `up_to_date` until its source or the converter schema moves.
 - `unreadable_session_ids` is a parking state, and a session can starve in it. A transient
   stat failure clears next pass; a permanent one (a side-file left at mode 000) leaves the session
@@ -72,19 +72,19 @@ stateDiagram-v2
 - No state here deletes a session. `removed_session_ids` lists the sessions whose source vanished this
   pass: `_retain_sourceless_sessions` keeps the corpus session directory and rewrites its `meta.json`
   once with `source_present: false` and `source_removed_at`
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1255-1260`), because the agent expires
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1275-1280`), because the agent expires
   old transcripts and the corpus holds the only copy left (`:46-49`). Later passes count the session in
   `retained_count`. `_advance_watermark` drops its entries, so a source that comes back reads as stale
-  and converts again from the live file (`:1333-1336`). A retained session whose recorded generation
-  is stale re-converts from its raw source archive, when it has one, and stays marked (`:1270-1307`).
-  A session whose sources merely could not be read is never marked source-removed (`:1202-1208`), and
+  and converts again from the live file (`:1353-1356`). A retained session whose recorded generation
+  is stale re-converts from its raw source archive, when it has one, and stays marked (`:1290-1327`).
+  A session whose sources merely could not be read is never marked source-removed (`:1222-1228`), and
   a scan that found zero sessions over a non-empty corpus raises `SuspiciousEmptyScanError` instead of
-  marking every session (`:1661-1667`).
-- Transition sites: `scan_sources` at `:1622`; `QuiescencePolicy` at `:1699`; `_write_session` at `:777`;
-  `MaterializationFailure` at `:1740`; `_retain_sourceless_sessions` (it keeps and marks, never deletes); `_advance_watermark` at
-  `:1778`.
+  marking every session (`:1681-1687`).
+- Transition sites: `scan_sources` at `:1642`; `QuiescencePolicy` at `:1719`; `_write_session` at `:797`;
+  `MaterializationFailure` at `:1760`; `_retain_sourceless_sessions` (it keeps and marks, never deletes); `_advance_watermark` at
+  `:1798`.
 
-Defined at: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1497`
+Defined at: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`
 
 ## Embed store schema version
 

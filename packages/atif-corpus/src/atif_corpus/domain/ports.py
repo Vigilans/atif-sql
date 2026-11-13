@@ -107,17 +107,42 @@ class ConverterPort(Protocol):
     the one exception with its own meaning: the session is empty, not broken.
     """
 
-    def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> ConversionOutput:
+    def convert(
+        self,
+        session_jsonl: Path,
+        *,
+        source_files: Sequence[Path] = (),
+        archive_dir: Path | None = None,
+    ) -> ConversionOutput:
         """Convert one session (main JSONL + its side-files) to artifacts.
 
+        ``source_files`` are the session's other transcripts when they do not
+        sit under the main transcript's side dir, as the scanner grouped them
+        (a Codex session's other rollouts). A Claude Code session passes none.
+
         With ``archive_dir``, also write a zstd copy of every source file of the
-        session under it, named by its path relative to ``session_jsonl``'s
-        parent plus ``.zst``, and list them in
+        session under it, named by its path relative to
+        :func:`source_base` plus ``.zst``, and list them in
         :attr:`ConversionOutput.source_archive`. The copy must be of the bytes
         the artifacts were built from; an adapter that cannot promise that
         should archive nothing rather than something else.
         """
         ...
+
+
+def source_base(session_jsonl: Path, source_files: Sequence[Path] = ()) -> Path:
+    """The directory a session's source files are named relative to.
+
+    The main transcript's parent, which holds its side dir too; for a session
+    whose ``source_files`` lie elsewhere (a Codex thread spanning several date
+    directories), the deepest directory holding all of them. The archive
+    manifest and the converter's ``source_file`` names both use it.
+    """
+    base = session_jsonl.parent
+    for path in source_files:
+        while base not in path.parents and base != base.parent:
+            base = base.parent
+    return base
 
 
 class ArtifactProducer(Protocol):

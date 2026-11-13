@@ -8,7 +8,7 @@ import dataclasses
 import json
 import os
 import shutil
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, TypedDict, Unpack, override
 
@@ -1016,8 +1016,14 @@ class _EventsConverter(FakeConverter):
     """A fake converter whose output carries two session_events lines."""
 
     @override
-    def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> ConversionOutput:
-        output = super().convert(session_jsonl, archive_dir=archive_dir)
+    def convert(
+        self,
+        session_jsonl: Path,
+        *,
+        source_files: Sequence[Path] = (),
+        archive_dir: Path | None = None,
+    ) -> ConversionOutput:
+        output = super().convert(session_jsonl, source_files=source_files, archive_dir=archive_dir)
         return dataclasses.replace(
             output,
             events_lines=['{"seq":0,"event_type":"mode"}', '{"seq":1,"event_type":"cost-state"}'],

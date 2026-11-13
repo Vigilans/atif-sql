@@ -135,7 +135,7 @@ session id, and `k` as parameters and formats only the width `len(query_vector)`
 fragments into `_SEARCH_SQL` (`:2330`, `:2347-2354`). It sets no complexity ratchet: `search` takes
 seven parameters and the widest command, `analyze`, takes 13, while `max-args = 19` sits at
 `atif_corpus.application.materialize.materialize`
-(`packages/atif-corpus/src/atif_corpus/application/materialize.py:1497`). Its uncovered units
+(`packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`). Its uncovered units
 concentrate in the commands that reach outward: `analyze`
 (`packages/atif-cli/src/atif_cli/app.py:1725-1826`), `convert` (`:690-772`), and `status`
 (`:1211-1380`), with a few in `search` (`:2123-2303`) and `main` (`:2538-2571`). `analyze` always

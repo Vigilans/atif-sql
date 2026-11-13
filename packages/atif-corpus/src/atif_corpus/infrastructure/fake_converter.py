@@ -18,25 +18,34 @@ from typing import TYPE_CHECKING, Any
 
 import zstandard
 
-from atif_corpus.domain.ports import ArchivedSource, ConversionOutput, EmptySourceError
+from atif_corpus.domain.ports import (
+    ArchivedSource,
+    ConversionOutput,
+    EmptySourceError,
+    source_base,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
-def _archive_sources(session_jsonl: Path, archive_dir: Path) -> tuple[ArchivedSource, ...]:
-    """Write a zstd copy of the main file and every file under its side dir.
+def _archive_sources(
+    session_jsonl: Path, source_files: Sequence[Path], archive_dir: Path
+) -> tuple[ArchivedSource, ...]:
+    """Write a zstd copy of the main file, every file under its side dir, and ``source_files``.
 
     The fake reads the files itself; the real adapter takes the bytes from the
     converter's verifying read instead (see ``atif_converter.infrastructure
     .source_archive``). The on-disk shape is the same, which is all the use
     case sees.
     """
-    base = session_jsonl.parent
-    side_dir = base / session_jsonl.stem
+    base = source_base(session_jsonl, source_files)
+    side_dir = session_jsonl.parent / session_jsonl.stem
     paths = [session_jsonl]
     if side_dir.is_dir():
         paths.extend(p for p in sorted(side_dir.rglob("*")) if p.is_file() and not p.is_symlink())
+    paths.extend(sorted(source_files))
     archived: list[ArchivedSource] = []
     for path in paths:
         data = path.read_bytes()
@@ -124,7 +133,13 @@ class FakeConverter:
         #: Every session path convert() was asked about, in call order.
         self.converted: list[Path] = []
 
-    def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> ConversionOutput:
+    def convert(
+        self,
+        session_jsonl: Path,
+        *,
+        source_files: Sequence[Path] = (),
+        archive_dir: Path | None = None,
+    ) -> ConversionOutput:
         """Fabricate contract-shaped artifacts for ``session_jsonl``."""
         session_id = session_jsonl.stem
         self.converted.append(session_jsonl)
@@ -169,6 +184,8 @@ class FakeConverter:
             loss_report_dict=loss_report,
             edges_lines=[json.dumps(edge, separators=(",", ":"))],
             source_archive=(
-                () if archive_dir is None else _archive_sources(session_jsonl, archive_dir)
+                ()
+                if archive_dir is None
+                else _archive_sources(session_jsonl, source_files, archive_dir)
             ),
         )

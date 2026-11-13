@@ -214,9 +214,17 @@ class TestAFailingSink:
 
         class Watching(FakeConverter):
             @override
-            def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> Any:
+            def convert(
+                self,
+                session_jsonl: Path,
+                *,
+                source_files: Sequence[Path] = (),
+                archive_dir: Path | None = None,
+            ) -> Any:
                 seen.append(read_sink_pending(layout.sink_pending_path))
-                return super().convert(session_jsonl, archive_dir=archive_dir)
+                return super().convert(
+                    session_jsonl, source_files=source_files, archive_dir=archive_dir
+                )
 
         run(source_root, corpus_root, RecordingSink(), converter=Watching())
         assert seen == [(SESSION_A,)]

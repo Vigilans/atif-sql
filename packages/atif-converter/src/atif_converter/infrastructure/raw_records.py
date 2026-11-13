@@ -6,8 +6,9 @@ The single raw-record reader the converter, the census, the edges emitter and
 the enrichment pass share. Discovery mirrors the contract: rglob over the
 session's sibling dir filtered to ``*.jsonl`` (``*.meta.json`` excluded by the
 suffix filter), which includes workflow-nested
-``subagents/workflows/wf_*/agent-*.jsonl``. File reads only: no harbor, no
-env, no network.
+``subagents/workflows/wf_*/agent-*.jsonl``. A Codex session's other rollouts
+are named by the caller instead (``extra_files``). File reads only: no
+harbor, no env, no network.
 
 ONE READ, ONE PARSE. :func:`load_session` opens each discovered file once and
 streams its bytes through a digest on the way to the JSON parser, so the
@@ -53,6 +54,21 @@ if TYPE_CHECKING:
     from collections.abc import Buffer, Callable, Iterable
 
     from atif_converter.infrastructure.source_archive import SourceArchiveWriter
+
+
+def session_base(session_jsonl: Path, files: Iterable[Path] = ()) -> Path:
+    """The directory every file of a session is named relative to.
+
+    The main transcript's parent, which also holds its side dir; when some
+    files lie elsewhere (a Codex thread spanning several date directories),
+    the deepest directory holding all of them. The same rule as
+    ``atif_corpus.domain.ports.source_base``, which names the archive.
+    """
+    base = session_jsonl.parent
+    for path in files:
+        while base not in path.parents and base != base.parent:
+            base = base.parent
+    return base
 
 
 def discover_session_files(session_jsonl: Path) -> list[Path]:
@@ -277,6 +293,11 @@ class SessionSnapshot:
         """Every discovered file, main first then sorted side-files."""
         return tuple(self.fingerprints)
 
+    @property
+    def base(self) -> Path:
+        """The directory each file's ``source_file`` name is relative to (:func:`session_base`)."""
+        return session_base(self.session_jsonl, self.fingerprints)
+
 
 @dataclass(frozen=True, slots=True)
 class LoadedSession:
@@ -305,11 +326,12 @@ class LoadedSession:
     def record_pairs(self) -> list[tuple[dict[str, Any], str]]:
         """Every OBJECT record with its source file, in file order.
 
-        ``source_file`` is relative to the session JSONL's parent directory,
-        the contract's edge field. Non-object JSON values are dropped here, as
+        ``source_file`` is relative to :attr:`SessionSnapshot.base` (the
+        session JSONL's parent directory unless the session's files span
+        several), the contract's edge field. Non-object JSON values are dropped here, as
         the audit never counted them.
         """
-        base = self.snapshot.session_jsonl.parent
+        base = self.snapshot.base
         pairs: list[tuple[dict[str, Any], str]] = []
         for path, records in self.records_by_file.items():
             source_file = path.relative_to(base).as_posix()
@@ -317,8 +339,17 @@ class LoadedSession:
         return pairs
 
 
-def load_session(session_jsonl: Path) -> LoadedSession:
+def _session_files(session_jsonl: Path, extra_files: Iterable[Path]) -> list[Path]:
+    files = discover_session_files(session_jsonl)
+    files.extend(path for path in sorted(extra_files) if path not in files)
+    return files
+
+
+def load_session(session_jsonl: Path, extra_files: Iterable[Path] = ()) -> LoadedSession:
     """Read every discovered file once: fingerprint and parse in a single pass.
+
+    ``extra_files`` are the session's transcripts outside the main one's side
+    dir (a Codex thread's other rollouts), read after the discovered ones.
 
     Raises
     ------
@@ -327,7 +358,7 @@ def load_session(session_jsonl: Path) -> LoadedSession:
     """
     fingerprints: dict[Path, FileFingerprint] = {}
     records_by_file: dict[Path, list[Any]] = {}
-    for path in discover_session_files(session_jsonl):
+    for path in _session_files(session_jsonl, extra_files):
         fingerprints[path], records_by_file[path] = _read_and_fingerprint(path)
     sidecar_fingerprints: dict[Path, FileFingerprint] = {}
     sidecars: dict[Path, Any] = {}
@@ -344,7 +375,7 @@ def load_session(session_jsonl: Path) -> LoadedSession:
     )
 
 
-def take_session_snapshot(session_jsonl: Path) -> SessionSnapshot:
+def take_session_snapshot(session_jsonl: Path, extra_files: Iterable[Path] = ()) -> SessionSnapshot:
     """Fingerprint every discovered file; holds digests, never parsed records.
 
     The use cases go through :func:`load_session`, which fingerprints as a
@@ -353,7 +384,9 @@ def take_session_snapshot(session_jsonl: Path) -> SessionSnapshot:
     """
     return SessionSnapshot(
         session_jsonl=session_jsonl,
-        fingerprints={path: _fingerprint(path) for path in discover_session_files(session_jsonl)},
+        fingerprints={
+            path: _fingerprint(path) for path in _session_files(session_jsonl, extra_files)
+        },
         sidecar_fingerprints={
             path: _fingerprint(path) for path in discover_sidecar_files(session_jsonl)
         },
@@ -364,12 +397,11 @@ def read_snapshot_records(snapshot: SessionSnapshot) -> list[tuple[dict[str, Any
     """Parse every object record of exactly the snapshot's file list.
 
     Returns ``(record, source_file)`` pairs in file order, ``source_file``
-    relative to the session JSONL's parent directory (the contract's edge
-    field). Malformed lines are skipped (same policy as harbor itself). Files
+    relative to :attr:`SessionSnapshot.base` (the contract's edge field). Malformed lines are skipped (same policy as harbor itself). Files
     added since the snapshot are NOT read: the snapshot's list is the whole
     input, and :func:`mutated_files` reports the newcomer afterwards.
     """
-    base = snapshot.session_jsonl.parent
+    base = snapshot.base
     pairs: list[tuple[dict[str, Any], str]] = []
     for path in snapshot.files:
         source_file = path.relative_to(base).as_posix()

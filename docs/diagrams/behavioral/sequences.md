@@ -29,22 +29,22 @@ sequenceDiagram
 Sources, in dispatch order:
 
 - CLI materialize: `packages/atif-cli/src/atif_cli/app.py:878`; report rendered at `:1042`.
-- materialize UC: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1497`;
-  `read_watermark` at `:424` called from `:1620`, `scan_sources` called at `:1622`, `build_plan` called
-  at `:1696`, `_write_session` at `:612` called from `:777`, watermark advanced at `:1776-1779`, report
-  built at `:1791`.
+- materialize UC: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`;
+  `read_watermark` at `:424` called from `:1640`, `scan_sources` called at `:1642`, `build_plan` called
+  at `:1716`, `_write_session` at `:624` called from `:797`, watermark advanced at `:1796-1799`, report
+  built at `:1811`.
 - scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:206`.
 - build_plan: `packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`.
-- RealConverter: `packages/atif-cli/src/atif_cli/converter_adapter.py:80`, calling
+- RealConverter: `packages/atif-cli/src/atif_cli/converter_adapter.py:82`, calling
   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220`.
 - converter: our ported Claude Code converter,
   `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:981`, reached from the
-  seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:128`; the ATIF
-  data classes and the validator the seam checks with (`:76`) are harbor's, vendored under
+  seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:133`; the ATIF
+  data classes and the validator the seam checks with (`:78`) are harbor's, vendored under
   `atif_converter.domain.atif`.
 - corpus artifacts: path arithmetic in
   `packages/atif-corpus/src/atif_corpus/domain/layout.py:65`; the artifacts written and the
-  directory swapped at `packages/atif-corpus/src/atif_corpus/application/materialize.py:691-733`
+  directory swapped at `packages/atif-corpus/src/atif_corpus/application/materialize.py:711-753`
   through `write_json_atomic` (`packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:72`),
   its zstd siblings (`:142`, `:159`), and `replace_dir_atomic` (`:165`).
 

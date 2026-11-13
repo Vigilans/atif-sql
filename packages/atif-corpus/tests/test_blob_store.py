@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import stat
+from collections.abc import Sequence
 from pathlib import Path
 from typing import override
 
@@ -37,8 +38,14 @@ class BlobConverter(FakeConverter):
     """The fake converter, plus attachments: both sessions share one image."""
 
     @override
-    def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> ConversionOutput:
-        base = super().convert(session_jsonl, archive_dir=archive_dir)
+    def convert(
+        self,
+        session_jsonl: Path,
+        *,
+        source_files: Sequence[Path] = (),
+        archive_dir: Path | None = None,
+    ) -> ConversionOutput:
+        base = super().convert(session_jsonl, source_files=source_files, archive_dir=archive_dir)
         blobs = (
             (_blob(SHARED),) if session_jsonl.stem == SESSION_A else (_blob(SHARED), _blob(ONLY_B))
         )

@@ -18,11 +18,11 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
    so re-pointing the source cannot overwrite another corpus, and the CLI hands
    in the wall clock plus the harbor and converter version pins alongside
    `RealConverter` behind `ConverterPort` (`:639-640`, `:973-989`,
-   `packages/atif-cli/src/atif_cli/converter_adapter.py:80`).
+   `packages/atif-cli/src/atif_cli/converter_adapter.py:82`).
 2. Sweep `.staging/`: an entry whose `tmp-<pid>` owner is a dead pid is crash
    debris and is removed, while a live pid belongs to a concurrent pass and is
    left alone
-   (`packages/atif-corpus/src/atif_corpus/application/materialize.py:971`).
+   (`packages/atif-corpus/src/atif_corpus/application/materialize.py:991`).
 3. Read `watermark.json` as a path-to-mtime map; an unreadable or wrongly
    shaped file degrades to empty, costing one full re-materialization rather
    than refusing to sync: `packages/atif-corpus/src/atif_corpus/application/materialize.py:424`.
@@ -30,7 +30,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
    sessions living under a directory that would not list into the unreadable
    set using the watermark as the only record of what lived there:
    `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:206`,
-   `packages/atif-corpus/src/atif_corpus/application/materialize.py:1092`.
+   `packages/atif-corpus/src/atif_corpus/application/materialize.py:1112`.
 5. Guard, then retain sourceless sessions: a corpus whose `meta.json` names
    another agent raises `CorpusAgentMismatchError` before anything is touched,
    and zero scanned sessions over a
@@ -43,19 +43,19 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
    each session's recorded generation, force-replanning sessions the watermark calls current whose artifact
    directory is missing (the one state reachable by a kill inside the swap
    window): `packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`,
-   `packages/atif-corpus/src/atif_corpus/application/materialize.py:1017`.
+   `packages/atif-corpus/src/atif_corpus/application/materialize.py:1037`.
 7. Per planned session: convert (the converter writes the raw source archive
    while it verifies its input), store the attachments in the shared blob
    store, write trajectory, loss report, edges, and session events, and `meta.json` last into a staging directory, then rename the whole directory
    into `sessions/<id>/` so a reader observes only a complete generation; a
-   session that raises is recorded and the pass continues (`packages/atif-corpus/src/atif_corpus/application/materialize.py:612`,
+   session that raises is recorded and the pass continues (`packages/atif-corpus/src/atif_corpus/application/materialize.py:624`,
    `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:197`).
    A retained session whose recorded generation is stale re-converts from its
    restored source archive in the same stage.
    With `--workers` above 1 this step runs on a spawn-context process pool;
    each worker runs the same per-session function under its own pid, outcomes
    are folded back in plan order, and a single planned session runs inline:
-   `packages/atif-corpus/src/atif_corpus/application/materialize.py:874`.
+   `packages/atif-corpus/src/atif_corpus/application/materialize.py:894`.
 8. Hand every session published or marked this pass, plus any an earlier pass
    left in `sink_pending.json`, to the DuckLake session sink in batches
    (`--no-lake` skips it); the first batch that raises, and every batch after
@@ -64,7 +64,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
 9. Advance the watermark for succeeded sessions only, retaining every entry of
    a failed, unplanned, or unreadable session so staleness still signals a
    retry, and write it atomically before emitting the report:
-   `packages/atif-corpus/src/atif_corpus/application/materialize.py:1310`,
+   `packages/atif-corpus/src/atif_corpus/application/materialize.py:1330`,
    `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:72`.
 
 ### Related
@@ -81,7 +81,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:690`
 
 1. Reject a path that is not an existing `.jsonl` file before the fingerprint
    snapshot reads anything, which the CLI maps to exit 64:
-   `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:71-73`.
+   `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:73-75`.
 2. Read every source file once: the main transcript and each discovered
    side-file under `<stem>/`, workflow-nested ones included. Each file is
    stat'ed, then streamed through a sha256 digest into the JSON parser, so the
@@ -126,7 +126,7 @@ the audit never read the session separately.
 ### Related
 
 - `packages/atif-converter/src/atif_converter/infrastructure/census.py:57`
-- `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:76`
+- `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:78`
 - `packages/atif-converter/src/atif_converter/domain/errors.py:47`
 - `packages/atif-converter/src/atif_converter/domain/fidelity.py:55`
 - `packages/atif-cli/src/atif_cli/errors.py:30`
@@ -467,7 +467,7 @@ Entry point: `scripts/atif-sql-refresh.sh:195`
   freshness report: scans source mtimes and replays the same pure plan
   `materialize` would build, generation staleness included, without converting anything, so its stale,
   up-to-date, and live counts are exactly what a pass would do
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1433`).
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1453`).
 - examples: entry at `packages/atif-cli/src/atif_cli/app.py:2372`. Derives one
   runnable example per view and macro from the static catalog and filters by
   `--category` and `--requires`; an unknown value exits 64

@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from atif_converter.domain.atif import Trajectory
 
 from atif_converter.domain.blobs import Blob
@@ -88,7 +90,7 @@ def validate_trajectory(trajectory: dict[str, Any]) -> tuple[str, ...]:
     return () if ok else tuple(str(e) for e in validator.errors)
 
 
-def read_session(session_jsonl: Path) -> LoadedSession:
+def read_session(session_jsonl: Path, extra_files: Sequence[Path] = ()) -> LoadedSession:
     """Read one session's files once, fingerprinted and parsed in the same pass.
 
     The reader half of the seam: :func:`convert_loaded_session` converts what
@@ -97,6 +99,9 @@ def read_session(session_jsonl: Path) -> LoadedSession:
     a ``ConversionError`` here, as it was when the converter did its own read,
     so a materialize pass records one per-session failure and continues.
 
+    ``extra_files`` are the session's other transcripts outside the main
+    one's side dir (a Codex thread's other rollouts).
+
     Raises
     ------
         InvalidSessionInput: ``session_jsonl`` is not an existing ``.jsonl`` file.
@@ -104,7 +109,7 @@ def read_session(session_jsonl: Path) -> LoadedSession:
     """
     require_transcript_file(session_jsonl)
     try:
-        return load_session(session_jsonl)
+        return load_session(session_jsonl, extra_files)
     except UnicodeDecodeError as exc:
         msg = f"conversion failed for {session_jsonl}"
         raise ConversionError(msg) from exc

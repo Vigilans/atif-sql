@@ -18,7 +18,7 @@ implementation. So a contract in this file is any of:
 
 **Every Protocol here is satisfied STRUCTURALLY, with no import in either direction.** That is the
 single most important structural fact for reading this file. `RealConverter`
-(`packages/atif-cli/src/atif_cli/converter_adapter.py:80`) implements `ConverterPort`
+(`packages/atif-cli/src/atif_cli/converter_adapter.py:82`) implements `ConverterPort`
 (`packages/atif-corpus/src/atif_corpus/domain/ports.py:101`) by shape alone; it names the
 Protocol only in its docstring, and the Protocol can't name it back, because atif-corpus may never
 import atif-converter. The Protocol name appears at only these import sites in the whole workspace:
@@ -58,7 +58,7 @@ The sections below aren't ranked; "Other contracts" at the end collects the smal
   `meta.json` and opens each stored trajectory with its own DuckDB connection.
 - `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:72-74`: declares
   `TRAJECTORY_FILENAME` / `EDGES_FILENAME` / `META_FILENAME` again as its own constants.
-- `packages/atif-corpus/src/atif_corpus/application/materialize.py:691-731`: the writer side, the
+- `packages/atif-corpus/src/atif_corpus/application/materialize.py:711-751`: the writer side, the
   only place the artifacts are produced.
 - `packages/atif-cli/tests/test_artifact_names_twin_pin.py:29`: pins the writer's names against
   every reader's copy, and `:19` pins the `.zst` suffix.
@@ -107,10 +107,10 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   dirs where `v_raw_meta` has a row (the trajectory list is built from `v_raw_meta` too); `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:175-180` skips a dir with no `meta.json`;
   `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:178-191` does the same and logs a warning. Nothing in the file layout expresses
   this: it's a write-ORDER promise made at
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:635-638`.
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:647-650`.
 - **No reader ever sees a partially written directory**, because the writer stages every
   per-session artifact under `<corpus_root>/.staging/` and swaps the whole dir into place
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:656` and `:733`), and `.staging` is deliberately outside `sessions/` so a DuckDB glob
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:668` and `:753`), and `.staging` is deliberately outside `sessions/` so a DuckDB glob
   can't reach it (`packages/atif-corpus/src/atif_corpus/domain/layout.py:89-94`). A `SIGKILL` or power loss inside the swap leaves the session missing rather than torn.
 - **`trajectory.json` is ONE JSON document, `edges.jsonl` is newline-delimited.** atif-duck encodes
   that split in its reader choice at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:25-28`, and in its read bounds: the bound for a
@@ -267,7 +267,7 @@ forbidden_modules = ["atif_converter", "atif_corpus", "atif_duck", "atif_embed",
 
 - **atif-cli is the only composition root**, and it is absent from both the `independence` module
   list (`pyproject.toml:608`) and the `forbidden` source list (`pyproject.toml:613`). The one module that imports
-  two independent packages at module scope is `packages/atif-cli/src/atif_cli/converter_adapter.py:64-74`
+  two independent packages at module scope is `packages/atif-cli/src/atif_cli/converter_adapter.py:64-75`
   (`app.py` imports them inside command bodies), and its
   docstring names that privilege explicitly at `packages/atif-cli/src/atif_cli/converter_adapter.py:5-9`.
 - **atif-analytics is absent from the independence list on purpose** so it can compose atif-models,
@@ -292,7 +292,7 @@ forbidden_modules = ["atif_converter", "atif_corpus", "atif_duck", "atif_embed",
   `TYPE_CHECKING` block) because `PLC0415` is ignored workspace-wide to satisfy the lean-import
   test (`pyproject.toml:225`). The exceptions are module-scope imports in atif-cli
   modules that are themselves only ever imported inside a command body:
-  `packages/atif-cli/src/atif_cli/converter_adapter.py:64-74`,
+  `packages/atif-cli/src/atif_cli/converter_adapter.py:64-75`,
   `packages/atif-cli/src/atif_cli/duck_errors.py:27`,
   `packages/atif-cli/src/atif_cli/lake_sessions.py:43-51`, and
   `packages/atif-cli/src/atif_cli/embed_lake.py:19`. A line-anchored grep of `src/` for another
@@ -430,7 +430,7 @@ a mismatched adapter fails the typecheck gate.
   `_EDGE_COLUMNS`), the same keys in the same order with DuckDB types.
 - `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:249-268`: reads the
   `uuid` field for the conflicts pipeline's returned-uuid validity guard.
-- `packages/atif-corpus/src/atif_corpus/application/materialize.py:695-698`: writes the lines and
+- `packages/atif-corpus/src/atif_corpus/application/materialize.py:715-718`: writes the lines and
   owns line termination.
 - `packages/atif-duck/src/atif_duck/domain/catalog.py:94`: the `messages` view publishes this
   surface, every key but `tool_use_ids`, plus `session_id`.
@@ -457,7 +457,7 @@ EDGE_FIELDS: tuple[str, ...] = (
 - **The producer emits lines WITHOUT trailing newlines and the writer adds them.** Stated on the
   port's `edges_lines` field at
   `packages/atif-corpus/src/atif_corpus/domain/ports.py:74-77` and honoured at
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:695-698`; a producer that terminated its own lines would double them.
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:715-718`; a producer that terminated its own lines would double them.
 - **`parent_uuid` is a nullable string, and atif-duck declares it `VARCHAR` outright** rather than
   letting JSON union inference decide; the reason is recorded at `packages/atif-duck/src/atif_duck/domain/raw_readers.py:57-61`.
 - **`tool_use_ids` means two different things by record type**: tool_use block ids for assistant
@@ -585,14 +585,14 @@ construction from settings: `packages/atif-embed/src/atif_embed/infrastructure/c
 **Consumers:**
 
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:172`: imports the port;
-  annotated at `packages/atif-corpus/src/atif_corpus/application/materialize.py:615` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1501`.
-- `packages/atif-cli/src/atif_cli/converter_adapter.py:80-148`: `RealConverter`, the production
+  annotated at `packages/atif-corpus/src/atif_corpus/application/materialize.py:627` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1521`.
+- `packages/atif-cli/src/atif_cli/converter_adapter.py:82-160`: `RealConverter`, the production
   adapter and the only module importing both atif-converter and atif-corpus at module scope.
-- `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:72`: the test adapter
+- `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:81`: the test adapter
   that ships in `src/`, not in `tests/`.
 - `packages/atif-cli/tests/test_converter_adapter.py:17`: asserts the mapping and binds
   `RealConverter` to the port annotation at `packages/atif-cli/tests/test_converter_adapter.py:95`;
-  `packages/atif-cli/tests/test_codex_cli.py:156` binds the Codex-configured adapter the same way.
+  `packages/atif-cli/tests/test_codex_cli.py:158` binds the Codex-configured adapter the same way.
 - `packages/atif-cli/src/atif_cli/app.py:976`: wires `RealConverter(agent=settings.agent)` into the
   use case.
 
@@ -627,12 +627,12 @@ class ConverterPort(Protocol):
 
 - **`RealConverter` never imports the Protocol it implements.** It names it only in its docstring
   and imports the return-value data classes and the empty-source error
-  (`packages/atif-cli/src/atif_cli/converter_adapter.py:69-74`), so nothing in either package
+  (`packages/atif-cli/src/atif_cli/converter_adapter.py:69-75`), so nothing in either package
   links the class to the port. The static links are the annotated assignments
   `converter: ConverterPort = RealConverter()` at
   `packages/atif-cli/tests/test_converter_adapter.py:95`, whose own comment
   (`packages/atif-cli/tests/test_converter_adapter.py:93-94`) states that the assignment is what ty
-  verifies, and its Codex twin at `packages/atif-cli/tests/test_codex_cli.py:156`, plus the CLI's
+  verifies, and its Codex twin at `packages/atif-cli/tests/test_codex_cli.py:158`, plus the CLI's
   call at `packages/atif-cli/src/atif_cli/app.py:976`, which hands the adapter to materialize's
   `converter: ConverterPort` parameter. A signature change on either side fails the typecheck gate
   at those sites, not at materialize time.
@@ -644,10 +644,10 @@ class ConverterPort(Protocol):
   anything and the use case records the failure and continues; `EmptySourceError` alone means
   the session is empty, not broken. `RealConverter` relies on that: it
   raises `TrajectoryValidationError` for an invalid trajectory rather than materializing it
-  (`packages/atif-cli/src/atif_cli/converter_adapter.py:129-130`, reasoning at `packages/atif-cli/src/atif_cli/converter_adapter.py:49-53`).
+  (`packages/atif-cli/src/atif_cli/converter_adapter.py:141-142`, reasoning at `packages/atif-cli/src/atif_cli/converter_adapter.py:49-53`).
 - **`trajectory_dict` is the ENRICHED trajectory and is NOT yet compact-serialized.** The writer
   owns `separators=(",", ":")`; the mapping decision is stated at `packages/atif-cli/src/atif_cli/converter_adapter.py:30-31` and
-  the writer applies it at `packages/atif-corpus/src/atif_corpus/application/materialize.py:691-693`.
+  the writer applies it at `packages/atif-corpus/src/atif_corpus/application/materialize.py:711-713`.
 - **`loss_report_dict` is `LossReport.to_json()`-shaped with enum members flattened to strings**
   (`packages/atif-cli/src/atif_cli/converter_adapter.py:32-33`), which is what makes it readable by atif-duck's
   `LOSS_REPORT_COLUMNS` projection at `packages/atif-duck/src/atif_duck/domain/raw_readers.py:77-90`.
@@ -911,11 +911,11 @@ rather than skipping a file that no longer contains the current version; the gua
 - **`LossReport.to_json()`**: producer
   `packages/atif-converter/src/atif_converter/domain/fidelity.py:147`, whose docstring calls the
   keys wire contract; consumed by `packages/atif-duck/src/atif_duck/domain/raw_readers.py:77-90`
-  as `LOSS_REPORT_COLUMNS` and by `packages/atif-cli/src/atif_cli/converter_adapter.py:133`.
+  as `LOSS_REPORT_COLUMNS` and by `packages/atif-cli/src/atif_cli/converter_adapter.py:145`.
   `record_counts` and `gaps_observed` stay `JSON` because they are an enum-keyed dict and a sorted
   list of enum values.
 - **The `meta.json` provenance record**: written at
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:706-731`, projected at
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:726-751`, projected at
   `packages/atif-duck/src/atif_duck/domain/raw_readers.py:99-121`. `harbor_version` (the vendored
   models' upstream release) and `converter_version` (the `atif-sql` release) are supplied by the
   CLI (`packages/atif-cli/src/atif_cli/app.py:981` and `:986`), so the corpus records which
@@ -977,10 +977,10 @@ rather than skipping a file that no longer contains the current version; the gua
   import duckdb, harbor, boto3, or polars at module scope, asserted in a fresh interpreter
   by `packages/atif-cli/tests/test_lean_import.py`; the deferred-import sites exist because of it.
 - **The other ports, satisfied the same way**: atif-corpus's `ArtifactProducer`
-  (`packages/atif-corpus/src/atif_corpus/domain/ports.py:123`), which atif-duck's
+  (`packages/atif-corpus/src/atif_corpus/domain/ports.py:148`), which atif-duck's
   `ColumnarArtifactProducer` fits (`packages/atif-duck/src/atif_duck/infrastructure/columnar.py:450`)
   and which the CLI's `materialize` doesn't inject, and `SessionSink`
-  (`packages/atif-corpus/src/atif_corpus/domain/ports.py:155`), which atif-duck's
+  (`packages/atif-corpus/src/atif_corpus/domain/ports.py:180`), which atif-duck's
   `DuckLakeSessionSink` fits (`packages/atif-duck/src/atif_duck/infrastructure/lake.py:868`) and
   the CLI wires in at `packages/atif-cli/src/atif_cli/app.py:1001`; atif-embed's `LakeStepsPort` and
   `LakeStepSnapshot` (`packages/atif-embed/src/atif_embed/domain/ports.py:198` and `:150`), which

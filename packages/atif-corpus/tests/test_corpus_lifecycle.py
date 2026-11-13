@@ -23,7 +23,7 @@ import json
 import os
 import shutil
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, override
 
@@ -258,17 +258,29 @@ class NonArchivingConverter(FakeConverter):
     """A port adapter that ignores ``archive_dir``, as a third-party one may."""
 
     @override
-    def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> ConversionOutput:
+    def convert(
+        self,
+        session_jsonl: Path,
+        *,
+        source_files: Sequence[Path] = (),
+        archive_dir: Path | None = None,
+    ) -> ConversionOutput:
         del archive_dir
-        return super().convert(session_jsonl)
+        return super().convert(session_jsonl, source_files=source_files)
 
 
 class LyingArchiveConverter(FakeConverter):
     """Claims an archive member it never wrote."""
 
     @override
-    def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> ConversionOutput:
-        output = super().convert(session_jsonl)
+    def convert(
+        self,
+        session_jsonl: Path,
+        *,
+        source_files: Sequence[Path] = (),
+        archive_dir: Path | None = None,
+    ) -> ConversionOutput:
+        output = super().convert(session_jsonl, source_files=source_files)
         return ConversionOutput(
             trajectory_dict=output.trajectory_dict,
             loss_report_dict=output.loss_report_dict,

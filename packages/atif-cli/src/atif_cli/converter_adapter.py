@@ -71,9 +71,11 @@ from atif_corpus.domain.ports import (
     BlobOutput,
     ConversionOutput,
     EmptySourceError,
+    source_base,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -95,11 +97,19 @@ class RealConverter:
         #: module docstring.
         self.agent = AgentSource(str(agent))
 
-    def convert(self, session_jsonl: Path, *, archive_dir: Path | None = None) -> ConversionOutput:
+    def convert(
+        self,
+        session_jsonl: Path,
+        *,
+        source_files: Sequence[Path] = (),
+        archive_dir: Path | None = None,
+    ) -> ConversionOutput:
         """Convert one session through its agent's use case; raise on invalid output.
 
-        With ``archive_dir``, the session's source files are archived there as
-        a by-product of the use case's verifying re-read.
+        ``source_files`` are a Codex session's other rollouts. With
+        ``archive_dir``, the session's source files are archived there as a
+        by-product of the use case's verifying re-read, named relative to
+        :func:`~atif_corpus.domain.ports.source_base`.
 
         Raises
         ------
@@ -115,11 +125,13 @@ class RealConverter:
         archive = (
             None
             if archive_dir is None
-            else SourceArchiveWriter(archive_dir, base=session_jsonl.parent)
+            else SourceArchiveWriter(archive_dir, base=source_base(session_jsonl, source_files))
         )
         try:
             if self.agent is AgentSource.CODEX:
-                result, report = convert_codex_and_audit(session_jsonl, archive=archive)
+                result, report = convert_codex_and_audit(
+                    session_jsonl, source_files=source_files, archive=archive
+                )
             else:
                 result, report = convert_and_audit(
                     session_jsonl, include_subagents=self.include_subagents, archive=archive

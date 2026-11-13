@@ -20,6 +20,7 @@ shared with the Claude Code path.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -50,6 +51,9 @@ from atif_converter.infrastructure.harbor_adapter import (
 )
 from atif_converter.infrastructure.raw_records import SessionSnapshot, mutated_files
 from atif_converter.infrastructure.source_archive import SourceArchiveWriter
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 #: Response-item payload types whose presence in a rollout means a specific
 #: content-shaped gap was actually exercised, rather than merely being possible.
@@ -144,9 +148,13 @@ def _refuse_if_mutated(
 def convert_codex_and_audit(
     rollout_jsonl: Path,
     *,
+    source_files: Sequence[Path] = (),
     archive: SourceArchiveWriter | None = None,
 ) -> tuple[ConversionResult, LossReport]:
     """Convert ``rollout_jsonl`` to ATIF and produce its loss accounting.
+
+    ``rollout_jsonl`` is the session's first rollout; ``source_files`` are its
+    other rollouts, read and fingerprinted with it.
 
     The returned :class:`ConversionResult` carries the ENRICHED trajectory
     (``source_uuids`` on steps, ``cache_creation_total`` and the compaction
@@ -169,7 +177,7 @@ def convert_codex_and_audit(
             read and the end of the audit, so the artifacts would not
             describe the rollout as it stands.
     """
-    loaded = read_session(rollout_jsonl)
+    loaded = read_session(rollout_jsonl, source_files)
     snapshot = loaded.snapshot
     # Attachments out BEFORE conversion, named by the same record ids the
     # enrichment pass writes into ``source_uuids`` (an edge's uuid depends on

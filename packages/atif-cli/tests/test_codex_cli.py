@@ -136,7 +136,9 @@ class TestAdapterRouting:
         """Routing, asserted without harbor: the seam picks the use case, nothing else."""
         calls: list[Path] = []
 
-        def _stub(path: Path, *, archive: object = None) -> tuple[ConversionResult, LossReport]:
+        def _stub(
+            path: Path, *, source_files: object = (), archive: object = None
+        ) -> tuple[ConversionResult, LossReport]:
             calls.append(path)
             return (
                 ConversionResult(
