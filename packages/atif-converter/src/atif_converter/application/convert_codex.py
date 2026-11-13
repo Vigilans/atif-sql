@@ -16,10 +16,11 @@ enrichment come from the Codex modules while the snapshot machinery, the error
 taxonomy and the returned ``(ConversionResult, LossReport)`` pair are shared
 with the Claude Code path.
 
-A session can span several rollouts: a thread's continuation segments, passed
-as ``source_files``. :mod:`atif_converter.domain.codex_threads` orders them
-into one record stream, and every artifact is built from that stream; the
-trajectory's steps are then marked reverted from the records behind them.
+A session can span several rollouts: a thread's continuation segments and the
+rollouts of the sub-agent threads it spawned, passed as ``source_files``.
+:mod:`atif_converter.domain.codex_threads` orders them into one record stream,
+and every artifact is built from that stream; the trajectory's steps are then
+marked reverted or sidechain from the records behind them.
 """
 
 from __future__ import annotations
@@ -79,6 +80,7 @@ def _loss_report(
     *,
     developer_messages: int,
     captured: int = 0,
+    spawned_files: int = 0,
 ) -> LossReport:
     """Loss accounting for one rollout: total records vs items that convert.
 
@@ -114,11 +116,10 @@ def _loss_report(
         records_captured=captured,
         records_dropped=dropped,
         gaps_observed=frozenset(gaps),
-        # A Codex sub-agent writes its OWN rollout under its own session id, so
-        # a rollout never carries a subagent side-file. Zero here is a fact
-        # about the format, not an unmeasured field.
-        subagent_files_found=0,
-        subagent_files_convertible=0,
+        # A Codex sub-agent writes rollouts of its own; the ones read with
+        # this session are its subagent files, and each one converts.
+        subagent_files_found=spawned_files,
+        subagent_files_convertible=spawned_files,
         workflow_subagent_files_found=0,
     )
 
@@ -167,7 +168,7 @@ def convert_codex_and_audit(
     """Convert ``rollout_jsonl`` to ATIF and produce its loss accounting.
 
     ``rollout_jsonl`` is the session's first rollout; ``source_files`` are its
-    other rollouts (its continuation segments).
+    other rollouts (continuation segments and spawned threads' rollouts).
 
     The returned :class:`ConversionResult` carries the ENRICHED trajectory
     (``source_uuids`` on steps, ``cache_creation_total`` and the compaction
@@ -203,10 +204,13 @@ def convert_codex_and_audit(
         ]
     )
     records = stream.records
+    sidechain_files = stream.sidechain_files
     # Attachments out BEFORE conversion, named by the same record ids the
     # enrichment pass writes into ``source_uuids`` (an edge's uuid depends on
     # the record's ids and position, never on the content being rewritten).
-    record_keys = [str(edge["uuid"]) for edge in build_codex_edges(records)]
+    record_keys = [
+        str(edge["uuid"]) for edge in build_codex_edges(records, sidechain_files=sidechain_files)
+    ]
     collector = BlobCollector()
     blob_index = extract_codex_blobs(
         [record for record, _src in records], collector, record_keys=record_keys
@@ -214,13 +218,14 @@ def convert_codex_and_audit(
     result = convert_codex_stream([record for record, _src in records], rollout_jsonl)
 
     census = codex_census_from_records(rollout_jsonl, records)
-    events = codex_session_events(records, record_ids=record_keys)
+    events = codex_session_events(records, record_ids=record_keys, sidechain_files=sidechain_files)
     report = _loss_report(
         census,
         developer_messages=_developer_message_count(records),
         captured=len(events),
+        spawned_files=len(sidechain_files),
     )
-    edges_lines = tuple(codex_edges_jsonl_lines(records))
+    edges_lines = tuple(codex_edges_jsonl_lines(records, sidechain_files=sidechain_files))
     events_lines = tuple(session_events_jsonl_lines(events))
     # The harbor trajectory has no other consumer, so enrich in place rather
     # than deep-copying a whole rollout's worth of steps.

@@ -29,13 +29,15 @@ shape. Discovery follows CONTRACT.md exactly:
   always alone and looking for siblings would be a stat per session for a
   directory that cannot exist.
 
-A Codex session is every rollout of its thread. A thread's continuation
+A Codex session is every rollout that records it. A thread's continuation
 segments (``rollout-<ts>-<thread>_<segment>.jsonl``) sit in the date
-directories of the days they were written, and their names carry the thread
-id the scanner files them under; the session's main transcript is the
-thread's first rollout, and every rollout of the group is in its watermark. A
-rollout is plain JSONL or zstd-compressed ``.jsonl.zst``; when both forms of
-one rollout are present, the plain file is the one read.
+directories of the days they were written, and a spawned sub-agent thread
+writes rollouts of its own whose ``session_meta`` names the root thread in
+``session_id``. The scanner reads each rollout's first record to file it under
+its root session; the session's main transcript is the root thread's first
+rollout, and every rollout of the group is in its watermark. A rollout is
+plain JSONL or zstd-compressed ``.jsonl.zst``; when both forms of one rollout
+are present, the plain file is the one read.
 
 A scan reports two kinds of absence and they must never be conflated. A
 session whose main transcript is genuinely GONE is marked source-removed:
@@ -48,10 +50,12 @@ separate fields so a caller cannot accidentally treat one as the other.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Any
 
+import zstandard
 from loguru import logger
 
 from atif_corpus.domain.agents import AgentSource
@@ -315,15 +319,80 @@ def scan_sources(
     )
 
 
+#: How much of a rollout's first line is read for its ``session_meta``. The
+#: record carries the model instructions and tool list, so it runs to tens of
+#: kilobytes; a first line longer than this is treated as carrying no ids.
+_SESSION_META_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _first_line(stream: IO[bytes] | zstandard.ZstdDecompressionReader) -> bytes:
+    """Bytes up to the first newline of a binary stream, at most :data:`_SESSION_META_MAX_BYTES`."""
+    chunks: list[bytes] = []
+    total = 0
+    while total < _SESSION_META_MAX_BYTES:
+        chunk = stream.read(64 * 1024)
+        if not chunk:
+            break
+        newline = chunk.find(b"\n")
+        if newline >= 0:
+            chunks.append(chunk[:newline])
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
+def _first_record(path: Path) -> dict[str, Any] | None:
+    """The rollout's first JSON record, or ``None`` when it does not parse as one.
+
+    Raises ``OSError`` when the file cannot be read, so the caller can tell an
+    unreadable rollout from one that records no ids.
+    """
+    with path.open("rb") as raw:
+        try:
+            if path.name.endswith(".zst"):
+                line = _first_line(zstandard.ZstdDecompressor().stream_reader(raw))
+            else:
+                line = _first_line(raw)
+        except zstandard.ZstdError:
+            return None
+    try:
+        record = json.loads(line.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _recorded_ids(record: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    """``(thread id, root session id)`` from a ``session_meta`` record, each ``None`` if absent."""
+    if record is None or record.get("type") != "session_meta":
+        return None, None
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None, None
+    thread_id = payload.get("id")
+    session_id = payload.get("session_id")
+    return (
+        thread_id if isinstance(thread_id, str) and thread_id else None,
+        session_id if isinstance(session_id, str) and session_id else None,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _Rollout:
     path: Path
     name: RolloutName
+    #: The session the rollout's ``session_meta`` files it under (its own
+    #: thread when it records none).
+    parent_session: str
 
 
-def _codex_rollouts(transcript_dirs: list[Path], unlistable: list[str]) -> list[_Rollout]:
-    """Every rollout under the day dirs, one per rollout id."""
+def _codex_rollouts(
+    transcript_dirs: list[Path], unlistable: list[str]
+) -> tuple[list[_Rollout], dict[str, str]]:
+    """Every rollout under the day dirs, one per rollout id, plus the unreadable ones."""
     by_rollout: dict[str, _Rollout] = {}
+    unreadable: dict[str, str] = {}
     for transcript_dir in transcript_dirs:
         entries = _list_dir(transcript_dir)
         if entries is None:
@@ -337,22 +406,65 @@ def _codex_rollouts(transcript_dirs: list[Path], unlistable: list[str]) -> list[
             previous = by_rollout.get(name.rollout_id)
             if previous is not None and not previous.name.compressed:
                 continue  # the plain form of a rollout wins over its compressed copy
-            by_rollout[name.rollout_id] = _Rollout(path=path, name=name)
-    return sorted(by_rollout.values(), key=lambda r: str(r.path))
+            try:
+                thread_id, session_id = _recorded_ids(_first_record(path))
+            except OSError as error:
+                logger.warning(
+                    "scan: cannot read {} ({}); its session is unreadable this pass "
+                    "and NOT treated as deleted",
+                    path,
+                    error,
+                )
+                unreadable.setdefault(name.thread_id, str(path))
+                continue
+            if thread_id is not None and thread_id != name.thread_id:
+                logger.warning(
+                    "scan: {} records thread {} but its name says {}; skipping",
+                    path,
+                    thread_id,
+                    name.thread_id,
+                )
+                continue
+            by_rollout[name.rollout_id] = _Rollout(
+                path=path, name=name, parent_session=session_id or name.thread_id
+            )
+    return sorted(by_rollout.values(), key=lambda r: str(r.path)), unreadable
+
+
+def _root_session(thread_id: str, parents: dict[str, str]) -> str:
+    """Follow recorded sessions up to the thread that records itself as its own.
+
+    A thread whose recorded session is not among the rollouts ends the walk
+    there: the group is named after the absent root and holds no rollout of it.
+    """
+    seen: set[str] = set()
+    current = thread_id
+    while current in parents and parents[current] != current and current not in seen:
+        seen.add(current)
+        current = parents[current]
+    return current
 
 
 def _scan_codex(
     source_root: Path, transcript_dirs: list[Path], unlistable: list[str]
 ) -> SourceScan:
-    """The Codex scan: rollouts grouped under the thread their names carry."""
+    """The Codex scan: rollouts grouped under the root session that records them."""
+    rollouts, unreadable = _codex_rollouts(transcript_dirs, unlistable)
+    parents = {r.name.thread_id: r.parent_session for r in rollouts}
     groups: dict[str, list[_Rollout]] = {}
-    for rollout in _codex_rollouts(transcript_dirs, unlistable):
-        groups.setdefault(rollout.name.thread_id, []).append(rollout)
+    for rollout in rollouts:
+        groups.setdefault(_root_session(rollout.name.thread_id, parents), []).append(rollout)
 
     sessions: list[SessionSource] = []
-    unreadable: dict[str, str] = {}
     rejected: list[str] = []
     for session_id, members in sorted(groups.items()):
+        own = [r for r in members if r.name.thread_id == session_id]
+        if not own:
+            logger.debug(
+                "scan: rollouts of session {} without its own thread's rollout; skipping",
+                session_id,
+            )
+            continue
         rejection = session_id_rejection(session_id)
         if rejection is not None:
             logger.warning(
@@ -362,8 +474,11 @@ def _scan_codex(
             )
             rejected.append(session_id)
             continue
-        first = [r for r in members if r.name.rollout_id == session_id]
-        main = (first or sorted(members, key=lambda r: r.path.name))[0].path
+        first = [r for r in own if r.name.rollout_id == session_id]
+        main = (first or sorted(own, key=lambda r: r.path.name))[0].path
+        if session_id in unreadable:
+            unreadable[session_id] = str(main)
+            continue
         mtimes: dict[str, int] = {}
         try:
             for rollout in members:

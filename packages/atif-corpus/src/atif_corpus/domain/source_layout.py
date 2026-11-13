@@ -79,9 +79,10 @@ class SourceLayout:
 
     ``has_side_files`` says whether a session can own a sibling directory of
     additional transcripts. Claude Code sessions do (subagent and workflow
-    side-files, which the watermark must notice). A Codex thread's
-    continuation segments sit beside its first rollout in the date tree
-    instead, and the scanner groups them by the thread id their names carry.
+    side-files, which the watermark must notice). A Codex session's other
+    rollouts (continuation segments and spawned sub-agent threads) sit beside
+    its first rollout in the date tree instead, and the scanner groups them by
+    the ids they record.
     """
 
     agent: AgentSource
@@ -100,7 +101,9 @@ class SourceLayout:
         Claude Code names the file after the session, so the stem IS the id.
         Codex prefixes a timestamp, so the id is the filename's thread uuid —
         and a name whose shape does not yield one is not a session this layout
-        can materialize, which the caller must skip rather than guess at.
+        can materialize, which the caller must skip rather than guess at. A
+        spawned sub-agent thread's rollout carries its own thread id here; the
+        scanner files it under its root session from the ids it records.
         """
         if not self.is_transcript(name):
             return None

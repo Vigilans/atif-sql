@@ -48,8 +48,8 @@ class SessionSource:
     ``subagents/workflows/wf_*/agent-*.jsonl``, and any deeper future
     nesting) — the contract requires the watermark to notice a workflow
     side-file changing even when the main transcript did not. For Codex it
-    covers every rollout of the thread: its first rollout and its
-    continuation segments.
+    covers every rollout of the session: the thread's own rollouts and those
+    of the sub-agent threads it spawned.
     """
 
     #: The session UUID (the main JSONL's stem).
@@ -151,6 +151,11 @@ def owns_path(session_jsonl: str, path: str) -> bool:
     about which entries belong to a session. Keyed on the main path rather
     than a whole :class:`SessionSource` so a session the scanner could NOT
     read — it has a path but no mtimes — gets scoped by the same rule.
+
+    A spawned Codex sub-agent thread's rollouts carry their own thread id, so
+    this rule cannot place them; while they are discovered they are in the
+    session's ``source_mtimes``, which :func:`_is_stale` and the watermark's
+    retention also consult.
     """
     if path == session_jsonl:
         return True
@@ -172,7 +177,9 @@ def _is_stale(session: SessionSource, watermark: Mapping[str, int]) -> bool:
     file's records.
     """
     recorded = {
-        path: mtime for path, mtime in watermark.items() if owns_path(session.session_jsonl, path)
+        path: mtime
+        for path, mtime in watermark.items()
+        if path in session.source_mtimes or owns_path(session.session_jsonl, path)
     }
     return not diff_source_mtimes(recorded, session.source_mtimes).is_empty
 

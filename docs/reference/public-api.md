@@ -98,7 +98,7 @@ materialization, taking the watermark and the quiescence policy as data. A sessi
 `generation_stale_session_ids` (its recorded converter or columnar schema differs from this pass's)
 is stale even though no source byte moved.
 
-`packages/atif-corpus/src/atif_corpus/domain/sessions.py:180-239`
+`packages/atif-corpus/src/atif_corpus/domain/sessions.py:187-246`
 
 ### build_structured_provider
 
@@ -534,7 +534,7 @@ def scan_source_root(
 The sessions found under `source_root`, discarding the per-scan diagnostics that the fuller
 `scan_sources` returns.
 
-`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:403-417`
+`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:518-532`
 
 ### TrajectoryValidationError
 

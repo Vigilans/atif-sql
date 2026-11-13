@@ -386,6 +386,7 @@ class TestCompressedRollouts:
 
 
 SEGMENT = "01a158c3-25de-70a3-b159-33361d98a15a"
+CHILD = "019ffb4f-6f3b-7873-b601-faed2e9a2316"
 
 
 class TestCodexSessionGroups:
@@ -440,3 +441,52 @@ class TestCodexSessionGroups:
             manifest["main"],
             f"10/01/{segment.name}",
         }
+
+
+class TestSpawnedThreads:
+    def test_spawned_threads_group_under_the_root(self, codex_source_root: Path) -> None:
+        first = write_rollout(codex_source_root, SESSION_A, mtime_ns=STALE_NS)
+        segment = write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-12T00-00-00-{SESSION_A}_{SEGMENT}.jsonl",
+            {"id": SESSION_A, "session_id": SESSION_A, "history_base": {"thread_id": SESSION_A}},
+            day=("2026", "09", "12"),
+            compressed=True,
+        )
+        child = write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-11T01-00-00-{CHILD}.jsonl",
+            {"id": CHILD, "session_id": SESSION_A, "parent_thread_id": SESSION_A},
+        )
+        (session,) = scan_source_root(codex_source_root, CODEX_LAYOUT)
+        assert session.session_id == SESSION_A
+        assert session.session_jsonl == str(first)
+        assert set(session.source_files) == {str(first), str(segment), str(child)}
+
+    def test_a_spawned_thread_of_a_spawned_thread_reaches_the_root(
+        self, codex_source_root: Path
+    ) -> None:
+        write_rollout(codex_source_root, SESSION_A, mtime_ns=STALE_NS)
+        write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-11T01-00-00-{CHILD}.jsonl",
+            {"id": CHILD, "session_id": SESSION_A},
+        )
+        grandchild = write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-11T02-00-00-{SESSION_B}.jsonl",
+            {"id": SESSION_B, "session_id": CHILD},
+        )
+        (session,) = scan_source_root(codex_source_root, CODEX_LAYOUT)
+        assert str(grandchild) in session.source_files
+
+    def test_spawned_rollouts_without_their_root_are_not_a_session(
+        self, codex_source_root: Path
+    ) -> None:
+        """A child whose root thread is not under the source root has no main transcript."""
+        write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-11T01-00-00-{CHILD}.jsonl",
+            {"id": CHILD, "session_id": SESSION_A},
+        )
+        assert scan_source_root(codex_source_root, CODEX_LAYOUT) == ()

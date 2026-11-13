@@ -180,15 +180,19 @@ proofs are out of scope for the workspace.
   1, side files present (subagents/, *.meta.json).
 - Codex layout: $CODEX_HOME/sessions/<YYYY>/<MM>/<DD>/rollout-<ts>-<thread>[_<segment>].jsonl,
   or the same name zstd-compressed as .jsonl.zst (the plain file wins when both
-  exist), transcript depth 3, no side files. session_id is the thread's UUID,
-  so it survives the date nesting.
-- A Codex session is every rollout of its thread: its first rollout and its
-  continuation segments, whose filenames carry the thread UUID. The main
+  exist), transcript depth 3, no side files. session_id is the root thread's
+  UUID, so it survives the date nesting.
+- A Codex session is every rollout that records it: the thread's continuation
+  segments (whose filenames carry the thread UUID) and the rollouts of the
+  sub-agent threads it spawned (whose session_meta.session_id names the root
+  thread). Discovery reads each rollout's first record to group them; the main
   transcript is the thread's first rollout, and the watermark covers every
   rollout of the group. The converter reads them as one record stream
   (atif_converter.domain.codex_threads): records on a branch the thread left
   (past a history_base cut, or in a rollout the chain never reaches) make steps
-  with extra.reverted.
+  with extra.reverted; a spawned thread's copied parent history is dropped and
+  its steps carry extra.is_sidechain and extra.agent_id, as Claude Code's
+  inlined subagent steps do, with trajectory.extra.subagents listing each one.
 - A session's archive and source_file names are relative to the deepest
   directory holding all its source files: the main transcript's parent unless
   a Codex thread spans several date directories.
@@ -237,7 +241,7 @@ proofs are out of scope for the workspace.
      carries its own is_error / exit_code. A script whose attribution is
      ambiguous emits none, and the exec result keeps the outcome folded from
      its items. The harbor port emits none, so parity is unchanged.
-   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 12) is
+   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 13) is
      bumped with any change to the converter's output for the same input.
 3. Census + edges + session events are derived from RAW jsonl (never from the
    trajectory). session_events keeps, as rows and NOT as steps: Claude Code

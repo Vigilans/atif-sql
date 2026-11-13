@@ -41,9 +41,12 @@ shortcut:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from atif_converter.domain.edges import EDGE_FIELDS, edge_to_jsonl_line
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 #: Payload types whose ``call_id`` is a tool-call join key back to ATIF
 #: ``tool_calls[].tool_call_id`` / ``observation.results[].source_call_id``.
@@ -117,8 +120,14 @@ def codex_edge_from_record(
     record: dict[str, Any],
     source_file: str,
     line_number: int,
+    *,
+    is_sidechain: bool = False,
 ) -> dict[str, Any]:
-    """Project one rollout record onto the contract's edge shape."""
+    """Project one rollout record onto the contract's edge shape.
+
+    ``is_sidechain`` marks a record of a spawned sub-agent thread's rollout,
+    read as part of the session that spawned it.
+    """
     payload = _payload(record)
     message_id = payload.get("id") if payload.get("type") == "message" else None
     return {
@@ -128,20 +137,23 @@ def codex_edge_from_record(
         "message_id": message_id if isinstance(message_id, str) else None,
         "type": _edge_type(record),
         "ts": record.get("timestamp"),
-        # Codex sub-agents get their own rollout file rather than an inlined
-        # sidechain, so no record of THIS session is a sidechain record.
-        "is_sidechain": False,
+        "is_sidechain": is_sidechain,
         "is_compact_summary": record.get("type") == "compacted",
         "source_file": source_file,
         "tool_use_ids": _tool_use_ids(record),
     }
 
 
-def build_codex_edges(records: list[tuple[dict[str, Any], str]]) -> list[dict[str, Any]]:
+def build_codex_edges(
+    records: list[tuple[dict[str, Any], str]],
+    *,
+    sidechain_files: Collection[str] = (),
+) -> list[dict[str, Any]]:
     """Build every edge from ``(record, source_file)`` pairs, in FILE order.
 
     A session of several rollouts passes them in its conversion order (see
-    :mod:`atif_converter.domain.codex_threads`).
+    :mod:`atif_converter.domain.codex_threads`), and ``sidechain_files`` names
+    the rollouts of its spawned threads.
 
     File order, not timestamp order: a rollout is append-only, so its line
     order is the causal order, and two records inside one millisecond share a
@@ -155,7 +167,12 @@ def build_codex_edges(records: list[tuple[dict[str, Any], str]]) -> list[dict[st
     edges: list[dict[str, Any]] = []
     for record, source_file in records:
         line_numbers[source_file] = line_numbers.get(source_file, 0) + 1
-        edge = codex_edge_from_record(record, source_file, line_numbers[source_file])
+        edge = codex_edge_from_record(
+            record,
+            source_file,
+            line_numbers[source_file],
+            is_sidechain=source_file in sidechain_files,
+        )
         # UNIQUENESS GUARD. `messages` is a uuid-keyed view, so two edges
         # sharing a uuid would silently double a record. No duplicate payload
         # id appears across the 74 local rollouts measured 2026-09-11, but the
@@ -175,9 +192,16 @@ def build_codex_edges(records: list[tuple[dict[str, Any], str]]) -> list[dict[st
     return edges
 
 
-def codex_edges_jsonl_lines(records: list[tuple[dict[str, Any], str]]) -> list[str]:
+def codex_edges_jsonl_lines(
+    records: list[tuple[dict[str, Any], str]],
+    *,
+    sidechain_files: Collection[str] = (),
+) -> list[str]:
     """``build_codex_edges`` + serialization: the ready-to-write edges.jsonl body."""
-    return [edge_to_jsonl_line(edge) for edge in build_codex_edges(records)]
+    return [
+        edge_to_jsonl_line(edge)
+        for edge in build_codex_edges(records, sidechain_files=sidechain_files)
+    ]
 
 
 def codex_edge_ids(records: list[tuple[dict[str, Any], str]]) -> list[str]:

@@ -107,12 +107,18 @@ History:
   thread left carry ``extra.reverted``. A Codex session event's ``uuid`` is
   its edge's, also where the edge ids fell back from a repeated id, and a
   repeated line-form edge id is qualified by its file.
+* 13 — a Codex session also holds the rollouts of the sub-agent threads it
+  spawned, whose ``session_meta.session_id`` names the root thread. Their
+  copied parent history is dropped, their steps carry ``extra.is_sidechain``
+  and ``extra.agent_id`` with their edges and session events marked
+  ``is_sidechain``, and ``trajectory.extra.subagents`` lists each spawned
+  thread.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 12
+CONVERTER_SCHEMA_VERSION: Final = 13
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""A Codex session of several rollouts: a thread and its continuation segment.
+"""A Codex session of several rollouts: continuation segments and a spawned thread.
 
 The session below is the shape Codex writes when a thread is continued from an
-earlier point:
+earlier point and then spawns a sub-agent:
 
 * the thread's first rollout holds two turns;
 * a continuation segment (written later, compressed, in another day directory)
   continues from before the second turn, so that turn in the first rollout is
-  a branch the thread left.
+  a branch the thread left;
+* the segment's turn spawns a sub-agent, whose own rollout starts with a copy
+  of the parent's history.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
 
 ROOT = "01a149e0-1f11-71d3-989c-2f36b98a004a"
 SEGMENT = "01a158c3-25de-70a3-b159-33361d98a15a"
+CHILD = "019ffb4f-6f3b-7873-b601-faed2e9a2316"
 MODEL = "openai/gpt-5.1-codex"
 
 
@@ -93,12 +96,57 @@ def first_rollout() -> list[dict[str, Any]]:
 
 def segment_rollout() -> list[dict[str, Any]]:
     # Continues the first rollout before its second turn (ordinal 4).
+    spawn = [
+        (
+            "response_item",
+            {
+                "type": "function_call",
+                "call_id": "call_spawn",
+                "name": "spawn_agent",
+                "arguments": "{}",
+            },
+        ),
+        (
+            "response_item",
+            {
+                "type": "function_call_output",
+                "call_id": "call_spawn",
+                "output": json.dumps({"agent_id": CHILD, "nickname": "Ada"}),
+            },
+        ),
+        ("event_msg", _token_count()),
+    ]
     meta = {
         "id": ROOT,
         "session_id": ROOT,
         "history_base": {"thread_id": ROOT, "end_ordinal_exclusive": 4},
     }
-    return _records(meta, 4, _turn("2"))
+    return _records(meta, 4, [*_turn("2"), *spawn])
+
+
+def child_rollout() -> list[dict[str, Any]]:
+    meta = {
+        "id": CHILD,
+        "session_id": ROOT,
+        "parent_thread_id": ROOT,
+        "subagent_history_start_ordinal": 3,
+        "source": {
+            "subagent": {
+                "thread_spawn": {"parent_thread_id": ROOT, "depth": 1, "agent_role": "explorer"}
+            }
+        },
+    }
+    # Ordinals 1-2 copy the parent's first turn; the child's own work starts at 3.
+    return _records(
+        meta,
+        1,
+        [
+            *_turn("1")[:2],
+            ("response_item", _message("user", "task", "msg_task")),
+            ("response_item", _message("assistant", "done", "msg_done")),
+            ("event_msg", _token_count()),
+        ],
+    )
 
 
 def _write(path: Path, records: list[dict[str, Any]], *, compressed: bool = False) -> Path:
@@ -117,7 +165,10 @@ def write_session(root: Path) -> tuple[Path, list[Path]]:
         segment_rollout(),
         compressed=True,
     )
-    return first, [segment]
+    child = _write(
+        root / "2026/10/20" / f"rollout-2026-10-20T13-00-00-{CHILD}.jsonl", child_rollout()
+    )
+    return first, [segment, child]
 
 
 class TestRolloutIds:
@@ -135,6 +186,7 @@ class TestAssembly:
         return assemble_codex_session(
             [
                 RolloutFile(f"10/17/rollout-2026-10-17T12-00-00-{ROOT}.jsonl", first_rollout()),
+                RolloutFile(f"10/20/rollout-2026-10-20T13-00-00-{CHILD}.jsonl", child_rollout()),
                 RolloutFile(
                     f"10/20/rollout-2026-10-20T12-00-00-{ROOT}_{SEGMENT}.jsonl.zst",
                     segment_rollout(),
@@ -142,10 +194,14 @@ class TestAssembly:
             ]
         )
 
-    def test_the_first_rollout_comes_before_its_segment(self) -> None:
+    def test_root_rollouts_come_first_then_the_spawned_thread(self) -> None:
         stream = self._stream()
         files = list(dict.fromkeys(source for _record, source in stream.records))
-        assert [rollout_ids(Path(f).name) for f in files] == [(ROOT, ROOT), (ROOT, SEGMENT)]
+        assert [rollout_ids(Path(f).name) for f in files] == [
+            (ROOT, ROOT),
+            (ROOT, SEGMENT),
+            (CHILD, CHILD),
+        ]
 
     def test_the_branch_past_the_history_base_cut_is_reverted(self) -> None:
         stream = self._stream()
@@ -155,6 +211,16 @@ class TestAssembly:
             if is_reverted and record["payload"].get("type") == "message"
         ]
         assert reverted_texts == ["question 2x", "answer 2x"]
+
+    def test_copied_parent_history_is_dropped_from_the_spawned_thread(self) -> None:
+        stream = self._stream()
+        assert stream.copied_records_dropped == 2
+        child_texts = [
+            record["payload"]["content"][0]["text"]
+            for record, source in stream.records
+            if stream.thread_of_file[source] == CHILD and record["payload"].get("type") == "message"
+        ]
+        assert child_texts == ["task", "done"]
 
     def test_a_rollout_off_the_chain_is_reverted_in_full(self) -> None:
         # A second segment that continues the FIRST rollout, abandoned for the newest one.
@@ -188,10 +254,11 @@ class TestAssembly:
         stream = assemble_codex_session([RolloutFile("r.jsonl", records)])
         assert [record for record, _source in stream.records] == records
         assert not any(stream.reverted)
+        assert stream.spawned == ()
 
 
 class TestConvertSession:
-    def test_the_session_converts_with_reverted_steps(self, tmp_path: Path) -> None:
+    def test_the_session_converts_with_reverted_and_sidechain_steps(self, tmp_path: Path) -> None:
         first, others = write_session(tmp_path / "sessions")
         result, report = convert_codex_and_audit(first, source_files=others)
         assert result.validation_errors == ()
@@ -204,20 +271,28 @@ class TestConvertSession:
             return [s.get("message") for s in steps if predicate(s.get("extra") or {})]
 
         assert texts(lambda e: e.get("reverted")) == ["question 2x", "answer 2x"]
-        assert texts(lambda e: not e.get("reverted")) == [
-            "question 1",
-            "answer 1",
-            "question 2",
-            "answer 2",
+        assert texts(lambda e: e.get("agent_id") == CHILD and e.get("is_sidechain")) == [
+            "task",
+            "done",
         ]
-        assert report.subagent_files_found == 0
+        assert "question 1" in texts(lambda e: not e.get("is_sidechain"))
+        assert texts(lambda e: True).count("question 1") == 1, "copied history was converted"
+
+        assert trajectory["extra"]["subagents"] == [
+            {
+                "agent_id": CHILD,
+                "agent_type": "explorer",
+                "parent_tool_call_id": "call_spawn",
+                "link_source": "tool_output",
+                "spawn_depth": 1,
+            }
+        ]
+        assert report.subagent_files_found == 1
 
         edges = [json.loads(line) for line in result.edges_lines]
         assert len({edge["uuid"] for edge in edges}) == len(edges)
-        assert {edge["source_file"] for edge in edges} == {
-            f"17/{first.name}",
-            f"20/{others[0].name}",
-        }
+        sidechain = {edge["source_file"] for edge in edges if edge["is_sidechain"]}
+        assert sidechain == {f"20/{others[1].name}"}
 
     def test_archive_names_are_relative_to_the_common_base(self, tmp_path: Path) -> None:
         from atif_converter.infrastructure.source_archive import SourceArchiveWriter
@@ -228,4 +303,5 @@ class TestConvertSession:
         assert {f.relative_path for f in archive.files} == {
             f"17/{first.name}",
             f"20/{others[0].name}",
+            f"20/{others[1].name}",
         }

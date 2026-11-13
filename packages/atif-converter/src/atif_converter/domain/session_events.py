@@ -52,7 +52,7 @@ short payload from a shortened one.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from typing import Any, Final
 
 from atif_converter.domain.codex_edges import record_id
@@ -301,6 +301,7 @@ def codex_session_events(
     records: Iterable[tuple[dict[str, Any], str]],
     *,
     record_ids: Sequence[str] | None = None,
+    sidechain_files: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """The kept Codex records as rows, in file order.
 
@@ -308,8 +309,9 @@ def codex_session_events(
     ``messages`` on it: ``record_ids`` when the caller holds the edge ids
     (aligned with ``records``), else
     :func:`~atif_converter.domain.codex_edges.record_id`, line-numbered per
-    source file. A rollout has no parent pointer and no sidechain, so those
-    columns are ``None`` / ``False``.
+    source file. A rollout has no parent pointer, so that column is ``None``;
+    ``is_sidechain`` marks a record of a spawned thread's rollout
+    (``sidechain_files``).
     """
     rows: list[dict[str, Any]] = []
     line_numbers: dict[str, int] = {}
@@ -336,7 +338,7 @@ def codex_session_events(
                 ),
                 parent_uuid=None,
                 tool_use_id=None,
-                is_sidechain=False,
+                is_sidechain=source_file in sidechain_files,
                 source_file=source_file,
                 payload=body,
             )
