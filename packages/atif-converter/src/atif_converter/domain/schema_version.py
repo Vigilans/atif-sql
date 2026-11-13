@@ -101,12 +101,18 @@ History:
   of the four rate families and from the request's own tier variant, and applies
   every exceeded threshold lowest first, so a key the highest one leaves out keeps
   the lower threshold's rate. The new ``balanced`` tier reads its own keys.
+* 12 — a Codex session is every rollout of its thread
+  (:mod:`atif_converter.domain.codex_threads`): its first rollout and its
+  continuation segments, read plain or ``.jsonl.zst``. Steps on a branch the
+  thread left carry ``extra.reverted``. A Codex session event's ``uuid`` is
+  its edge's, also where the edge ids fell back from a repeated id, and a
+  repeated line-form edge id is qualified by its file.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 11
+CONVERTER_SCHEMA_VERSION: Final = 12
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

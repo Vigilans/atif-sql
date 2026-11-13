@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from atif_corpus.domain.agents import AgentSource
+from atif_corpus.domain.sessions import owns_path
 from atif_corpus.domain.source_layout import (
     CLAUDE_CODE_LAYOUT,
     CODEX_LAYOUT,
@@ -21,6 +22,8 @@ from atif_corpus.domain.source_layout import (
 CODEX_ROLLOUT = "rollout-2026-09-11T17-27-01-01a09182-2858-7f42-936b-7f027b341fdf.jsonl"
 CODEX_SESSION = "01a09182-2858-7f42-936b-7f027b341fdf"
 CLAUDE_SESSION = "11111111-1111-1111-1111-111111111111"
+CODEX_SEGMENT_ID = "01a158c3-25de-70a3-b159-33361d98a15a"
+CODEX_SEGMENT = f"rollout-2026-10-20T18-02-26-{CODEX_SESSION}_{CODEX_SEGMENT_ID}.jsonl"
 
 
 class TestLayoutRegistry:
@@ -47,6 +50,14 @@ class TestTranscriptNames:
         assert not CODEX_LAYOUT.is_transcript(f"{CLAUDE_SESSION}.jsonl")
         assert CODEX_LAYOUT.session_id(CODEX_ROLLOUT) == CODEX_SESSION
 
+    def test_codex_continuation_segment_carries_its_thread(self) -> None:
+        """A segment names the thread it continues, so it files under that session."""
+        assert CODEX_LAYOUT.is_transcript(CODEX_SEGMENT)
+        assert CODEX_LAYOUT.session_id(CODEX_SEGMENT) == CODEX_SESSION
+        parsed = parse_rollout_name(CODEX_SEGMENT)
+        assert parsed is not None
+        assert (parsed.thread_id, parsed.rollout_id) == (CODEX_SESSION, CODEX_SEGMENT_ID)
+
     def test_codex_takes_a_compressed_rollout(self) -> None:
         name = f"{CODEX_ROLLOUT}.zst"
         assert CODEX_LAYOUT.is_transcript(name)
@@ -54,6 +65,7 @@ class TestTranscriptNames:
         parsed = parse_rollout_name(name)
         assert parsed is not None
         assert parsed.compressed
+        assert parsed.rollout_id == CODEX_SESSION
 
     def test_claude_code_takes_no_compressed_transcript(self) -> None:
         assert not CLAUDE_CODE_LAYOUT.is_transcript(f"{CLAUDE_SESSION}.jsonl.zst")
@@ -109,3 +121,19 @@ class TestWatermarkResolution:
         root = "/home/alice/.codex/sessions"
         path = f"{root}/2026/09/11/{CODEX_ROLLOUT}"
         assert CODEX_LAYOUT.session_from_watermark_path(f"{root}/", path) == (CODEX_SESSION, path)
+
+
+class TestOwnership:
+    def test_every_rollout_of_a_thread_shares_its_watermark_scope(self) -> None:
+        """Continuation segments sit in other date dirs; their names carry the thread."""
+        root = "/home/alice/.codex/sessions"
+        main = f"{root}/2026/09/11/{CODEX_ROLLOUT}"
+        assert owns_path(main, f"{root}/2026/10/20/{CODEX_SEGMENT}")
+        assert owns_path(main, f"{root}/2026/10/20/{CODEX_SEGMENT}.zst")
+        other = "rollout-2026-09-11T17-27-01-01a08db0-09a9-7b02-b690-62b5323644ff.jsonl"
+        assert not owns_path(main, f"{root}/2026/09/11/{other}")
+
+    def test_claude_code_scope_is_the_side_dir(self) -> None:
+        main = f"/p/-proj/{CLAUDE_SESSION}.jsonl"
+        assert owns_path(main, f"/p/-proj/{CLAUDE_SESSION}/subagents/agent-a.jsonl")
+        assert not owns_path(main, "/p/-proj/22222222-2222-2222-2222-222222222222.jsonl")

@@ -140,6 +140,9 @@ def codex_edge_from_record(
 def build_codex_edges(records: list[tuple[dict[str, Any], str]]) -> list[dict[str, Any]]:
     """Build every edge from ``(record, source_file)`` pairs, in FILE order.
 
+    A session of several rollouts passes them in its conversion order (see
+    :mod:`atif_converter.domain.codex_threads`).
+
     File order, not timestamp order: a rollout is append-only, so its line
     order is the causal order, and two records inside one millisecond share a
     timestamp often enough that sorting by it would shuffle a tool call past
@@ -162,6 +165,11 @@ def build_codex_edges(records: list[tuple[dict[str, Any], str]]) -> list[dict[st
             kind = record.get("type")
             prefix = kind if isinstance(kind, str) and kind else "record"
             edge["uuid"] = f"{prefix}:L{line_numbers[source_file]}"
+            # Line numbers repeat across the rollouts of one session, and
+            # ordinals repeat across a thread's segments, so the line form is
+            # qualified by its file when another file already took it.
+            if edge["uuid"] in used_ids:
+                edge["uuid"] = f"{source_file}:{edge['uuid']}"
         used_ids.add(str(edge["uuid"]))
         edges.append(edge)
     return edges

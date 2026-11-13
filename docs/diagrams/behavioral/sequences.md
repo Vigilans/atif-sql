@@ -33,8 +33,8 @@ Sources, in dispatch order:
   `read_watermark` at `:424` called from `:1640`, `scan_sources` called at `:1642`, `build_plan` called
   at `:1716`, `_write_session` at `:624` called from `:797`, watermark advanced at `:1796-1799`, report
   built at `:1811`.
-- scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:216`.
-- build_plan: `packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`.
+- scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:220`.
+- build_plan: `packages/atif-corpus/src/atif_corpus/domain/sessions.py:180`.
 - RealConverter: `packages/atif-cli/src/atif_cli/converter_adapter.py:82`, calling
   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220`.
 - converter: our ported Claude Code converter,

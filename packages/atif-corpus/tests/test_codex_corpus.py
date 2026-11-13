@@ -383,3 +383,60 @@ class TestCompressedRollouts:
         )
         (session,) = scan_source_root(codex_source_root, CODEX_LAYOUT)
         assert session.session_jsonl == str(path)
+
+
+SEGMENT = "01a158c3-25de-70a3-b159-33361d98a15a"
+
+
+class TestCodexSessionGroups:
+    def test_a_thread_and_its_segments_are_one_session(self, codex_source_root: Path) -> None:
+        first = write_rollout(codex_source_root, SESSION_A, mtime_ns=STALE_NS)
+        segment = write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-12T00-00-00-{SESSION_A}_{SEGMENT}.jsonl",
+            {"id": SESSION_A, "session_id": SESSION_A, "history_base": {"thread_id": SESSION_A}},
+            day=("2026", "09", "12"),
+            compressed=True,
+        )
+        (session,) = scan_source_root(codex_source_root, CODEX_LAYOUT)
+        assert session.session_id == SESSION_A
+        assert session.session_jsonl == str(first)
+        assert set(session.source_files) == {str(first), str(segment)}
+
+    def test_a_new_segment_makes_the_session_stale(
+        self, codex_source_root: Path, tmp_path: Path
+    ) -> None:
+        corpus_root = tmp_path / "corpus"
+        write_rollout(codex_source_root, SESSION_A, mtime_ns=STALE_NS)
+        assert _materialize_codex(codex_source_root, corpus_root).materialized_count == 1
+        assert _materialize_codex(codex_source_root, corpus_root).materialized_count == 0
+        write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-09-12T00-00-00-{SESSION_A}_{SEGMENT}.jsonl",
+            {"id": SESSION_A, "history_base": {"thread_id": SESSION_A}},
+            day=("2026", "09", "12"),
+        )
+        assert _materialize_codex(codex_source_root, corpus_root).materialized_count == 1
+        assert _materialize_codex(codex_source_root, corpus_root).materialized_count == 0
+
+    def test_the_converter_gets_the_group_and_the_archive_spans_it(
+        self, codex_source_root: Path, tmp_path: Path
+    ) -> None:
+        corpus_root = tmp_path / "corpus"
+        write_rollout(codex_source_root, SESSION_A, mtime_ns=STALE_NS)
+        segment = write_rollout_file(
+            codex_source_root,
+            f"rollout-2026-10-01T00-00-00-{SESSION_A}_{SEGMENT}.jsonl",
+            {"id": SESSION_A, "history_base": {"thread_id": SESSION_A}},
+            day=("2026", "10", "01"),
+        )
+        _materialize_codex(codex_source_root, corpus_root)
+        meta = json.loads(CorpusLayout(corpus_root=corpus_root).meta_path(SESSION_A).read_text())
+        manifest = meta["source_archive"]
+        # Two months apart: the deepest directory holding both is the year.
+        assert manifest["source_dir"] == "2026"
+        assert manifest["main"] == f"09/11/rollout-2026-09-11T00-00-00-{SESSION_A}.jsonl"
+        assert {entry["path"] for entry in manifest["files"]} == {
+            manifest["main"],
+            f"10/01/{segment.name}",
+        }

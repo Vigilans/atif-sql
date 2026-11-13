@@ -128,7 +128,7 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   `VARCHAR` (`packages/atif-duck/src/atif_duck/domain/raw_readers.py:105`); the CLI supplies it (`packages/atif-cli/src/atif_cli/app.py:978`).
 
 **The hand-written contract and the manifests split the job.** Its CLI heading
-(`docs/CONTRACT.md:301`) names atif-cli the package that composes the others. The atif-cli
+(`docs/CONTRACT.md:309`) names atif-cli the package that composes the others. The atif-cli
 manifest declares five siblings (`packages/atif-cli/pyproject.toml:32-36`) and the CLI imports
 every one of them; atif-models reaches it through atif-analytics, which imports atif-models
 (`packages/atif-analytics/pyproject.toml:23`) as the import-linter contracts permit.

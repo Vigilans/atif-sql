@@ -10,11 +10,16 @@ records, and the fingerprints are re-checked once the artifacts are built, so
 the census, the trajectory and ``edges.jsonl`` all describe the same bytes of a
 rollout that Codex may still be appending to.
 
-What differs is only what a rollout IS. One file, no side-file tree, a record
-taxonomy of its own, and a set of gaps of its own — so the census, the edges
-and the enrichment come from the Codex modules while the snapshot machinery,
-the error taxonomy and the returned ``(ConversionResult, LossReport)`` pair are
-shared with the Claude Code path.
+What differs is only what a rollout IS. No side-file tree, a record taxonomy
+of its own, and a set of gaps of its own — so the census, the edges and the
+enrichment come from the Codex modules while the snapshot machinery, the error
+taxonomy and the returned ``(ConversionResult, LossReport)`` pair are shared
+with the Claude Code path.
+
+A session can span several rollouts: a thread's continuation segments, passed
+as ``source_files``. :mod:`atif_converter.domain.codex_threads` orders them
+into one record stream, and every artifact is built from that stream; the
+trajectory's steps are then marked reverted from the records behind them.
 """
 
 from __future__ import annotations
@@ -32,6 +37,11 @@ from atif_converter.domain.codex_fidelity import (
     CodexFidelityGap,
     CodexRecordType,
 )
+from atif_converter.domain.codex_threads import (
+    RolloutFile,
+    assemble_codex_session,
+    mark_codex_session,
+)
 from atif_converter.domain.errors import SourceMutatedDuringConversion
 from atif_converter.domain.fidelity import AnyRecordType, LossReport
 from atif_converter.domain.result_signals import annotate_codex_trajectory
@@ -39,7 +49,7 @@ from atif_converter.domain.session_events import (
     codex_session_events,
     session_events_jsonl_lines,
 )
-from atif_converter.infrastructure.codex_adapter import convert_loaded_codex_session
+from atif_converter.infrastructure.codex_adapter import convert_codex_stream
 from atif_converter.infrastructure.codex_census import (
     CodexSessionCensus,
     codex_census_from_records,
@@ -65,7 +75,10 @@ _ITEM_TYPE_GAPS: dict[str, CodexFidelityGap] = {
 
 
 def _loss_report(
-    census: CodexSessionCensus, *, developer_messages: int, captured: int = 0
+    census: CodexSessionCensus,
+    *,
+    developer_messages: int,
+    captured: int = 0,
 ) -> LossReport:
     """Loss accounting for one rollout: total records vs items that convert.
 
@@ -154,7 +167,7 @@ def convert_codex_and_audit(
     """Convert ``rollout_jsonl`` to ATIF and produce its loss accounting.
 
     ``rollout_jsonl`` is the session's first rollout; ``source_files`` are its
-    other rollouts, read and fingerprinted with it.
+    other rollouts (its continuation segments).
 
     The returned :class:`ConversionResult` carries the ENRICHED trajectory
     (``source_uuids`` on steps, ``cache_creation_total`` and the compaction
@@ -179,19 +192,29 @@ def convert_codex_and_audit(
     """
     loaded = read_session(rollout_jsonl, source_files)
     snapshot = loaded.snapshot
+    base = snapshot.base
+    stream = assemble_codex_session(
+        [
+            RolloutFile(
+                source_file=path.relative_to(base).as_posix(),
+                records=[record for record in records if isinstance(record, dict)],
+            )
+            for path, records in loaded.records_by_file.items()
+        ]
+    )
+    records = stream.records
     # Attachments out BEFORE conversion, named by the same record ids the
     # enrichment pass writes into ``source_uuids`` (an edge's uuid depends on
     # the record's ids and position, never on the content being rewritten).
-    records = loaded.record_pairs()
     record_keys = [str(edge["uuid"]) for edge in build_codex_edges(records)]
     collector = BlobCollector()
     blob_index = extract_codex_blobs(
         [record for record, _src in records], collector, record_keys=record_keys
     )
-    result = convert_loaded_codex_session(loaded)
+    result = convert_codex_stream([record for record, _src in records], rollout_jsonl)
 
     census = codex_census_from_records(rollout_jsonl, records)
-    events = codex_session_events(records)
+    events = codex_session_events(records, record_ids=record_keys)
     report = _loss_report(
         census,
         developer_messages=_developer_message_count(records),
@@ -203,7 +226,8 @@ def convert_codex_and_audit(
     # than deep-copying a whole rollout's worth of steps.
     enriched = enrich_codex_trajectory(result.trajectory, records, copy_input=False)
     annotate_codex_trajectory(enriched, [record for record, _src in records], blob_index)
-    del records, loaded, events
+    mark_codex_session(enriched, stream, record_keys)
+    del records, loaded, events, stream
     _refuse_if_mutated(snapshot, archive)
 
     return (

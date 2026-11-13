@@ -110,11 +110,11 @@ entry.
 | Symbol | Path | Last modified |
 | --- | --- | --- |
 | `is_interrupt` | `packages/atif-analytics/src/atif_analytics/domain/authorship.py:125` | 2026-09-27 |
-| `codex_edge_ids` | `packages/atif-converter/src/atif_converter/domain/codex_edges.py:175` | 2026-09-11 |
+| `codex_edge_ids` | `packages/atif-converter/src/atif_converter/domain/codex_edges.py:183` | 2026-09-11 |
 | `CODEX_CONVERTIBLE_RECORD_TYPES` | `packages/atif-converter/src/atif_converter/domain/codex_fidelity.py:47` | 2026-09-11 |
 | `is_claude_session_event` | `packages/atif-converter/src/atif_converter/domain/session_events.py:206` | 2026-09-27 |
 | `is_codex_session_event` | `packages/atif-converter/src/atif_converter/domain/session_events.py:295` | 2026-09-27 |
-| `convert_codex_session` | `packages/atif-converter/src/atif_converter/infrastructure/codex_adapter.py:67` | 2026-09-11 |
+| `convert_codex_session` | `packages/atif-converter/src/atif_converter/infrastructure/codex_adapter.py:58` | 2026-09-11 |
 | `LAKE_TABLE_NAMES` | `packages/atif-duck/src/atif_duck/domain/lake.py:254` | 2026-09-28 |
 
 ## Unreferenced exports
@@ -162,9 +162,9 @@ intra-module use site is named after the table.
 | `CLAUDE_WHOLE_RECORD_TYPES` | `packages/atif-converter/src/atif_converter/domain/session_events.py:96` | 2026-09-27 |
 | `CODEX_WHOLE_RECORD_TYPES` | `packages/atif-converter/src/atif_converter/domain/session_events.py:124` | 2026-09-27 |
 | `CODEX_EVENT_MSG_TYPES` | `packages/atif-converter/src/atif_converter/domain/session_events.py:126` | 2026-09-27 |
-| `REPORTED_COST_SOURCE_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:339` | 2026-09-27 |
-| `REPORTED_UNKNOWN_MODEL_COST_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:340` | 2026-09-27 |
-| `REPORTED_COST_SOURCE_COST_STATE` | `packages/atif-converter/src/atif_converter/domain/session_events.py:342` | 2026-09-27 |
+| `REPORTED_COST_SOURCE_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:349` | 2026-09-27 |
+| `REPORTED_UNKNOWN_MODEL_COST_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:350` | 2026-09-27 |
+| `REPORTED_COST_SOURCE_COST_STATE` | `packages/atif-converter/src/atif_converter/domain/session_events.py:352` | 2026-09-27 |
 | `read_codex_rollout` | `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:43` | 2026-09-11 |
 | `ARCHIVE_ZSTD_LEVEL` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:49` | 2026-09-27 |
 | `ArchivedSourceFile` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:63` | 2026-09-27 |
@@ -261,7 +261,7 @@ numbers follow it as plain numbers.
   `packages/atif-converter/src/atif_converter/domain/blobs.py:344`, inside
   `codex_tool_image_media_type`, which is called at `:363`.
 - `codex_edge_from_record` is called at
-  `packages/atif-converter/src/atif_converter/domain/codex_edges.py:155`.
+  `packages/atif-converter/src/atif_converter/domain/codex_edges.py:158`.
 - `COMMAND_TOOL_NAME` names a nested command call at
   `packages/atif-converter/src/atif_converter/domain/codex_nested_calls.py:105`,
   and `VIA_EXEC` is written into the call's `extra` at `:110`.
@@ -271,8 +271,8 @@ numbers follow it as plain numbers.
   `CLAUDE_WHOLE_RECORD_TYPES` are membership tests at `:184`, `:189`, and
   `:200`; `CODEX_WHOLE_RECORD_TYPES` and `CODEX_EVENT_MSG_TYPES` are membership
   tests at `:285` and `:290`; `REPORTED_COST_SOURCE_KEY` and
-  `REPORTED_COST_SOURCE_COST_STATE` make up the dict entry at `:367`, and
-  `REPORTED_UNKNOWN_MODEL_COST_KEY` is the key written at `:371`.
+  `REPORTED_COST_SOURCE_COST_STATE` make up the dict entry at `:377`, and
+  `REPORTED_UNKNOWN_MODEL_COST_KEY` is the key written at `:381`.
 - `read_codex_rollout` is called at
   `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:70`.
 - `ARCHIVE_ZSTD_LEVEL` sets the compressor level at
@@ -367,7 +367,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
   (`SourceDelta`).
 - `packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:36`
   (`COMPACT_SEPARATORS`),
-  `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:63`
+  `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:74`
   (`WATCHED_SIDE_FILE_GLOBS`), and
   `packages/atif-corpus/src/atif_corpus/infrastructure/source_archive.py:51`
   (`ARCHIVE_CODEC`) with `:122` (`read_manifest`).

@@ -52,7 +52,7 @@ short payload from a shortened one.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any, Final
 
 from atif_converter.domain.codex_edges import record_id
@@ -297,17 +297,23 @@ def is_codex_session_event(record: dict[str, Any]) -> bool:
     return _codex_kind(record) is not None
 
 
-def codex_session_events(records: Iterable[tuple[dict[str, Any], str]]) -> list[dict[str, Any]]:
+def codex_session_events(
+    records: Iterable[tuple[dict[str, Any], str]],
+    *,
+    record_ids: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
     """The kept Codex records as rows, in file order.
 
-    ``uuid`` is the same id ``edges.jsonl`` gives the record
-    (:func:`~atif_converter.domain.codex_edges.record_id`, line-numbered per
-    source file), so a row joins ``messages`` on it. A rollout has no parent
-    pointer and no sidechain, so those columns are ``None`` / ``False``.
+    ``uuid`` is the id ``edges.jsonl`` gives the record, so a row joins
+    ``messages`` on it: ``record_ids`` when the caller holds the edge ids
+    (aligned with ``records``), else
+    :func:`~atif_converter.domain.codex_edges.record_id`, line-numbered per
+    source file. A rollout has no parent pointer and no sidechain, so those
+    columns are ``None`` / ``False``.
     """
     rows: list[dict[str, Any]] = []
     line_numbers: dict[str, int] = {}
-    for record, source_file in records:
+    for index, (record, source_file) in enumerate(records):
         line_numbers[source_file] = line_numbers.get(source_file, 0) + 1
         kind = _codex_kind(record)
         if kind is None:
@@ -323,7 +329,11 @@ def codex_session_events(records: Iterable[tuple[dict[str, Any], str]]) -> list[
                 len(rows),
                 ts=record.get("timestamp"),
                 kind=kind,
-                uuid=record_id(record, line_numbers[source_file]),
+                uuid=(
+                    record_id(record, line_numbers[source_file])
+                    if record_ids is None
+                    else record_ids[index]
+                ),
                 parent_uuid=None,
                 tool_use_id=None,
                 is_sidechain=False,

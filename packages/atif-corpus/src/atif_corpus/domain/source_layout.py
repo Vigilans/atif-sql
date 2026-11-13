@@ -22,28 +22,48 @@ from pathlib import PurePosixPath
 
 from atif_corpus.domain.agents import AgentSource
 
-#: A Codex rollout filename: ``rollout-<ts>-<thread-uuid>.jsonl``, optionally
-#: zstd-compressed (``.jsonl.zst``). The uuid is five hyphen-separated groups,
-#: and the timestamp takes everything before it.
-_ROLLOUT_NAME = re.compile(r"^rollout-.+-(?P<thread>[^-_/]+(?:-[^-_/]+){4})\.jsonl(?P<zst>\.zst)?$")
+#: A Codex rollout filename: ``rollout-<ts>-<thread-uuid>[_<segment-uuid>].jsonl``,
+#: optionally zstd-compressed (``.jsonl.zst``). A continuation segment names the
+#: thread it continues and its own segment id; a thread's first rollout names
+#: the thread alone. Each uuid is five hyphen-separated groups, and the
+#: timestamp takes everything before the thread uuid.
+_ROLLOUT_NAME = re.compile(
+    r"^rollout-.+-(?P<thread>[^-_/]+(?:-[^-_/]+){4})"
+    r"(?:_(?P<segment>[^-_/]+(?:-[^-_/]+){4}))?\.jsonl(?P<zst>\.zst)?$"
+)
 
 
 @dataclass(frozen=True, slots=True)
 class RolloutName:
     """What a Codex rollout filename says about the rollout it holds."""
 
-    #: The thread the rollout belongs to.
+    #: The thread the rollout belongs to: a continuation segment and the
+    #: thread's first rollout carry the same one.
     thread_id: str
+    #: The id ``history_base.thread_id`` refers to: the segment id for a
+    #: continuation, the thread id for the thread's first rollout.
+    rollout_id: str
     #: Whether the file is the zstd-compressed ``.jsonl.zst`` form.
     compressed: bool
 
 
 def parse_rollout_name(name: str) -> RolloutName | None:
-    """The thread id a rollout filename carries, or ``None`` for any other name."""
+    """The thread and rollout ids a rollout filename carries, or ``None`` for any other name."""
     match = _ROLLOUT_NAME.match(name)
     if match is None:
         return None
-    return RolloutName(thread_id=match.group("thread"), compressed=match.group("zst") is not None)
+    thread_id = match.group("thread")
+    return RolloutName(
+        thread_id=thread_id,
+        rollout_id=match.group("segment") or thread_id,
+        compressed=match.group("zst") is not None,
+    )
+
+
+def rollout_thread_id(path: str) -> str | None:
+    """The thread id of the rollout file at ``path``, or ``None`` when it is not one."""
+    parsed = parse_rollout_name(PurePosixPath(path).name)
+    return None if parsed is None else parsed.thread_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +79,9 @@ class SourceLayout:
 
     ``has_side_files`` says whether a session can own a sibling directory of
     additional transcripts. Claude Code sessions do (subagent and workflow
-    side-files, which the watermark must notice); a Codex sub-agent writes its
-    own rollout under its own session id, so a rollout is always alone.
+    side-files, which the watermark must notice). A Codex thread's
+    continuation segments sit beside its first rollout in the date tree
+    instead, and the scanner groups them by the thread id their names carry.
     """
 
     agent: AgentSource
@@ -77,7 +98,7 @@ class SourceLayout:
         """The session id a transcript filename carries, or ``None`` if it carries none.
 
         Claude Code names the file after the session, so the stem IS the id.
-        Codex prefixes a timestamp, so the id is the filename's trailing uuid —
+        Codex prefixes a timestamp, so the id is the filename's thread uuid —
         and a name whose shape does not yield one is not a session this layout
         can materialize, which the caller must skip rather than guess at.
         """
@@ -106,8 +127,9 @@ class SourceLayout:
         if len(segments) <= self.transcript_depth:
             return None
         if self.agent is AgentSource.CODEX:
-            # A rollout owns no side-files, so a recorded path IS a main
-            # transcript and its own name carries the id.
+            # A rollout owns no side-files, and every rollout of a thread
+            # scopes the same watermark entries (``owns_path``), so a recorded
+            # path stands in for its thread's main transcript.
             session_id = self.session_id(segments[self.transcript_depth])
             return (session_id, path) if session_id else None
         # Claude Code: `<project>/<session>.jsonl`, or a side-file under
@@ -128,8 +150,8 @@ CLAUDE_CODE_LAYOUT = SourceLayout(
     has_side_files=True,
 )
 
-#: Codex CLI: `<source_root>/<YYYY>/<MM>/<DD>/rollout-<ts>-<uuid>.jsonl[.zst]`,
-#: one file per session and no side-files.
+#: Codex CLI: `<source_root>/<YYYY>/<MM>/<DD>/rollout-<ts>-<uuid>[_<segment>].jsonl[.zst]`,
+#: one or more rollouts per session and no side-files.
 CODEX_LAYOUT = SourceLayout(
     agent=AgentSource.CODEX,
     transcript_depth=3,

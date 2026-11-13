@@ -30,12 +30,12 @@ catalog copy.
 2. One pass through the corpus use case runs scan, plan, convert, and write in that order and
    returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1517`).
 3. The scanner discovers every session under the raw transcript root and separates unreadable
-   sessions from absent ones, so a `stat` failure is never mistaken for a deletion (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:216`). It walks whichever layout the
+   sessions from absent ones, so a `stat` failure is never mistaken for a deletion (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:220`). It walks whichever layout the
    agent selects, descending exactly `transcript_depth` directories and reporting an unlistable one at
-   any level (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:179`).
+   any level (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:190`).
 4. The pure planner partitions the scan into to-materialize, up-to-date, and skipped-live using
    the previous watermark and the quiescence policy; `force` overrides staleness but never
-   liveness (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`).
+   liveness (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:180`).
 5. For each planned session the use case calls `converter.convert` across the port; one session's
    exception is caught and recorded so a single bad transcript cannot abort the sync (`packages/atif-corpus/src/atif_corpus/application/materialize.py:813`).
    By default the sessions are spread over a process pool (`--workers`, default `min(8, cpu_count)`)
@@ -44,7 +44,7 @@ catalog copy.
    forbids atif-corpus from importing atif-converter; it raises rather than returning an invalid
    trajectory (`packages/atif-cli/src/atif_cli/converter_adapter.py:141-142`).
 7. Under `--agent codex` the same step runs `convert_codex_and_audit`, which reads the one rollout it
-   is given and converts it with our ported Codex converter (`packages/atif-converter/src/atif_converter/application/convert_codex.py:148`).
+   is given and converts it with our ported Codex converter (`packages/atif-converter/src/atif_converter/application/convert_codex.py:161`).
 8. `convert_and_audit` reads the source files once (fingerprinted and parsed in the same pass,
    `harbor_adapter.read_session`), converts those records with our ported converter through the
    seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py`

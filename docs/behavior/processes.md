@@ -29,7 +29,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
 4. Scan the source root for main transcripts and every side-file, then fold
    sessions living under a directory that would not list into the unreadable
    set using the watermark as the only record of what lived there:
-   `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:216`,
+   `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:220`,
    `packages/atif-corpus/src/atif_corpus/application/materialize.py:1112`.
 5. Guard, then retain sourceless sessions: a corpus whose `meta.json` names
    another agent raises `CorpusAgentMismatchError` before anything is touched,
@@ -42,7 +42,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:878`
 6. Build the pure `MaterializationPlan` from quiescence, the watermark, and
    each session's recorded generation, force-replanning sessions the watermark calls current whose artifact
    directory is missing (the one state reachable by a kill inside the swap
-   window): `packages/atif-corpus/src/atif_corpus/domain/sessions.py:169`,
+   window): `packages/atif-corpus/src/atif_corpus/domain/sessions.py:180`,
    `packages/atif-corpus/src/atif_corpus/application/materialize.py:1037`.
 7. Per planned session: convert (the converter writes the raw source archive
    while it verifies its input), store the attachments in the shared blob

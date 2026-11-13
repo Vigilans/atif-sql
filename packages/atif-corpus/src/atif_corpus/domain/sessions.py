@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from atif_corpus.domain.source_layout import rollout_thread_id
 from atif_corpus.domain.watermark import diff_source_mtimes
 
 if TYPE_CHECKING:
@@ -46,12 +47,15 @@ class SessionSource:
     side-file under the session dir (``subagents/agent-*.jsonl``,
     ``subagents/workflows/wf_*/agent-*.jsonl``, and any deeper future
     nesting) — the contract requires the watermark to notice a workflow
-    side-file changing even when the main transcript did not.
+    side-file changing even when the main transcript did not. For Codex it
+    covers every rollout of the thread: its first rollout and its
+    continuation segments.
     """
 
     #: The session UUID (the main JSONL's stem).
     session_id: str
-    #: Absolute path of the main ``<session_id>.jsonl`` transcript.
+    #: Absolute path of the main transcript (``<session_id>.jsonl``, or a
+    #: Codex thread's first rollout).
     session_jsonl: str
     #: ``{absolute path: epoch-ns mtime}`` for the main file + all side-files.
     source_mtimes: Mapping[str, int]
@@ -140,14 +144,21 @@ def owns_path(session_jsonl: str, path: str) -> bool:
     """True when ``path`` is ``session_jsonl`` itself or one of its side-files.
 
     The single definition of a session's watermark scope: the main JSONL
-    plus everything under ``<main-jsonl-stem>/``. Staleness and watermark
-    retention both key off this, so the two can never disagree about which
-    entries belong to a session. Keyed on the main path rather than a whole
-    :class:`SessionSource` so a session the scanner could NOT read — it has
-    a path but no mtimes — gets scoped by the same rule.
+    plus everything under ``<main-jsonl-stem>/``, and for a Codex rollout
+    every rollout of the same thread (its continuation segments sit in other
+    date directories, and their filenames carry the thread id). Staleness and
+    watermark retention both key off this, so the two can never disagree
+    about which entries belong to a session. Keyed on the main path rather
+    than a whole :class:`SessionSource` so a session the scanner could NOT
+    read — it has a path but no mtimes — gets scoped by the same rule.
     """
+    if path == session_jsonl:
+        return True
+    thread_id = rollout_thread_id(session_jsonl)
+    if thread_id is not None:
+        return rollout_thread_id(path) == thread_id
     stem = session_jsonl.rsplit(".", 1)[0]
-    return path == session_jsonl or path.startswith(f"{stem}/")
+    return path.startswith(f"{stem}/")
 
 
 def _is_stale(session: SessionSource, watermark: Mapping[str, int]) -> bool:

@@ -19,7 +19,7 @@ Every pass over the raw transcript corpus reclassifies each discovered session f
 state is not a stored field; it is what the watermark records, whether the session's artifact
 directory exists, and what its `meta.json` (or the empty-session record) says about the generation
 and the source. The classification is the `if / elif / else` at
-`packages/atif-corpus/src/atif_corpus/domain/sessions.py:218-223`, and the outcome states are the
+`packages/atif-corpus/src/atif_corpus/domain/sessions.py:229-234`, and the outcome states are the
 counters and id tuples of `MaterializationReport`
 (`packages/atif-corpus/src/atif_corpus/application/materialize.py:220-287`).
 
@@ -49,9 +49,9 @@ stateDiagram-v2
 - `skipped_live` is the entry state for a session still being written, not an error state; a session
   first scanned after it went quiet enters `to_materialize` directly. A transcript is appended to many times per
   turn, and a session qualifies to convert only once its newest source mtime is at least
-  `quiesce_seconds` old, 300 by default (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:84`).
+  `quiesce_seconds` old, 300 by default (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:88`).
   `force` overrides staleness but never quiescence, because converting a half-written transcript
-  produces a wrong artifact rather than a stale one (`:183-185`).
+  produces a wrong artifact rather than a stale one (`:194-196`).
 - `failures --> to_materialize` is the retry, and it works only because `_advance_watermark` retains
   the failed session's entries. Staleness is "recorded set differs from scanned set", so the retained
   entry *is* the retry signal; dropping it would classify the session `up_to_date` forever

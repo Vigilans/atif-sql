@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from atif_converter.domain.codex_threads import rollout_ids
 from atif_converter.domain.errors import (
     ConversionError,
     EmptySessionError,
@@ -32,36 +33,26 @@ from atif_converter.infrastructure.raw_records import LoadedSession
 if TYPE_CHECKING:
     from atif_converter.domain.atif import Trajectory
 
-#: A Codex rollout's filename shape. harbor's own
-#: ``Codex._ROLLOUT_FILENAME_RE`` requires the same prefix for its upload path,
-#: and the session id is the filename's trailing uuid — so a file that does not
-#: match this is not a rollout and must not be guessed at.
-_ROLLOUT_PREFIX = "rollout-"
-
 
 def codex_session_id(rollout_jsonl: Path) -> str:
-    """The session id a rollout filename carries.
+    """The session id a rollout filename carries: its thread uuid.
 
-    ``rollout-<ISO-ish timestamp>-<uuid>.jsonl[.zst]`` — the uuid is the last five
-    hyphen-separated groups of the stem, and it equals the ``id`` inside the
-    file's ``session_meta`` record (verified 2026-09-11 over the local
-    rollouts). Read from the NAME rather than the contents because discovery
-    needs a session id before anything parses the file.
+    ``rollout-<ISO-ish timestamp>-<uuid>[_<segment>].jsonl[.zst]`` — the
+    thread uuid equals the ``id`` inside the file's ``session_meta`` record
+    (verified 2026-09-11 over the local rollouts), and a continuation segment
+    carries the thread it continues. Read from the NAME rather than the
+    contents because discovery needs a session id before anything parses the
+    file.
 
     Raises
     ------
         InvalidSessionInput: the name is not a rollout filename.
     """
-    stem = Path(rollout_jsonl.name.removesuffix(".zst")).stem
-    if not stem.startswith(_ROLLOUT_PREFIX):
+    ids = rollout_ids(rollout_jsonl.name)
+    if ids is None:
         msg = f"not a Codex rollout filename (expected rollout-<ts>-<uuid>.jsonl): {rollout_jsonl}"
         raise InvalidSessionInput(msg)
-    parts = stem.split("-")
-    uuid_groups = 5
-    if len(parts) < uuid_groups + 1:
-        msg = f"Codex rollout filename carries no session uuid: {rollout_jsonl}"
-        raise InvalidSessionInput(msg)
-    return "-".join(parts[-uuid_groups:])
+    return ids[0]
 
 
 def convert_codex_session(rollout_jsonl: Path) -> ConversionResult:
@@ -110,6 +101,31 @@ def convert_loaded_codex_session(loaded: LoadedSession) -> ConversionResult:
     rollout_jsonl = loaded.snapshot.session_jsonl
     try:
         trajectory = convert_loaded_codex_rollout(loaded)
+    except (
+        Exception
+    ) as exc:  # the converter is a port of untyped upstream code; classify at the seam
+        msg = f"Codex conversion failed for {rollout_jsonl}"
+        raise ConversionError(msg) from exc
+    return _result_from(trajectory, rollout_jsonl)
+
+
+def convert_codex_stream(records: list[dict[str, Any]], rollout_jsonl: Path) -> ConversionResult:
+    """Convert a session's assembled record stream into a validated ATIF trajectory.
+
+    ``records`` are :func:`~atif_converter.domain.codex_threads.assemble_codex_session`'s
+    stream, read from ``rollout_jsonl`` (the session's first rollout) and the
+    session's other rollouts. A session of one rollout passes that rollout's
+    records, which converts exactly as :func:`convert_loaded_codex_session` does.
+
+    Raises
+    ------
+        EmptySessionError: the converter found no convertible events.
+        ConversionError: any unexpected failure inside the converter.
+    """
+    from atif_converter.infrastructure.codex_converter import convert_codex_record_list
+
+    try:
+        trajectory = convert_codex_record_list(records, rollout_jsonl)
     except (
         Exception
     ) as exc:  # the converter is a port of untyped upstream code; classify at the seam

@@ -29,8 +29,13 @@ shape. Discovery follows CONTRACT.md exactly:
   always alone and looking for siblings would be a stat per session for a
   directory that cannot exist.
 
-A Codex rollout is plain JSONL or zstd-compressed ``.jsonl.zst``; when both
-forms of one rollout are present, the plain file is the one read.
+A Codex session is every rollout of its thread. A thread's continuation
+segments (``rollout-<ts>-<thread>_<segment>.jsonl``) sit in the date
+directories of the days they were written, and their names carry the thread
+id the scanner files them under; the session's main transcript is the
+thread's first rollout, and every rollout of the group is in its watermark. A
+rollout is plain JSONL or zstd-compressed ``.jsonl.zst``; when both forms of
+one rollout are present, the plain file is the one read.
 
 A scan reports two kinds of absence and they must never be conflated. A
 session whose main transcript is genuinely GONE is marked source-removed:
@@ -49,9 +54,15 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from atif_corpus.domain.agents import AgentSource
 from atif_corpus.domain.session_id import session_id_rejection
 from atif_corpus.domain.sessions import SessionSource
-from atif_corpus.domain.source_layout import CLAUDE_CODE_LAYOUT, SourceLayout
+from atif_corpus.domain.source_layout import (
+    CLAUDE_CODE_LAYOUT,
+    RolloutName,
+    SourceLayout,
+    parse_rollout_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -203,14 +214,7 @@ def _transcripts(transcript_dir: Path, layout: SourceLayout) -> list[Path] | Non
     entries = _list_dir(transcript_dir)
     if entries is None:
         return None
-    transcripts = [entry for entry in entries if layout.is_transcript(entry.name)]
-    names = {entry.name for entry in transcripts}
-    # The plain form of a rollout wins over its compressed copy.
-    return [
-        entry
-        for entry in transcripts
-        if not (entry.name.endswith(".zst") and entry.name.removesuffix(".zst") in names)
-    ]
+    return [entry for entry in entries if layout.is_transcript(entry.name)]
 
 
 def scan_sources(
@@ -239,6 +243,8 @@ def scan_sources(
         return SourceScan()
 
     transcript_dirs, unlistable = _transcript_dirs(source_root, layout)
+    if layout.agent is AgentSource.CODEX:
+        return _scan_codex(source_root, transcript_dirs, unlistable)
 
     sessions: list[SessionSource] = []
     unreadable: dict[str, str] = {}
@@ -300,6 +306,91 @@ def scan_sources(
         len(rejected),
         source_root,
         layout.agent.value,
+    )
+    return SourceScan(
+        sessions=tuple(sessions),
+        unreadable=MappingProxyType(dict(unreadable)),
+        unlistable_dirs=tuple(unlistable),
+        rejected_session_ids=tuple(sorted(rejected)),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Rollout:
+    path: Path
+    name: RolloutName
+
+
+def _codex_rollouts(transcript_dirs: list[Path], unlistable: list[str]) -> list[_Rollout]:
+    """Every rollout under the day dirs, one per rollout id."""
+    by_rollout: dict[str, _Rollout] = {}
+    for transcript_dir in transcript_dirs:
+        entries = _list_dir(transcript_dir)
+        if entries is None:
+            unlistable.append(str(transcript_dir))
+            continue
+        for path in entries:
+            name = parse_rollout_name(path.name)
+            if name is None:
+                logger.debug("scan: {} is not a codex transcript name; skipping", path)
+                continue
+            previous = by_rollout.get(name.rollout_id)
+            if previous is not None and not previous.name.compressed:
+                continue  # the plain form of a rollout wins over its compressed copy
+            by_rollout[name.rollout_id] = _Rollout(path=path, name=name)
+    return sorted(by_rollout.values(), key=lambda r: str(r.path))
+
+
+def _scan_codex(
+    source_root: Path, transcript_dirs: list[Path], unlistable: list[str]
+) -> SourceScan:
+    """The Codex scan: rollouts grouped under the thread their names carry."""
+    groups: dict[str, list[_Rollout]] = {}
+    for rollout in _codex_rollouts(transcript_dirs, unlistable):
+        groups.setdefault(rollout.name.thread_id, []).append(rollout)
+
+    sessions: list[SessionSource] = []
+    unreadable: dict[str, str] = {}
+    rejected: list[str] = []
+    for session_id, members in sorted(groups.items()):
+        rejection = session_id_rejection(session_id)
+        if rejection is not None:
+            logger.warning(
+                "scan: rejecting session name {!r} ({}); nothing from it is materialized",
+                session_id,
+                rejection,
+            )
+            rejected.append(session_id)
+            continue
+        first = [r for r in members if r.name.rollout_id == session_id]
+        main = (first or sorted(members, key=lambda r: r.path.name))[0].path
+        mtimes: dict[str, int] = {}
+        try:
+            for rollout in members:
+                mtime = _mtime_ns(rollout.path)
+                if mtime is not None:
+                    mtimes[str(rollout.path)] = mtime
+        except OSError as error:
+            logger.warning(
+                "scan: cannot stat sources of session {} ({}); skipping this pass "
+                "and NOT treating it as deleted",
+                session_id,
+                error,
+            )
+            unreadable[session_id] = str(main)
+            continue
+        if str(main) not in mtimes:
+            continue
+        sessions.append(
+            SessionSource(session_id=session_id, session_jsonl=str(main), source_mtimes=mtimes)
+        )
+    logger.debug(
+        "scan: {} sessions ({} unreadable, {} unlistable dirs, {} rejected names) under {} as codex",
+        len(sessions),
+        len(unreadable),
+        len(unlistable),
+        len(rejected),
+        source_root,
     )
     return SourceScan(
         sessions=tuple(sessions),

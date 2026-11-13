@@ -83,4 +83,18 @@ def convert_loaded_codex_rollout(loaded: LoadedSession) -> Trajectory | None:
     return convert_codex_records(loaded.main_records, fallback_session_id=rollout_jsonl.parent.name)
 
 
-__all__ = ["convert_codex_rollout", "convert_loaded_codex_rollout", "read_codex_rollout"]
+def convert_codex_record_list(records: list[Any], rollout_jsonl: Path) -> Trajectory | None:
+    """Convert a record list read from ``rollout_jsonl`` and its sibling rollouts.
+
+    The same conversion as :func:`convert_loaded_codex_rollout`, over records the
+    caller assembled (a session's rollouts in conversion order).
+    """
+    return convert_codex_records(records, fallback_session_id=rollout_jsonl.parent.name)
+
+
+__all__ = [
+    "convert_codex_record_list",
+    "convert_codex_rollout",
+    "convert_loaded_codex_rollout",
+    "read_codex_rollout",
+]
