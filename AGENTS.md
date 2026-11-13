@@ -343,9 +343,10 @@ copy of the queryable rows:
   run is refused while sessions are pending a lake write).
 - Analytics: `analyze` reads session data from the lake when the lake holds
   the corpus (`--no-lake` reads the files). A session is read from the lake
-  only when its `session_meta` row carries the `materialized_at` and
-  `source_mtime_ns` its `meta.json` carries now; any other session (not
-  loaded, left behind by a failed or skipped lake write) is read from its
+  only when its `session_meta` row carries the `materialized_at`,
+  `source_mtime_ns`, `source_present` and `source_removed_at` its `meta.json`
+  carries now; any other session (not loaded, left behind by a failed or
+  skipped lake write) is read from its
   files, so a lagging lake never hands a pipeline an older transcript. Session
   enumeration and the stored trajectory's mtime bound come from the session
   directories either way, so the checkpoint sees the same bounds (`corpus

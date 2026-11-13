@@ -425,6 +425,24 @@ class TestALaggingLakeNeverServesAnOldWrite:
         finally:
             opened.close()
 
+    def test_a_session_marked_source_removed_without_the_lake_is_read_from_its_files(
+        self, tmp_path: Path
+    ) -> None:
+        """The mark rewrites only ``source_present`` and ``source_removed_at`` in ``meta.json``."""
+        source, corpus, lake = _own_lake(tmp_path)
+        (source / "-work-proj" / f"{RICH_B}.jsonl").unlink()
+        with _env(lake, tmp_path), contextlib.redirect_stdout(io.StringIO()):
+            materialize(source_root=source, corpus_root=corpus, lake=False, fmt="json")  # type: ignore[arg-type]
+        meta = json.loads((corpus / "sessions" / RICH_B / "meta.json").read_text())
+        assert meta["source_present"] is False
+
+        opened = _open(lake, corpus)
+        try:
+            opened.session_bounds()
+            assert opened.from_files == (RICH_B,)
+        finally:
+            opened.close()
+
     def test_a_lake_that_does_not_hold_the_corpus_is_not_used(
         self, built: tuple[Path, Path, Path], tmp_path: Path
     ) -> None:

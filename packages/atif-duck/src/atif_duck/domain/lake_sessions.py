@@ -39,12 +39,12 @@ from atif_duck.domain.sql_literal import SqlFragment
 _SCOPE: str = f"{CORPUS_COLUMN} = ? AND {SESSION_KEY} IN (SELECT unnest(?::VARCHAR[]))"
 _ORDER: str = f"ORDER BY {SESSION_KEY}, step_id, rowid"
 
-#: ``(session_id, materialized_at, source_mtime_ns)`` for every session of a
-#: corpus (param: corpus). What a session's ``meta.json`` said when the lake
-#: loaded it, so a reader can tell a current session from one the lake holds an
-#: older write of.
+#: ``(session_id, materialized_at, source_mtime_ns, source_present,
+#: source_removed_at)`` for every session of a corpus (param: corpus). What a
+#: session's ``meta.json`` said when the lake loaded it, so a reader can tell a
+#: current session from one the lake holds an older write of.
 SESSION_FRESHNESS_SQL: SqlFragment = SqlFragment(
-    f"SELECT {SESSION_KEY}, materialized_at, source_mtime_ns "  # noqa: S608  # nosec B608 - constants only; corpus is bound
+    f"SELECT {SESSION_KEY}, materialized_at, source_mtime_ns, source_present, source_removed_at "  # noqa: S608  # nosec B608 - constants only; corpus is bound
     f"FROM {LAKE_ALIAS}.session_meta WHERE {CORPUS_COLUMN} = ?"
 )
 
@@ -58,10 +58,17 @@ LAST_EDGE_TS_SQL: SqlFragment = SqlFragment(
 
 @dataclass(frozen=True, slots=True)
 class SessionFreshness:
-    """What a session's ``meta.json`` said when the lake loaded it."""
+    """What a session's ``meta.json`` said when the lake loaded it.
+
+    A conversion writes a new ``materialized_at``. Marking a session whose
+    transcript vanished rewrites only ``source_present`` and
+    ``source_removed_at``, so those are compared too.
+    """
 
     materialized_at: str | None
     source_mtime_ns: int | None
+    source_present: bool | None
+    source_removed_at: str | None
 
 
 def is_current(meta: object, recorded: SessionFreshness | None) -> bool:
@@ -71,6 +78,8 @@ def is_current(meta: object, recorded: SessionFreshness | None) -> bool:
     return bool(
         meta.get("materialized_at") == recorded.materialized_at
         and meta.get("source_mtime_ns") == recorded.source_mtime_ns
+        and meta.get("source_present") == recorded.source_present
+        and meta.get("source_removed_at") == recorded.source_removed_at
     )
 
 

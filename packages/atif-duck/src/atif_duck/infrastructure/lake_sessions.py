@@ -144,8 +144,10 @@ class LakeSessionReader:
             str(sid): SessionFreshness(
                 materialized_at=None if materialized is None else str(materialized),
                 source_mtime_ns=None if mtime is None else int(mtime),
+                source_present=None if present is None else bool(present),
+                source_removed_at=None if removed is None else str(removed),
             )
-            for sid, materialized, mtime in rows
+            for sid, materialized, mtime, present, removed in rows
         }
 
     def last_edge_ts(self) -> dict[str, datetime | None]:

@@ -193,7 +193,7 @@ sequenceDiagram
    other commands share, and stamps explicit `--max-sessions` / `--max-cost-usd` ceilings over the
    env defaults so a crontab line carries its spend cap visibly (`packages/atif-cli/src/atif_cli/app.py:1785-1790`).
 2. The command opens the lake's session source when the lake holds the corpus
-   (`packages/atif-cli/src/atif_cli/app.py:1792`, `packages/atif-cli/src/atif_cli/lake_sessions.py:108`),
+   (`packages/atif-cli/src/atif_cli/app.py:1792`, `packages/atif-cli/src/atif_cli/lake_sessions.py:109`),
    and the pipeline runner builds one shared `CorpusReader` over it (or over the file source)
    for every stage and loops the LLM stages (classify, conflicts, friction, perceived); the
    `skip_*` flags subtract stages (`packages/atif-analytics/src/atif_analytics/application/analyze.py:62`).

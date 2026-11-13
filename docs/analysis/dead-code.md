@@ -148,8 +148,8 @@ intra-module use site is named after the table.
 | `StorageLayout` | `packages/atif-cli/src/atif_cli/corpus.py:83` | 2026-09-28 |
 | `LaneStatus` | `packages/atif-cli/src/atif_cli/cron.py:74` | 2026-08-28 |
 | `DuckLakeSteps` | `packages/atif-cli/src/atif_cli/embed_lake.py:70` | 2026-09-28 |
-| `TURNS_BATCH_SIZE` | `packages/atif-cli/src/atif_cli/lake_sessions.py:67` | 2026-09-28 |
-| `STEPS_BATCH_SIZE` | `packages/atif-cli/src/atif_cli/lake_sessions.py:71` | 2026-09-28 |
+| `TURNS_BATCH_SIZE` | `packages/atif-cli/src/atif_cli/lake_sessions.py:68` | 2026-09-28 |
+| `STEPS_BATCH_SIZE` | `packages/atif-cli/src/atif_cli/lake_sessions.py:72` | 2026-09-28 |
 | `emit_row_batches` | `packages/atif-cli/src/atif_cli/output.py:181` | 2026-08-28 |
 | `CODEX_TOOL_IMAGE_MEDIA_TYPES` | `packages/atif-converter/src/atif_converter/domain/blobs.py:96` | 2026-10-08 |
 | `codex_tool_image_media_type` | `packages/atif-converter/src/atif_converter/domain/blobs.py:339` | 2026-10-08 |
@@ -253,7 +253,7 @@ numbers follow it as plain numbers.
 - `DuckLakeSteps` is the return type of `lake_steps_port` at
   `packages/atif-cli/src/atif_cli/embed_lake.py:89` and is constructed at `:95`.
 - `TURNS_BATCH_SIZE` and `STEPS_BATCH_SIZE` are default arguments at
-  `packages/atif-cli/src/atif_cli/lake_sessions.py:93` and `:94`.
+  `packages/atif-cli/src/atif_cli/lake_sessions.py:94` and `:95`.
 - `emit_row_batches` is the shared writer both public emitters call, at
   `packages/atif-cli/src/atif_cli/output.py:155` and again on line 178 of that
   file.

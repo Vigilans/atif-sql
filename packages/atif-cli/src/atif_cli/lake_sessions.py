@@ -12,8 +12,9 @@ author label comes from atif-analytics' rule table (pinned to atif-duck's
 ``step_author`` by ``test_authorship_twin_pin.py``).
 
 Per session, the lake is used only when it holds the session's CURRENT
-artifacts: its ``session_meta`` row must carry the ``materialized_at`` and
-``source_mtime_ns`` the session's ``meta.json`` carries now. Anything else (a
+artifacts: its ``session_meta`` row must carry the ``materialized_at``,
+``source_mtime_ns``, ``source_present`` and ``source_removed_at`` the
+session's ``meta.json`` carries now (atif-duck's ``is_current``). Anything else (a
 session the lake has not loaded, one a failed or skipped lake write left
 behind, one whose ``meta.json`` cannot be read) is read from its files, so a
 lagging lake can never hand the pipelines an older transcript than the files
