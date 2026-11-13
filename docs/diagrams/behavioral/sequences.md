@@ -29,10 +29,10 @@ sequenceDiagram
 Sources, in dispatch order:
 
 - CLI materialize: `packages/atif-cli/src/atif_cli/app.py:878`; report rendered at `:1034`.
-- materialize UC: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1514`;
-  `read_watermark` at `:339` called from `:1587`, `scan_sources` called at `:1641`, `build_plan` called
-  at `:1710`, `_write_session` at `:586` called from `:762`, watermark advanced at `:1738-1741`, report
-  built at `:1808`.
+- materialize UC: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1525`;
+  `read_watermark` at `:339` called from `:1598`, `scan_sources` called at `:1652`, `build_plan` called
+  at `:1721`, `_write_session` at `:586` called from `:762`, watermark advanced at `:1749-1752`, report
+  built at `:1820`.
 - scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:224`.
 - build_plan: `packages/atif-corpus/src/atif_corpus/domain/sessions.py:187`.
 - RealConverter: `packages/atif-cli/src/atif_cli/converter_adapter.py:82`, calling

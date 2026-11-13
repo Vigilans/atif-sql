@@ -223,7 +223,7 @@ per-session reader otherwise.
 ## atif-corpus
 
 One materialization pass is sweep, scan, plan, convert, write, advance watermark, and `materialize` is
-that pass (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1514`). The decision half
+that pass (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1525`). The decision half
 is pure: the domain never stats a file and never reads a clock, so `build_plan` partitions scanned
 sessions into to-materialize, up-to-date, and skipped-live deterministically from mtimes in epoch
 nanoseconds plus an injected now (`packages/atif-corpus/src/atif_corpus/domain/sessions.py:187`). The
@@ -245,7 +245,7 @@ The agent enum itself is an AST-pinned twin of the converter's, since the indepe
 forbids the import (`packages/atif-corpus/src/atif_corpus/domain/agents.py:25`).
 
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py`: the pass itself
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1514`), the report value object
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1525`), the report value object
   (`:217`), and the public `read_watermark` its consumers call (`:339`).
 - `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py`: the only place this
   member stats the source corpus

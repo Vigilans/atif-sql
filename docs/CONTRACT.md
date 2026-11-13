@@ -139,11 +139,13 @@ proofs are out of scope for the workspace.
   from an archive its own alone, and only its own trip the empty-scan guard.
   It likewise reads and writes only its own part of watermark.json: an
   ordinary pass the flat entries, a relocatable pass its host's block, so
-  machines keep transcripts at identical absolute paths apart. A first
-  relocatable pass finds its block empty and converts every live session
-  again under its host. Machines sharing a corpus each keep their own
-  sessions' source_present current; another machine's sessions arrive
-  through whatever syncs the corpus.
+  machines keep transcripts at identical absolute paths apart. A relocatable
+  pass records its host in each empty_sessions.json entry it writes, and a
+  pass keeps another machine's entries as it found them. A first relocatable
+  pass finds its block empty and converts every live session again under its
+  host. Machines sharing a corpus each keep their own sessions'
+  source_present current; another machine's sessions arrive through whatever
+  syncs the corpus.
 - Empty sessions: a transcript with no convertible record is recorded in
   empty_sessions.json keyed by session id with the generation it was checked
   under; its watermark advances and it's reported as `empty`, not `failed`.

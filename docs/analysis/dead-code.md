@@ -358,7 +358,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
   `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:61`
   (`require_transcript_file`).
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:207`
-  (`MaterializationFailure`) and `:1521` (`PassPreview`).
+  (`MaterializationFailure`) and `:1532` (`PassPreview`).
 - `packages/atif-corpus/src/atif_corpus/domain/layout.py:25`
   (`WATERMARK_FILENAME`) and `:27` (`EMPTY_SESSIONS_FILENAME`), and
   `packages/atif-corpus/src/atif_corpus/domain/watermark.py:26`

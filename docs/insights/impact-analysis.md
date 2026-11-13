@@ -121,7 +121,7 @@ places with no import edge between them.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| `atif_corpus.application.materialize`: the writer, routed through `CorpusLayout` | direct import | yes | `packages/atif-corpus/src/atif_corpus/application/materialize.py:148-157` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1632` |
+| `atif_corpus.application.materialize`: the writer, routed through `CorpusLayout` | direct import | yes | `packages/atif-corpus/src/atif_corpus/application/materialize.py:148-157` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1643` |
 | `atif_duck.infrastructure.registry`: builds globs under `corpus_root / "sessions"` | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:730-740` |
 | `atif_embed.infrastructure.corpus_text_rows`: its own `sessions/` walk, gated on `meta.json` | indirect | yes | `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:166-184` |
 | `atif_analytics.infrastructure.corpus_reader`: re-declares the filename constants | indirect | yes | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:72-74` and `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:178-191` |
@@ -179,7 +179,7 @@ import-graph query reaches it.
 | `OpenAiBedrockProvider` / `AnthropicBedrockProvider`: the two real adapters, one per family; each imports `CallUsage` / `ProviderUnavailable` / `RefusalError` / `SchemaT` / `UsageAccumulator` from the port module and NOT the Protocol | indirect | yes | `packages/atif-models/src/atif_models/infrastructure/openai_bedrock.py:41-47` and `packages/atif-models/src/atif_models/infrastructure/openai_bedrock.py:81`, `packages/atif-models/src/atif_models/infrastructure/anthropic_bedrock.py:61-67` and `packages/atif-models/src/atif_models/infrastructure/anthropic_bedrock.py:130` |
 | `test_models_ports.py`: binds `OpenAiBedrockProvider` to the port by annotation and `isinstance`; the Anthropic adapter has no such test | test | yes | `packages/atif-models/tests/test_models_ports.py:29-38` |
 | `FakeProvider`: the deterministic double, named in prose only | test | yes | `packages/atif-analytics/tests/analytics_fixtures.py:300` |
-| `ConverterPort` ← `materialize` use case, in several signature positions | direct import | yes | `packages/atif-corpus/src/atif_corpus/application/materialize.py:589`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:866`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1518` |
+| `ConverterPort` ← `materialize` use case, in several signature positions | direct import | yes | `packages/atif-corpus/src/atif_corpus/application/materialize.py:589`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:866`, `packages/atif-corpus/src/atif_corpus/application/materialize.py:1529` |
 | `RealConverter`: the production adapter; imports `ConversionOutput` and three other types from the port module, never `ConverterPort`, which it names only in docstrings | indirect | yes | `packages/atif-cli/src/atif_cli/converter_adapter.py:69-75` and `packages/atif-cli/src/atif_cli/converter_adapter.py:82-83` |
 | `FakeConverter`: shipped in `src/` rather than `tests/`; same shape, same non-import | indirect | yes | `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:21-26` and `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:81` |
 | `ConversionOutput`: the frozen dataclass that DOES cross the boundary as an import | direct import | yes | `packages/atif-corpus/src/atif_corpus/domain/ports.py:65-66` |
@@ -195,7 +195,7 @@ import-graph query reaches it.
   is bound to a port type: a port-typed parameter, or an annotated name in a binding test. For
   `RealConverter` that call site is the `materialize` command in `atif_cli.app`, a different module
   from the class and a different package from the Protocol (`packages/atif-cli/src/atif_cli/app.py:981`,
-  `packages/atif-corpus/src/atif_corpus/application/materialize.py:1518`). `FakeConverter` lives in
+  `packages/atif-corpus/src/atif_corpus/application/materialize.py:1529`). `FakeConverter` lives in
   `src/`, so a missed update fails the type gate rather than only a test
   (`packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:5-8`). For
   `LlmStructuredProvider` the call sites are the factory's two return statements, one per adapter
@@ -265,7 +265,7 @@ driving the CLI reads, so the dict is the surface, not the individual numbers, a
 | `ClassifiedError.to_payload()`: the JSON error envelope on non-TTY stderr | indirect | likely | `packages/atif-cli/src/atif_cli/errors.py:78-86` |
 | `test_app.py`: asserts against the dict, never against a literal, except where the number itself is the claim | test | yes | `packages/atif-cli/tests/test_app.py:42` and `packages/atif-cli/tests/test_app.py:1542` |
 | `test_cron.py`, `test_integration.py`, `test_vss_commands.py`: more suites keyed off the dict | test | yes | `packages/atif-cli/tests/test_cron.py:28`, `packages/atif-cli/tests/test_integration.py:147`, `packages/atif-cli/tests/test_vss_commands.py:23` |
-| `docs/CONTRACT.md:333-369` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:333-369` |
+| `docs/CONTRACT.md:335-371` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:335-371` |
 
 ### Blast-radius notes
 

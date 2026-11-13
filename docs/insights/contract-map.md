@@ -127,7 +127,7 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   `VARCHAR` (`packages/atif-duck/src/atif_duck/domain/raw_readers.py:105`); the CLI supplies it (`packages/atif-cli/src/atif_cli/app.py:983`).
 
 **The hand-written contract and the manifests split the job.** Its CLI heading
-(`docs/CONTRACT.md:333`) names atif-cli the package that composes the others. The atif-cli
+(`docs/CONTRACT.md:335`) names atif-cli the package that composes the others. The atif-cli
 manifest declares five siblings (`packages/atif-cli/pyproject.toml:32-36`) and the CLI imports
 every one of them; atif-models reaches it through atif-analytics, which imports atif-models
 (`packages/atif-analytics/pyproject.toml:23`) as the import-linter contracts permit.
@@ -584,7 +584,7 @@ construction from settings: `packages/atif-embed/src/atif_embed/infrastructure/c
 **Consumers:**
 
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:186`: imports the port;
-  annotated at `packages/atif-corpus/src/atif_corpus/application/materialize.py:589` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1518`.
+  annotated at `packages/atif-corpus/src/atif_corpus/application/materialize.py:589` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1529`.
 - `packages/atif-cli/src/atif_cli/converter_adapter.py:82-160`: `RealConverter`, the production
   adapter and the only module importing both atif-converter and atif-corpus at module scope.
 - `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:81`: the test adapter

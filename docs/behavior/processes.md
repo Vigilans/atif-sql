@@ -465,7 +465,7 @@ Entry point: `scripts/atif-sql-refresh.sh:195`
   freshness report: scans source mtimes and replays the same pure plan
   `materialize` would build, generation staleness included, without converting anything, so its stale,
   up-to-date, and live counts are exactly what a pass would do
-  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1442`).
+  (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1453`).
 - examples: entry at `packages/atif-cli/src/atif_cli/app.py:2377`. Derives one
   runnable example per view and macro from the static catalog and filters by
   `--category` and `--requires`; an unknown value exits 64

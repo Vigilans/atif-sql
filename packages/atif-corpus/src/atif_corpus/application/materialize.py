@@ -1370,26 +1370,37 @@ def _next_empty_record(
     newly_empty: Collection[str],
     expected: Mapping[str, object],
     agent: str,
+    host: str | None,
 ) -> dict[str, dict[str, object]]:
     """The next ``empty_sessions.json``: drop what moved on, add what came back empty.
 
     A recorded session keeps its entry while it is still around
     (``keep_ids``: scanned or merely unreadable) and was not attempted this
-    pass. An attempt replaces the entry: empty again records the current
-    generation and ``agent``, anything else (success or a real failure)
-    removes it. An entry another agent recorded is that agent's pass's to
-    judge and is kept as it is; one with no ``agent`` is this pass's.
+    pass. An attempt replaces the entry, whichever pass recorded it: empty
+    again records the current generation, ``agent`` and, for a relocatable
+    pass, ``host``; anything else (success or a real failure) removes it.
+    An unattempted entry another agent or machine recorded (its ``agent`` or
+    ``host`` differs; one with no ``agent`` is claude-code's, one with no
+    ``host`` an ordinary pass's) is that pass's to judge and is kept as it is.
     """
     attempted = set(attempted_ids)
     keep = set(keep_ids)
     record = {
         session_id: dict(generation)
         for session_id, generation in previous.items()
-        if generation.get("agent", agent) != agent
-        or (session_id in keep and session_id not in attempted)
+        if session_id not in attempted
+        and (
+            session_id in keep
+            or generation.get("agent", agent) != agent
+            or generation.get("host") != host
+        )
     }
     for session_id in newly_empty:
-        record[session_id] = {**expected, "agent": agent}
+        record[session_id] = {
+            **expected,
+            "agent": agent,
+            **({} if host is None else {"host": host}),
+        }
     return dict(sorted(record.items()))
 
 
@@ -1800,6 +1811,7 @@ def materialize(
         newly_empty=empty,
         expected=expected,
         agent=agent,
+        host=host,
     )
     if next_empty or layout.empty_sessions_path.exists():
         write_json_atomic(layout.empty_sessions_path, next_empty, indent=2)

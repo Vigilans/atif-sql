@@ -7,7 +7,7 @@ it as ``meta.host``, beside the same artifacts an ordinary pass writes. A
 pass marks, retains, re-converts from an archive and guards only its own
 machine's sessions; an ordinary pass keeps the host-less ones.
 ``watermark.json`` holds an ordinary pass's flat entries beside one block per
-host.
+host, and ``empty_sessions.json`` entries name their host.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from atif_corpus.application.materialize import (
     SuspiciousEmptyScanError,
     materialize,
     preview_pass,
+    read_empty_sessions,
     read_watermark,
 )
 from atif_corpus.domain.layout import CorpusLayout
@@ -38,11 +39,12 @@ def run(
     relocatable: bool = True,
     converter_version: str = "0.1.0",
     materialized_at: str = "2026-01-02T00:00:00+00:00",
+    converter: FakeConverter | None = None,
 ) -> MaterializationReport:
     return materialize(
         source_root=source_root,
         corpus_root=corpus_root,
-        converter=FakeConverter(),
+        converter=converter or FakeConverter(),
         materialized_at=materialized_at,
         harbor_version="0.22.0",
         converter_version=converter_version,
@@ -93,12 +95,13 @@ def run_on(
     monkeypatch: pytest.MonkeyPatch,
     source_root: Path,
     corpus_root: Path,
+    converter: FakeConverter | None = None,
     *,
     converter_version: str = "0.1.0",
 ) -> MaterializationReport:
     """A relocatable pass on machine ``host``."""
     monkeypatch.setattr("atif_corpus.application.materialize.machine_hostname", lambda: host)
-    return run(source_root, corpus_root, converter_version=converter_version)
+    return run(source_root, corpus_root, converter_version=converter_version, converter=converter)
 
 
 def preview_on(
@@ -351,3 +354,47 @@ def test_read_watermark_reads_the_flat_entries_or_one_hosts_block(tmp_path: Path
     assert read_watermark(path) == {"/s/a.jsonl": 1}
     assert read_watermark(path, host="host-a") == {"/s/a.jsonl": 2}
     assert read_watermark(path, host="host-b") == {}
+
+
+def empty_record_of(corpus_root: Path) -> dict[str, Any]:
+    return read_empty_sessions(CorpusLayout(corpus_root=corpus_root).empty_sessions_path)
+
+
+class TestEmptySessionHosts:
+    def test_a_relocatable_entry_names_its_host(
+        self, source_root: Path, corpus_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_session(source_root, SESSION_A, mtime_ns=STALE_NS)
+        empty = FakeConverter(empty_sessions=frozenset({SESSION_A}))
+        run_on("host-a", monkeypatch, source_root, corpus_root, empty)
+        assert empty_record_of(corpus_root)[SESSION_A]["host"] == "host-a"
+
+    def test_other_machines_entries_are_kept(
+        self, tmp_path: Path, corpus_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source_a, source_b = tmp_path / "a", tmp_path / "b"
+        write_session(source_a, SESSION_A, mtime_ns=STALE_NS)
+        write_session(source_b, SESSION_B, mtime_ns=STALE_NS)
+        empty = FakeConverter(empty_sessions=frozenset({SESSION_A}))
+        run_on("host-a", monkeypatch, source_a, corpus_root, empty)
+        entry = empty_record_of(corpus_root)[SESSION_A]
+
+        run_on("host-b", monkeypatch, source_b, corpus_root)
+        run(source_b, corpus_root, relocatable=False)
+
+        assert empty_record_of(corpus_root)[SESSION_A] == entry
+
+    def test_a_relocatable_attempt_replaces_an_ordinary_entry(
+        self, source_root: Path, corpus_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_session(source_root, SESSION_A, mtime_ns=STALE_NS)
+        run(
+            source_root,
+            corpus_root,
+            relocatable=False,
+            converter=FakeConverter(empty_sessions=frozenset({SESSION_A})),
+        )
+        assert "host" not in empty_record_of(corpus_root)[SESSION_A]
+
+        assert run_on("host-a", monkeypatch, source_root, corpus_root).materialized_count == 1
+        assert SESSION_A not in empty_record_of(corpus_root)

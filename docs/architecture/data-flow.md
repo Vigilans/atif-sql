@@ -28,7 +28,7 @@ catalog copy.
    `ConverterPort` adapter, the wall-clock instant, and the harbor / converter version pins
    stamped into every `meta.json` (`packages/atif-cli/src/atif_cli/app.py:978-991`).
 2. One pass through the corpus use case runs scan, plan, convert, and write in that order and
-   returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1514`).
+   returns a `MaterializationReport` (`packages/atif-corpus/src/atif_corpus/application/materialize.py:1525`).
 3. The scanner discovers every session under the raw transcript root and separates unreadable
    sessions from absent ones, so a `stat` failure is never mistaken for a deletion (`packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:224`). It walks whichever layout the
    agent selects, descending exactly `transcript_depth` directories and reporting an unlistable one at
@@ -57,7 +57,7 @@ catalog copy.
    `ArtifactProducer`. `meta.json` is written last and the whole directory swaps into
    `sessions/<id>/`, so a reader sees one complete generation or the other
    (`packages/atif-corpus/src/atif_corpus/application/materialize.py:689-717`); the watermark advances
-   only for sessions that succeeded (`:1793`).
+   only for sessions that succeeded (`:1804`).
 10. After the swaps, still in the parent process, the pass calls the `SessionSink` (atif-duck's
    `DuckLakeSessionSink`, plugged in by the CLI unless `--no-lake`) once. The sink compares every
    session's `meta.json` with the lake's `session_meta` row and replaces, in batches, the rows of
