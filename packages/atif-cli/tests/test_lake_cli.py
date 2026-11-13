@@ -275,8 +275,7 @@ class TestPoolAndSingleWorkerWriteTheSameLake:
                 expected_meta={META_COLUMNAR_KEY: COLUMNAR_SCHEMA_VERSION},
                 workers=workers,
                 artifact_producer=ColumnarArtifactProducer(),
-                session_sink=DuckLakeSessionSink(layout),
-                sink_batch_size=2,
+                session_sink=DuckLakeSessionSink(layout, sync_batch_size=2),
             )
             assert report.materialized_count == 3
             assert report.workers == workers

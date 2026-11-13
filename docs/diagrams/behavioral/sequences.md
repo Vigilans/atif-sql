@@ -28,11 +28,11 @@ sequenceDiagram
 
 Sources, in dispatch order:
 
-- CLI materialize: `packages/atif-cli/src/atif_cli/app.py:878`; report rendered at `:1027`.
-- materialize UC: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1524`;
-  `read_watermark` at `:415` called from `:1646`, `scan_sources` called at `:1648`, `build_plan` called
-  at `:1717`, `_write_session` at `:615` called from `:785`, watermark advanced at `:1796-1799`, report
-  built at `:1813`.
+- CLI materialize: `packages/atif-cli/src/atif_cli/app.py:878`; report rendered at `:1028`.
+- materialize UC: `packages/atif-corpus/src/atif_corpus/application/materialize.py:1430`;
+  `read_watermark` at `:330` called from `:1544`, `scan_sources` called at `:1546`, `build_plan` called
+  at `:1614`, `_write_session` at `:530` called from `:700`, watermark advanced at `:1690-1693`, report
+  built at `:1707`.
 - scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:224`.
 - build_plan: `packages/atif-corpus/src/atif_corpus/domain/sessions.py:187`.
 - RealConverter: `packages/atif-cli/src/atif_cli/converter_adapter.py:82`, calling
@@ -43,8 +43,8 @@ Sources, in dispatch order:
   data classes and the validator the seam checks with (`:81`) are harbor's, vendored under
   `atif_converter.domain.atif`.
 - corpus artifacts: path arithmetic in
-  `packages/atif-corpus/src/atif_corpus/domain/layout.py:65`; the artifacts written and the
-  directory swapped at `packages/atif-corpus/src/atif_corpus/application/materialize.py:702-741`
+  `packages/atif-corpus/src/atif_corpus/domain/layout.py:62`; the artifacts written and the
+  directory swapped at `packages/atif-corpus/src/atif_corpus/application/materialize.py:617-656`
   through `write_json_atomic` (`packages/atif-corpus/src/atif_corpus/infrastructure/atomic.py:72`),
   its zstd siblings (`:142`, `:159`), and `replace_dir_atomic` (`:165`).
 
@@ -77,10 +77,10 @@ sequenceDiagram
 
 Sources, in dispatch order:
 
-- CLI query: `packages/atif-cli/src/atif_cli/app.py:1374`; `duckdb.connect()` at `:1549`, the lake
-  attached at `:1555` when it holds the corpus, `register` called at `:1559`,
-  `_harden_query_connection` at `:537` called from `:1568`, caller SQL executed at `:1590`, emit at
-  `:1596`.
+- CLI query: `packages/atif-cli/src/atif_cli/app.py:1375`; `duckdb.connect()` at `:1550`, the lake
+  attached at `:1556` when it holds the corpus, `register` called at `:1560`,
+  `_harden_query_connection` at `:537` called from `:1569`, caller SQL executed at `:1591`, emit at
+  `:1597`.
 - atif_duck register: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2185`, whose
   documented order is fixed at `:2205-2213`: `register_raw` `:637` (`register_lake_raw` instead when
   the lake is attached), `register_views` `:1024`, `register_vss` `:1642`, `register_macros` `:1946`,
@@ -125,8 +125,8 @@ sequenceDiagram
 
 Sources, in dispatch order:
 
-- CLI analyze: `packages/atif-cli/src/atif_cli/app.py:1715`; settings resolved at `:1781-1788`,
-  `run_analyze` called at `:1799`.
+- CLI analyze: `packages/atif-cli/src/atif_cli/app.py:1716`; settings resolved at `:1782-1789`,
+  `run_analyze` called at `:1800`.
 - run_analyze: `packages/atif-analytics/src/atif_analytics/application/analyze.py:37`; the
   `stages` list at `:103-108`, each stage invoked at `:129`.
 - CorpusReader: `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:314`,

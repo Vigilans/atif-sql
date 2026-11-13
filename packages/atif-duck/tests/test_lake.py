@@ -21,7 +21,13 @@ from typing import Any
 
 import duckdb
 import pytest
-from duck_fixtures import CODEX_SESSION_ID, SESSION_IDS, build_corpus, write_codex_session
+from duck_fixtures import (
+    CODEX_SESSION_ID,
+    SESSION_IDS,
+    build_corpus,
+    republish,
+    write_codex_session,
+)
 from test_columnar import add_columnar
 
 from atif_duck.domain import lake as lake_domain
@@ -284,11 +290,10 @@ class TestSharedCorpus:
         corpus = self._shared(tmp_path / "shared")
         layout = _lake(tmp_path, corpus)
         before = self._agents(_writer(layout))
-        DuckLakeSessionSink(layout).sync_sessions(
-            corpus_root=corpus.root,
-            agent="codex",
-            session_ids=[CODEX_SESSION_ID, SESSION_IDS[0]],
-        )
+        republish(corpus.root / "sessions" / CODEX_SESSION_ID)
+        republish(corpus.root / "sessions" / SESSION_IDS[0])
+        written = DuckLakeSessionSink(layout).sync_corpus(corpus_root=corpus.root, agent="codex")
+        assert written == 2
         assert self._agents(_writer(layout)) == before
         assert verify_lake(layout).clean
 
@@ -296,11 +301,6 @@ class TestSharedCorpus:
 # ---------------------------------------------------------------------------
 # Pending sessions: the corpus compared with the lake
 # ---------------------------------------------------------------------------
-
-
-def _rewrite_meta(session_dir: Path, **changes: object) -> None:
-    path = session_dir / "meta.json"
-    path.write_text(json.dumps({**json.loads(path.read_text()), **changes}))
 
 
 class TestPending:
@@ -312,11 +312,14 @@ class TestPending:
         corpus = _corpus(tmp_path / "corpus")
         layout = _lake(tmp_path, corpus)
         sessions = corpus.root / "sessions"
-        _rewrite_meta(sessions / SESSION_IDS[0], materialized_at="2026-12-01T00:00:00Z")
-        _rewrite_meta(
-            sessions / SESSION_IDS[1],
-            source_present=False,
-            source_removed_at="2026-12-01T00:00:00Z",
+        republish(sessions / SESSION_IDS[0])
+        # A source-removed mark keeps materialized_at as it was.
+        meta_path = sessions / SESSION_IDS[1] / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta_path.write_text(
+            json.dumps(
+                {**meta, "source_present": False, "source_removed_at": "2026-12-01T00:00:00Z"}
+            )
         )
         write_codex_session(corpus.root)
         assert lake_pending_session_ids(layout, corpus.root) == tuple(
@@ -347,11 +350,11 @@ class TestSink:
         corpus = _corpus(tmp_path / "corpus")
         layout = LakeLayout(tmp_path / "lake")
         sink = DuckLakeSessionSink(layout)
-        sink.sync_sessions(corpus_root=corpus.root, agent="claude-code", session_ids=SESSION_IDS)
+        assert sink.sync_corpus(corpus_root=corpus.root, agent="claude-code") == 0
         assert not layout.root.exists()
         assert sink.writes == 0
 
-    def test_a_sync_replaces_exactly_the_named_sessions_rows(self, tmp_path: Path) -> None:
+    def test_a_sync_replaces_exactly_the_pending_sessions_rows(self, tmp_path: Path) -> None:
         corpus = _corpus(tmp_path / "corpus")
         layout = _lake(tmp_path, corpus)
         before = _rows(
@@ -360,11 +363,11 @@ class TestSink:
         )
         _drop_last_step(corpus.root / "sessions" / SESSION_IDS[0])
         _drop_last_step(corpus.root / "sessions" / SESSION_IDS[1])
-        # Only the first session is handed over: the lake must change for it
-        # alone, and verify must then name the second.
-        DuckLakeSessionSink(layout).sync_sessions(
-            corpus_root=corpus.root, agent="claude-code", session_ids=[SESSION_IDS[0]]
-        )
+        # Only the first session's meta.json says it was rewritten: the lake
+        # must change for it alone, and verify must then name the second.
+        republish(corpus.root / "sessions" / SESSION_IDS[0])
+        sink = DuckLakeSessionSink(layout)
+        assert sink.sync_corpus(corpus_root=corpus.root, agent="claude-code") == 1
         after = dict(
             _rows(_reader(layout, corpus.root), "SELECT session_id, count(*) FROM steps GROUP BY 1")
         )
@@ -372,19 +375,37 @@ class TestSink:
         assert after[SESSION_IDS[1]] == dict(before)[SESSION_IDS[1]]
         report = verify_lake(layout)
         assert {m.session_id for m in report.mismatches} == {SESSION_IDS[1]}
-        DuckLakeSessionSink(layout).sync_sessions(
-            corpus_root=corpus.root, agent="claude-code", session_ids=[SESSION_IDS[1]]
-        )
+        republish(corpus.root / "sessions" / SESSION_IDS[1])
+        assert sink.sync_corpus(corpus_root=corpus.root, agent="claude-code") == 1
         assert verify_lake(layout).clean
+        assert sink.sync_corpus(corpus_root=corpus.root, agent="claude-code") == 0
+        assert sink.writes == 2
+
+    def test_pending_sessions_are_replaced_a_batch_at_a_time(self, tmp_path: Path) -> None:
+        corpus = _corpus(tmp_path / "corpus")
+        layout = _lake(tmp_path, corpus)
+        snapshots = lake_status(layout).snapshots
+        for session_id in SESSION_IDS:
+            republish(corpus.root / "sessions" / session_id)
+        sink = DuckLakeSessionSink(layout, sync_batch_size=1)
+        assert sink.sync_corpus(corpus_root=corpus.root, agent="claude-code") == len(SESSION_IDS)
+        assert lake_status(layout).snapshots == snapshots + len(SESSION_IDS)
+        assert verify_lake(layout).clean
+
+    def test_nothing_pending_takes_no_writer_lock(self, tmp_path: Path) -> None:
+        corpus = _corpus(tmp_path / "corpus")
+        layout = _lake(tmp_path, corpus)
+        sink = DuckLakeSessionSink(layout, lock_timeout_seconds=0.3)
+        with writer_lock(layout, timeout_seconds=1):
+            assert sink.sync_corpus(corpus_root=corpus.root, agent="claude-code") == 0
 
     def test_a_corpus_the_lake_does_not_hold_is_loaded_whole(self, tmp_path: Path) -> None:
         first = _corpus(tmp_path / "corpus-a")
         layout = _lake(tmp_path, first)
         second_root = tmp_path / "corpus-codex"
         write_codex_session(second_root)
-        DuckLakeSessionSink(layout).sync_sessions(
-            corpus_root=second_root, agent="codex", session_ids=["not-even-a-session"]
-        )
+        written = DuckLakeSessionSink(layout).sync_corpus(corpus_root=second_root, agent="codex")
+        assert written == 1
         state = lake_status(layout)
         assert [(name, agent, n) for name, agent, _, n in state.corpora] == [
             ("corpus-a", "claude-code", 2),
@@ -416,9 +437,10 @@ class TestSink:
         )
         assert isinstance(refused, LakeUnavailable)
         assert "stale" in refused.reason
-        DuckLakeSessionSink(layout).sync_sessions(
-            corpus_root=corpus.root, agent="claude-code", session_ids=[SESSION_IDS[0]]
+        written = DuckLakeSessionSink(layout).sync_corpus(
+            corpus_root=corpus.root, agent="claude-code"
         )
+        assert written == len(SESSION_IDS)
         assert lake_status(layout).stale == ()
         assert verify_lake(layout).clean
 
@@ -427,9 +449,7 @@ class TestSink:
         layout = _lake(tmp_path, corpus)
         other = build_corpus(tmp_path / "b" / "corpus")
         with pytest.raises(LakeCorpusConflictError):
-            DuckLakeSessionSink(layout).sync_sessions(
-                corpus_root=other, agent="claude-code", session_ids=[SESSION_IDS[0]]
-            )
+            DuckLakeSessionSink(layout).sync_corpus(corpus_root=other, agent="claude-code")
         with pytest.raises(LakeCorpusConflictError):
             rebuild_lake(layout, [corpus, LakeCorpus(other, "claude-code")])
 
@@ -442,11 +462,10 @@ class TestSink:
     def test_a_held_writer_lock_times_the_sink_out(self, tmp_path: Path) -> None:
         corpus = _corpus(tmp_path / "corpus")
         layout = _lake(tmp_path, corpus)
+        republish(corpus.root / "sessions" / SESSION_IDS[0])
         sink = DuckLakeSessionSink(layout, lock_timeout_seconds=0.3)
         with writer_lock(layout, timeout_seconds=1), pytest.raises(LakeLockTimeoutError):
-            sink.sync_sessions(
-                corpus_root=corpus.root, agent="claude-code", session_ids=[SESSION_IDS[0]]
-            )
+            sink.sync_corpus(corpus_root=corpus.root, agent="claude-code")
 
 
 # ---------------------------------------------------------------------------
@@ -518,9 +537,8 @@ class TestAttachForQuery:
         corpus = _corpus(tmp_path / "corpus")
         layout = _lake(tmp_path, corpus)
         _drop_last_step(corpus.root / "sessions" / SESSION_IDS[0])
-        DuckLakeSessionSink(layout).sync_sessions(
-            corpus_root=corpus.root, agent="claude-code", session_ids=[SESSION_IDS[0]]
-        )
+        republish(corpus.root / "sessions" / SESSION_IDS[0])
+        DuckLakeSessionSink(layout).sync_corpus(corpus_root=corpus.root, agent="claude-code")
         con = duckdb.connect()
         reader = attach_lake_for_query(con, layout, corpus_root=corpus.root, all_corpora=False)
         assert isinstance(reader, LakeReader)
@@ -608,9 +626,8 @@ class TestRebuildAndCompact:
         sink = DuckLakeSessionSink(layout)
         for _ in range(4):
             for session_id in SESSION_IDS:
-                sink.sync_sessions(
-                    corpus_root=corpus.root, agent="claude-code", session_ids=[session_id]
-                )
+                republish(corpus.root / "sessions" / session_id)
+                sink.sync_corpus(corpus_root=corpus.root, agent="claude-code")
         grown = lake_status(layout)
         report = compact_lake(layout, expire_older_than_days=0)
         assert report.files_after < report.files_before == grown.data_files

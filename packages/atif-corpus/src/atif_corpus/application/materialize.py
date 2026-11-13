@@ -63,13 +63,10 @@ One pass = sweep → scan → plan → convert → write → advance watermark:
    whole corpus.
 5. Sync the session sink, when one is injected
    (:class:`~atif_corpus.domain.ports.SessionSink`; atif-cli plugs in the
-   DuckLake writer): every session published or marked this pass, plus any
-   left pending by an earlier pass, handed over in plan order, one batch per
-   call, in THIS process. Before the pass publishes anything the sessions it
-   may publish are recorded in ``sink_pending.json`` beside the watermark;
-   after the sink ran, only the ones it did not take stay there. A sink that
-   raises therefore leaves its sessions recorded, and the next pass hands
-   them over again, whether or not their sources moved.
+   DuckLake writer): one call after every swap and source-removed mark, in
+   THIS process. The sink compares the corpus with its copy and copies
+   whatever differs, so a sink that raised, or a pass run without one, is
+   caught up by the next pass that has one, whether or not any source moved.
 6. Advance ``watermark.json``: only sessions that materialized successfully
    (or converted to nothing, see below) move their entries forward, so a
    failed session stays stale and is retried next pass instead of being
@@ -269,8 +266,8 @@ class MaterializationReport:
     archive_session_ids: tuple[str, ...] = ()
     #: Sessions the session sink took this pass (0 without a sink).
     sink_synced_count: int = 0
-    #: Sessions the sink still owes after this pass: its first failing batch
-    #: and every batch after it. Recorded in ``sink_pending.json``.
+    #: Sessions this pass published or marked that the sink may not have
+    #: taken, because it raised. The next pass's sink compares again.
     sink_pending_session_ids: tuple[str, ...] = ()
     #: The sink's failure, one line, when it raised.
     sink_error: str | None = None
@@ -308,108 +305,26 @@ class MaterializationReport:
         return len(self.archive_session_ids)
 
 
-#: Sessions per ``SessionSink.sync_sessions`` call unless the caller says otherwise.
-DEFAULT_SINK_BATCH_SIZE = 64
+def _sync_sink(
+    sink: SessionSink | None, layout: CorpusLayout, *, agent: str, published: Sequence[str]
+) -> tuple[int, tuple[str, ...], str | None, float]:
+    """Call the sink once; ``(synced, pending, error, seconds)``.
 
-
-def read_sink_pending(path: Path) -> tuple[str, ...]:
-    """Load ``sink_pending.json``'s session ids; empty when absent or unreadable.
-
-    An unreadable file degrades to empty rather than failing the pass. The
-    sink's own recovery covers what that loses: it rebuilds a copy it cannot
-    trust, and ``atif-sql lake verify`` names any session that differs.
+    A sink that raises fails nothing: its error is reported with the sessions
+    this pass published, and the next pass's sink compares again.
     """
+    if sink is None:
+        return 0, (), None, 0.0
+    started = time.perf_counter()
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return ()
-    except (OSError, ValueError) as exc:
-        logger.warning("materialize: ignoring unreadable {}: {}", path, exc)
-        return ()
-    ids = raw.get("session_ids") if isinstance(raw, dict) else None
-    if not isinstance(ids, list):
-        return ()
-    return tuple(str(sid) for sid in ids if isinstance(sid, str))
-
-
-def _ordered_unique(*groups: Sequence[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for group in groups:
-        for item in group:
-            if item not in seen:
-                seen.add(item)
-                out.append(item)
-    return out
-
-
-class _SinkLedger:
-    """``sink_pending.json`` bookkeeping for one pass (a no-op without a sink)."""
-
-    def __init__(self, layout: CorpusLayout, sink: SessionSink | None) -> None:
-        self.layout = layout
-        self.sink = sink
-        self.previous: tuple[str, ...] = (
-            read_sink_pending(layout.sink_pending_path) if sink is not None else ()
+        synced = sink.sync_corpus(corpus_root=layout.corpus_root, agent=agent)
+    except Exception as exc:  # noqa: BLE001 — reported, and the next pass compares again
+        error = f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "materialize: session sink failed; the next pass syncs what it missed: {}", error
         )
-        self._intended: list[str] = list(self.previous)
-
-    def intend(self, session_ids: Sequence[str]) -> None:
-        """Record ``session_ids`` as owed BEFORE anything publishes them."""
-        if self.sink is None or not session_ids:
-            return
-        grown = _ordered_unique(self._intended, session_ids)
-        if len(grown) == len(self._intended):
-            return
-        self._intended = grown
-        self._write(grown)
-
-    def _write(self, session_ids: Sequence[str]) -> None:
-        path = self.layout.sink_pending_path
-        if session_ids:
-            self.layout.corpus_root.mkdir(parents=True, exist_ok=True)
-            write_json_atomic(path, {"session_ids": list(session_ids)}, indent=2)
-        else:
-            path.unlink(missing_ok=True)
-
-    def sync(
-        self, published: Sequence[str], *, agent: str, batch_size: int
-    ) -> tuple[int, tuple[str, ...], str | None, float]:
-        """Hand ``published`` (plan order) and the previous pending ids to the sink.
-
-        Returns ``(synced, still_pending, error, seconds)``. Stops at the first
-        batch that raises: a sink that failed once this pass is likely to fail
-        again, and everything after it stays pending either way.
-        """
-        if self.sink is None:
-            return 0, (), None, 0.0
-        order = _ordered_unique(published, self.previous)
-        started = time.perf_counter()
-        synced = 0
-        error: str | None = None
-        pending: list[str] = []
-        for start in range(0, len(order), batch_size):
-            batch = order[start : start + batch_size]
-            if error is not None:
-                pending.extend(batch)
-                continue
-            try:
-                self.sink.sync_sessions(
-                    corpus_root=self.layout.corpus_root, agent=agent, session_ids=batch
-                )
-            except Exception as exc:  # noqa: BLE001 — recorded and retried, never fatal to the pass
-                error = f"{type(exc).__name__}: {exc}"
-                logger.warning(
-                    "materialize: session sink failed on {} session(s); they stay pending: {}",
-                    len(batch),
-                    error,
-                )
-                pending.extend(batch)
-                continue
-            synced += len(batch)
-        if pending or self.layout.sink_pending_path.exists():
-            self._write(pending)
-        return synced, tuple(pending), error, time.perf_counter() - started
+        return 0, tuple(published), error, time.perf_counter() - started
+    return synced, (), None, time.perf_counter() - started
 
 
 def read_watermark(path: Path) -> dict[str, int]:
@@ -1221,7 +1136,6 @@ def _retain_sourceless_sessions(
     agent: str,
     removed_at: str,
     mark: bool,
-    before_mark: Callable[[Sequence[str]], None] | None = None,
 ) -> tuple[tuple[str, ...], dict[str, dict[str, Any]]]:
     """Keep every sourceless session of ``agent``; mark the ones not yet marked. Nothing is deleted.
 
@@ -1243,14 +1157,6 @@ def _retain_sourceless_sessions(
     retained: dict[str, dict[str, Any]] = {}
     metas = {session_id: _read_meta(layout, session_id) for session_id in sourceless_ids}
     own_ids = [sid for sid, meta in metas.items() if meta is None or _session_agent(meta) == agent]
-    if mark and before_mark is not None:
-        before_mark(
-            [
-                sid
-                for sid in own_ids
-                if (meta := metas[sid]) is not None and meta.get("source_present") is not False
-            ]
-        )
     for session_id in own_ids:
         meta = metas[session_id]
         if meta is None:
@@ -1540,7 +1446,6 @@ def materialize(
     expected_meta: Mapping[str, object] | None = None,
     converter_schema: int | None = None,
     session_sink: SessionSink | None = None,
-    sink_batch_size: int = DEFAULT_SINK_BATCH_SIZE,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> MaterializationReport:
     """Run one materialization pass; see the module docstring for the shape.
@@ -1614,13 +1519,10 @@ def materialize(
         setup such as installing the log sink the parent uses. Ignored on
         the inline path.
     session_sink
-        Optional :class:`~atif_corpus.domain.ports.SessionSink` handed every
-        session this pass published or marked source-removed, plus any an
-        earlier pass left in ``sink_pending.json``, after the swaps and in this
-        process. A sink failure is reported (``sink_error``,
+        Optional :class:`~atif_corpus.domain.ports.SessionSink`, called once
+        after the swaps and in this process to bring its copy in step with the
+        corpus. A sink failure is reported (``sink_error``,
         ``sink_pending_session_ids``), never raised.
-    sink_batch_size
-        Sessions per ``sync_sessions`` call.
 
     Raises
     ------
@@ -1629,12 +1531,9 @@ def materialize(
         ones of this agent — almost always a wrong ``source_root``. Nothing
         is touched.
     ValueError
-        ``workers`` is below ``1``, ``sink_batch_size`` is below ``1``, or
-        ``expected_meta`` contradicts the stamped converter key.
+        ``workers`` is below ``1``, or ``expected_meta`` contradicts the
+        stamped converter key.
     """
-    if sink_batch_size < 1:
-        msg = f"sink_batch_size must be >= 1, got {sink_batch_size}"
-        raise ValueError(msg)
     pass_started = time.perf_counter()
     expected = expected_generation(
         converter_version, expected_meta, converter_schema=converter_schema
@@ -1642,7 +1541,6 @@ def materialize(
 
     layout = CorpusLayout(corpus_root=corpus_root)
     _sweep_staging(layout)
-    ledger = _SinkLedger(layout, session_sink)
     previous_watermark = read_watermark(layout.watermark_path)
     previous_empty = read_empty_sessions(layout.empty_sessions_path)
     scan = scan_sources(source_root, source_layout)
@@ -1707,7 +1605,6 @@ def materialize(
         agent=agent,
         removed_at=materialized_at,
         mark=not scan.unlistable_dirs,
-        before_mark=ledger.intend,
     )
 
     planned_sessions = sessions
@@ -1730,7 +1627,6 @@ def materialize(
 
     live_jobs = tuple(_live_job(session, source_root) for session in plan.to_materialize)
     archive_jobs = _archive_jobs(retained, expected, force=force, wanted=wanted)
-    ledger.intend([job.session_id for job in (*live_jobs, *archive_jobs)])
     outcomes, workers_used = _attempt_sessions(
         layout,
         (*live_jobs, *archive_jobs),
@@ -1787,10 +1683,8 @@ def materialize(
     # (their meta.json changed). Empty sessions published nothing.
     empty_ids = set(empty)
     published = [session.session_id for session in succeeded if session.session_id not in empty_ids]
-    sink_synced, sink_pending, sink_error, sink_seconds = ledger.sync(
-        [*published, *archived_ok, *removed_ids],
-        agent=agent,
-        batch_size=sink_batch_size,
+    sink_synced, sink_pending, sink_error, sink_seconds = _sync_sink(
+        session_sink, layout, agent=agent, published=[*published, *archived_ok, *removed_ids]
     )
 
     layout.corpus_root.mkdir(parents=True, exist_ok=True)

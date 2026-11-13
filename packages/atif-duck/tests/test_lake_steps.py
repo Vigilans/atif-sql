@@ -16,7 +16,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from duck_fixtures import SESSION_IDS, build_corpus
+from duck_fixtures import SESSION_IDS, build_corpus, republish
 from test_vss import DIM, MODEL, _write_lance, write_lance_rows
 
 from atif_duck.domain.embedding_guard import EmbeddingProviderMismatch
@@ -106,9 +106,8 @@ class TestReads:
             lineage = steps.lineage
             assert list(steps.step_texts(min_chars=MIN_CHARS, since_snapshot=before)) == []
         _rewrite_first_step(corpus, SESSION_IDS[0], "a rewritten first step, long enough to embed")
-        DuckLakeSessionSink(layout).sync_sessions(
-            corpus_root=corpus, agent="claude-code", session_ids=[SESSION_IDS[0]]
-        )
+        republish(corpus / "sessions" / SESSION_IDS[0])
+        DuckLakeSessionSink(layout).sync_corpus(corpus_root=corpus, agent="claude-code")
         oracle = _oracle(corpus)
         with _open(layout, corpus) as steps:
             assert steps.lineage == lineage
@@ -134,10 +133,12 @@ class TestReads:
         sink = DuckLakeSessionSink(layout)
         with _open(layout, corpus) as steps:
             before = steps.snapshot_id
-        sink.sync_sessions(corpus_root=corpus, agent="claude-code", session_ids=[SESSION_IDS[1]])
+        republish(corpus / "sessions" / SESSION_IDS[1])
+        sink.sync_corpus(corpus_root=corpus, agent="claude-code")
         with _open(layout, corpus) as steps:
             first_write = steps.snapshot_id
-        sink.sync_sessions(corpus_root=corpus, agent="claude-code", session_ids=[SESSION_IDS[1]])
+        republish(corpus / "sessions" / SESSION_IDS[1])
+        sink.sync_corpus(corpus_root=corpus, agent="claude-code")
         with _open(layout, corpus) as steps:
             second_write = steps.snapshot_id
         compact_lake(layout, expire_older_than_days=30)

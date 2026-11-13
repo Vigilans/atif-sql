@@ -284,14 +284,15 @@ copy of the queryable rows:
 - Writer: only the materialize PARENT writes, through the `SessionSink` port
   (`atif_corpus.domain.ports`), which atif-duck implements as
   `DuckLakeSessionSink` and atif-cli wires in. After the swaps, materialize
-  hands it every session published or marked source-removed this pass, in plan
-  order, in batches (`ATIF_SQL_LAKE_SYNC_BATCH_SIZE`); each batch is one
-  transaction that deletes and re-inserts those sessions' rows in every table.
-  Pool workers never touch the lake, so a pool and `--workers 1` write the same
-  rows. Before anything publishes, the pass records the sessions it's about to
-  hand over in `<corpus>/sink_pending.json`; a sink failure or a killed pass
-  leaves them there and the next pass hands them over again, source change or
-  not. A failed lake write never fails the pass. With no lake, the sink does
+  calls it once (`sync_corpus`), and it replaces the rows of every pending
+  session (see Reader below), in batches (`ATIF_SQL_LAKE_SYNC_BATCH_SIZE`);
+  each batch is one transaction that deletes and re-inserts those sessions'
+  rows in every table. When the published catalog shows nothing pending, it
+  returns without taking the writer lock. Pool workers never touch the lake,
+  so a pool and `--workers 1` write the same rows. A sink failure, a killed
+  pass, or a pass run with `--no-lake` leaves sessions pending; the next pass
+  with the lake replaces them whether or not a source moved. A failed lake write
+  never fails the pass. With no lake, the sink does
   nothing, so `atif-sql lake rebuild` is what turns it on. A corpus the lake
   doesn't hold yet is loaded whole on first sync.
 - Loading a batch (sync, first load, rebuild, and verify's reading of the
@@ -360,7 +361,7 @@ copy of the queryable rows:
   reads files. The reader drops a memoized session whenever its bounds move
   between stages. The outputs stay parquet under `analytics/`, not lake tables: they're a few
   small shard directories per corpus that one process appends to, so the lake
-  would add a second writer to lock against materialize and a pending ledger
+  would add a second writer to lock against materialize and its own catch-up
   for a failed sync, and buy no fewer files.
 - Row order and layout: a step's tool calls and results have no ordinal, so
   their order is insertion order (`rowid`), and the writer inserts the

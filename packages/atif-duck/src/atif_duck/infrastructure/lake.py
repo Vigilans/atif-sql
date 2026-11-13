@@ -45,12 +45,15 @@ granted path is the statement gate's to refuse, as for the per-session parquet.
 The writer
 ----------
 :class:`DuckLakeSessionSink` is the adapter atif-cli plugs into atif-corpus's
-``SessionSink`` port. materialize calls it in the PARENT process, after the
-sessions' directories were swapped into place, one batch of session ids at a
-time: one transaction deletes the batch's rows from every table and inserts
-them again from the registry's raw relations over the published artifacts
-(:func:`atif_duck.infrastructure.registry.register_raw` with a session
-filter), so the lake holds exactly what the per-session path would read.
+``SessionSink`` port. materialize calls it once per pass in the PARENT
+process, after the sessions' directories were swapped into place. It compares
+every session's ``meta.json`` with the lake's ``session_meta`` row
+(:func:`pending_session_ids`) and replaces the rows of the sessions that
+differ, a batch at a time: one transaction deletes the batch's rows from
+every table and inserts them again from the registry's raw relations over
+the published artifacts (:func:`atif_duck.infrastructure.registry.register_raw`
+with a session filter), so the lake holds exactly what the per-session path
+would read.
 
 A missing lake is not an error: the sink does nothing until
 ``atif-sql lake rebuild`` creates one. A lake whose recorded schema differs
@@ -315,13 +318,8 @@ def pending_session_ids(con: duckdb.DuckDBPyConnection, corpus_root: Path) -> tu
     )
 
 
-def lake_pending_session_ids(layout: LakeLayout, corpus_root: Path) -> tuple[str, ...]:
-    """:func:`pending_session_ids` over the published catalog.
-
-    Empty when the lake cannot serve the corpus (:func:`attach_lake_for_query`
-    says why): the lake's state reports that, and the next materialize loads
-    the corpus whole.
-    """
+def _published_pending(layout: LakeLayout, corpus_root: Path) -> tuple[str, ...] | None:
+    """:func:`pending_session_ids` over the published catalog; ``None`` when the lake cannot serve the corpus."""
     import duckdb
 
     con = duckdb.connect()
@@ -330,12 +328,22 @@ def lake_pending_session_ids(layout: LakeLayout, corpus_root: Path) -> tuple[str
             attach_lake_for_query(con, layout, corpus_root=corpus_root, all_corpora=False),
             LakeReader,
         ):
-            return ()
+            return None
         return pending_session_ids(con, corpus_root)
     except duckdb.Error:
-        return ()
+        return None
     finally:
         con.close()
+
+
+def lake_pending_session_ids(layout: LakeLayout, corpus_root: Path) -> tuple[str, ...]:
+    """:func:`pending_session_ids` over the published catalog.
+
+    Empty when the lake cannot serve the corpus (:func:`attach_lake_for_query`
+    says why): the lake's state reports that, and the next materialize loads
+    the corpus whole.
+    """
+    return _published_pending(layout, corpus_root) or ()
 
 
 @contextlib.contextmanager
@@ -958,7 +966,7 @@ def rebuild_lake(
 
 @dataclass(slots=True)
 class DuckLakeSessionSink:
-    """Replace published sessions' rows in the lake: atif-corpus's ``SessionSink``.
+    """Keep a corpus's rows in the lake equal to its published artifacts: atif-corpus's ``SessionSink``.
 
     Satisfies the port structurally (the two packages may not import each
     other). Runs in materialize's parent process only; nothing here is
@@ -968,25 +976,33 @@ class DuckLakeSessionSink:
     layout: LakeLayout
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS
     load_batch_size: int = DEFAULT_LOAD_BATCH_SIZE
+    #: Sessions per transaction when pending sessions are replaced.
+    sync_batch_size: int = DEFAULT_SYNC_BATCH_SIZE
     memory_limit_bytes: int | None = None
     #: Processes that stage a batch's parquet from its trajectories.
     stage_workers: int = 1
     #: How many sync calls wrote rows (for tests and the report).
     writes: int = field(default=0)
 
-    def sync_sessions(self, *, corpus_root: Path, agent: str, session_ids: Sequence[str]) -> None:
-        """Make the lake's rows for ``session_ids`` equal their published artifacts.
+    def sync_corpus(self, *, corpus_root: Path, agent: str) -> int:
+        """Replace the rows of every pending session of the corpus; return how many sessions were written.
 
-        Returns normally when that holds afterwards, including when there is
-        no lake at all (``lake rebuild`` loads everything when one is made).
-        Raises on anything else; materialize then records the sessions as
-        pending and retries them next pass.
+        A session is pending when its lake rows are missing or older than its
+        ``meta.json`` (:func:`pending_session_ids`). They are replaced
+        ``sync_batch_size`` at a time, one transaction and one published reader
+        catalog per batch. A corpus the lake does not hold yet is loaded
+        whole, and a lake whose recorded schema is stale is rebuilt.
+
+        Returns 0 without taking the writer lock when there is no lake
+        (``lake rebuild`` loads everything when one is made) or the published
+        catalog shows nothing pending. Raises on anything else; the next call
+        compares again.
         """
-        if not session_ids:
-            return
         if not self.layout.exists():
             logger.debug("lake: no lake at {}; nothing to sync", self.layout.root)
-            return
+            return 0
+        if _published_pending(self.layout, corpus_root) == ():
+            return 0
         corpus = LakeCorpus(root=corpus_root, agent=agent)
         with writer_lock(self.layout, timeout_seconds=self.lock_timeout_seconds):
             action, known = self._plan(corpus)
@@ -994,7 +1010,7 @@ class DuckLakeSessionSink:
                 logger.warning(
                     "lake: {} was written by another schema; rebuilding it", self.layout.root
                 )
-                _rebuild_locked(
+                report = _rebuild_locked(
                     self.layout,
                     [*known.values(), corpus],
                     batch_size=self.load_batch_size,
@@ -1002,23 +1018,39 @@ class DuckLakeSessionSink:
                     stage_workers=self.stage_workers,
                 )
                 self.writes += 1
-                return
+                return next((n for name, _, n in report.corpora if name == corpus.name), 0)
             with _writer_connection(self.memory_limit_bytes) as con:
                 _attach(con, self.layout.catalog_path, self.layout.data_dir, read_only=False)
-                staging = Staging.beside(self.layout, workers=self.stage_workers)
                 if action == "load_corpus":
-                    _load_corpus(con, corpus, batch_size=self.load_batch_size, staging=staging)
-                else:
-                    ids = sorted(set(session_ids))
-                    # A pool only pays for its start-up on more sessions than workers.
-                    if len(ids) <= self.stage_workers:
-                        staging = Staging(staging.root)
-                    with _stage_pool(staging) as pooled:
-                        for group_agent, group in _by_agent(corpus.root, ids).items():
-                            _load_batch(con, corpus, group, agent=group_agent, staging=pooled)
+                    staging = Staging.beside(self.layout, workers=self.stage_workers)
+                    _, written = _load_corpus(
+                        con, corpus, batch_size=self.load_batch_size, staging=staging
+                    )
+                    _detach(con)
+                    _publish_reader_catalog(self.layout)
+                    self.writes += 1
+                    return written
+                pending = pending_session_ids(con, corpus.root)
                 _detach(con)
-            _publish_reader_catalog(self.layout)
-            self.writes += 1
+            for start in range(0, len(pending), self.sync_batch_size):
+                self._replace(corpus, pending[start : start + self.sync_batch_size])
+            if pending:
+                self.writes += 1
+            return len(pending)
+
+    def _replace(self, corpus: LakeCorpus, session_ids: Sequence[str]) -> None:
+        """One transaction per agent replacing ``session_ids``' rows, then publish the reader catalog."""
+        with _writer_connection(self.memory_limit_bytes) as con:
+            _attach(con, self.layout.catalog_path, self.layout.data_dir, read_only=False)
+            staging = Staging.beside(self.layout, workers=self.stage_workers)
+            # A pool only pays for its start-up on more sessions than workers.
+            if len(session_ids) <= self.stage_workers:
+                staging = Staging(staging.root)
+            with _stage_pool(staging) as pooled:
+                for group_agent, group in _by_agent(corpus.root, session_ids).items():
+                    _load_batch(con, corpus, group, agent=group_agent, staging=pooled)
+            _detach(con)
+        _publish_reader_catalog(self.layout)
 
     def _plan(self, corpus: LakeCorpus) -> tuple[str, dict[str, LakeCorpus]]:
         """``rebuild`` (stale schema), ``load_corpus`` (not registered yet) or ``sync``."""

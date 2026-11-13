@@ -1,31 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ``SessionSink`` port: what materialize hands it, when, and what a failure leaves.
+"""The ``SessionSink`` port: when materialize calls it, and what a failure leaves.
 
 atif-corpus knows nothing about what the sink keeps (atif-cli plugs in
-atif-duck's DuckLake writer), so these tests use a recording fake and pin the
-contract any sink gets: every session published or marked source-removed this
-pass, in plan order and in batches, after the swaps and in this process; a
-sink failure never fails the pass, and every session it did not take is
-recorded in ``sink_pending.json`` BEFORE anything publishes, and handed over
-again by the next pass even when no source moved.
+atif-duck's DuckLake writer, which compares the corpus with the lake), so
+these tests use a recording fake and pin the contract any sink gets: one call
+per pass, with the corpus root and the agent, after every swap and
+source-removed mark and in this process; and a sink failure never fails the
+pass, which reports it with the sessions it published.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, override
+from typing import Any
 
 import pytest
 from corpus_fixtures import NOW_NS, SESSION_A, SESSION_B, STALE_NS, write_session
 
-from atif_corpus.application.materialize import (
-    MaterializationReport,
-    materialize,
-    read_sink_pending,
-)
+from atif_corpus.application.materialize import MaterializationReport, materialize
 from atif_corpus.domain.layout import CorpusLayout
 from atif_corpus.infrastructure.fake_converter import FakeConverter
 
@@ -41,26 +35,24 @@ VERSIONS: dict[str, Any] = {
 
 
 class RecordingSink:
-    """Records every batch; raises for the first ``fail_calls`` calls."""
+    """Records the published ``meta.json`` of every session at each call; may raise."""
 
-    def __init__(self, *, fail_calls: int = 0, error: type[BaseException] = RuntimeError) -> None:
-        self.calls: list[tuple[Path, str, tuple[str, ...]]] = []
-        self.fail_calls = fail_calls
+    def __init__(self, *, error: type[BaseException] | None = None) -> None:
+        self.calls: list[tuple[Path, str, dict[str, dict[str, Any]]]] = []
         self.error = error
 
-    def sync_sessions(self, *, corpus_root: Path, agent: str, session_ids: Sequence[str]) -> None:
-        # The contract: every session handed over is already published.
-        layout = CorpusLayout(corpus_root=corpus_root)
-        for session_id in session_ids:
-            assert layout.meta_path(session_id).is_file(), session_id
-        self.calls.append((corpus_root, agent, tuple(session_ids)))
-        if len(self.calls) <= self.fail_calls:
-            msg = f"scripted sink failure on call {len(self.calls)}"
+    def sync_corpus(self, *, corpus_root: Path, agent: str) -> int:
+        sessions = CorpusLayout(corpus_root=corpus_root).sessions_dir
+        metas = {
+            entry.name: json.loads((entry / "meta.json").read_text())
+            for entry in sorted(sessions.iterdir())
+            if (entry / "meta.json").is_file()
+        }
+        self.calls.append((corpus_root, agent, metas))
+        if self.error is not None:
+            msg = "scripted sink failure"
             raise self.error(msg)
-
-    @property
-    def handed(self) -> list[str]:
-        return [sid for _, _, batch in self.calls for sid in batch]
+        return len(metas)
 
 
 def run(
@@ -69,7 +61,6 @@ def run(
     sink: RecordingSink | None,
     *,
     converter: FakeConverter | None = None,
-    batch: int = 2,
     workers: int = 1,
 ) -> MaterializationReport:
     return materialize(
@@ -78,7 +69,6 @@ def run(
         converter=converter or FakeConverter(),
         now_ns=NOW_NS,
         session_sink=sink,
-        sink_batch_size=batch,
         workers=workers,
         **VERSIONS,
     )
@@ -89,153 +79,74 @@ def _write_all(source_root: Path) -> None:
         write_session(source_root, session_id, mtime_ns=STALE_NS)
 
 
-def _pending(corpus_root: Path) -> tuple[str, ...]:
-    return read_sink_pending(CorpusLayout(corpus_root=corpus_root).sink_pending_path)
-
-
-class TestWhatTheSinkIsHanded:
-    def test_published_sessions_in_plan_order_and_batches(
-        self, source_root: Path, corpus_root: Path
+class TestWhenTheSinkIsCalled:
+    @pytest.mark.parametrize("workers", [1, 3])
+    def test_once_after_every_session_is_published(
+        self, source_root: Path, corpus_root: Path, workers: int
     ) -> None:
         _write_all(source_root)
         sink = RecordingSink()
-        report = run(source_root, corpus_root, sink, batch=3)
-        assert [batch for _, _, batch in sink.calls] == [SESSIONS[:3], SESSIONS[3:]]
-        assert {(root, agent) for root, agent, _ in sink.calls} == {(corpus_root, "claude-code")}
+        report = run(source_root, corpus_root, sink, workers=workers)
+        assert [(root, agent, tuple(metas)) for root, agent, metas in sink.calls] == [
+            (corpus_root, "claude-code", SESSIONS)
+        ]
         assert report.sink_synced_count == len(SESSIONS)
         assert report.sink_pending_session_ids == ()
         assert report.sink_error is None
-        assert not CorpusLayout(corpus_root=corpus_root).sink_pending_path.exists()
 
-    def test_failed_and_empty_sessions_are_not_handed_over(
-        self, source_root: Path, corpus_root: Path
-    ) -> None:
+    def test_an_up_to_date_pass_still_calls_it(self, source_root: Path, corpus_root: Path) -> None:
+        """The sink may be behind the corpus without any source moving."""
         _write_all(source_root)
+        run(source_root, corpus_root, None)
         sink = RecordingSink()
-        converter = FakeConverter(
-            fail_sessions=frozenset({SESSION_B}), empty_sessions=frozenset({SESSION_C})
-        )
-        run(source_root, corpus_root, sink, converter=converter)
-        assert sink.handed == [SESSION_A, SESSION_D]
-        assert _pending(corpus_root) == ()
+        report = run(source_root, corpus_root, sink)
+        assert report.materialized_count == 0
+        assert len(sink.calls) == 1
 
-    def test_an_up_to_date_pass_hands_over_nothing(
+    def test_a_source_removed_session_is_marked_before_the_call(
         self, source_root: Path, corpus_root: Path
     ) -> None:
         _write_all(source_root)
-        run(source_root, corpus_root, RecordingSink())
-        again = RecordingSink()
-        run(source_root, corpus_root, again)
-        assert again.calls == []
-
-    def test_a_newly_source_removed_session_is_handed_over(
-        self, source_root: Path, corpus_root: Path
-    ) -> None:
-        _write_all(source_root)
-        run(source_root, corpus_root, RecordingSink())
+        run(source_root, corpus_root, None)
         (source_root / "-proj-a" / f"{SESSION_B}.jsonl").unlink()
         sink = RecordingSink()
         report = run(source_root, corpus_root, sink)
         assert report.removed_session_ids == (SESSION_B,)
-        assert sink.handed == [SESSION_B]
-        # Marked once: the pass after that hands it over no more.
-        later = RecordingSink()
-        run(source_root, corpus_root, later)
-        assert later.calls == []
-
-    def test_the_pool_hands_over_exactly_what_the_inline_path_does(self, tmp_path: Path) -> None:
-        source_root = tmp_path / "projects"
-        _write_all(source_root)
-        inline, pooled = RecordingSink(), RecordingSink()
-        run(source_root, tmp_path / "inline", inline, workers=1)
-        run(source_root, tmp_path / "pooled", pooled, workers=3)
-        assert [batch for _, _, batch in pooled.calls] == [batch for _, _, batch in inline.calls]
+        ((_, _, metas),) = sink.calls
+        assert metas[SESSION_B]["source_present"] is False
 
 
 class TestAFailingSink:
-    def test_the_failed_batch_and_every_later_one_stay_pending(
+    def test_the_failure_is_reported_with_the_sessions_published(
         self, source_root: Path, corpus_root: Path
     ) -> None:
         _write_all(source_root)
-        sink = RecordingSink(fail_calls=1)
-        report = run(source_root, corpus_root, sink, batch=2)
-        # The first batch failed; the pass stopped handing over and kept all.
-        assert [batch for _, _, batch in sink.calls] == [SESSIONS[:2]]
-        assert report.sink_pending_session_ids == SESSIONS
+        converter = FakeConverter(
+            fail_sessions=frozenset({SESSION_B}), empty_sessions=frozenset({SESSION_C})
+        )
+        report = run(
+            source_root, corpus_root, RecordingSink(error=RuntimeError), converter=converter
+        )
+        assert report.sink_pending_session_ids == (SESSION_A, SESSION_D)
         assert report.sink_synced_count == 0
         assert report.sink_error is not None
         assert "scripted sink failure" in report.sink_error
-        assert _pending(corpus_root) == SESSIONS
-        # The pass itself succeeded: artifacts published, watermark advanced.
-        assert report.failed_count == 0
-        assert report.materialized_count == len(SESSIONS)
+        # The pass itself went on: artifacts published, the failure is the converter's.
+        assert [f.session_id for f in report.failures] == [SESSION_B]
+        assert report.materialized_count == 2
 
-    def test_the_next_pass_hands_pending_sessions_over_with_no_source_change(
+    def test_the_next_pass_calls_it_again_with_no_source_change(
         self, source_root: Path, corpus_root: Path
     ) -> None:
         _write_all(source_root)
-        run(source_root, corpus_root, RecordingSink(fail_calls=1))
+        run(source_root, corpus_root, RecordingSink(error=RuntimeError))
         retry = RecordingSink()
         report = run(source_root, corpus_root, retry)
         assert report.materialized_count == 0
-        assert retry.handed == list(SESSIONS)
+        assert report.sink_synced_count == len(SESSIONS)
         assert report.sink_pending_session_ids == ()
-        assert not CorpusLayout(corpus_root=corpus_root).sink_pending_path.exists()
 
-    def test_a_pass_without_a_sink_leaves_the_pending_record_alone(
-        self, source_root: Path, corpus_root: Path
-    ) -> None:
+    def test_an_interrupt_is_not_swallowed(self, source_root: Path, corpus_root: Path) -> None:
         _write_all(source_root)
-        run(source_root, corpus_root, RecordingSink(fail_calls=1))
-        write_session(source_root, SESSION_A, mtime_ns=STALE_NS + 1)
-        report = run(source_root, corpus_root, None)
-        assert report.materialized_count == 1
-        assert _pending(corpus_root) == SESSIONS
-
-    def test_sessions_are_recorded_before_they_publish(
-        self, source_root: Path, corpus_root: Path
-    ) -> None:
-        """A pass killed between a session's swap and its sync still leaves it recorded."""
-        _write_all(source_root)
-        sink = RecordingSink(fail_calls=1, error=KeyboardInterrupt)
         with pytest.raises(KeyboardInterrupt):
-            run(source_root, corpus_root, sink)
-        assert _pending(corpus_root) == SESSIONS
-        retry = RecordingSink()
-        run(source_root, corpus_root, retry)
-        assert retry.handed == list(SESSIONS)
-
-    def test_a_converter_sees_its_session_recorded_before_the_swap(
-        self, source_root: Path, corpus_root: Path
-    ) -> None:
-        write_session(source_root, SESSION_A, mtime_ns=STALE_NS)
-        layout = CorpusLayout(corpus_root=corpus_root)
-        seen: list[tuple[str, ...]] = []
-
-        class Watching(FakeConverter):
-            @override
-            def convert(
-                self,
-                session_jsonl: Path,
-                *,
-                source_files: Sequence[Path] = (),
-                archive_dir: Path | None = None,
-            ) -> Any:
-                seen.append(read_sink_pending(layout.sink_pending_path))
-                return super().convert(
-                    session_jsonl, source_files=source_files, archive_dir=archive_dir
-                )
-
-        run(source_root, corpus_root, RecordingSink(), converter=Watching())
-        assert seen == [(SESSION_A,)]
-
-    def test_an_unreadable_record_reads_as_empty(self, tmp_path: Path) -> None:
-        path = tmp_path / "sink_pending.json"
-        path.write_text("{not json")
-        assert read_sink_pending(path) == ()
-        path.write_text(json.dumps({"session_ids": "not-a-list"}))
-        assert read_sink_pending(path) == ()
-
-    def test_a_batch_size_below_one_is_refused(self, source_root: Path, corpus_root: Path) -> None:
-        with pytest.raises(ValueError, match="sink_batch_size"):
-            run(source_root, corpus_root, RecordingSink(), batch=0)
+            run(source_root, corpus_root, RecordingSink(error=KeyboardInterrupt))

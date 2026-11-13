@@ -23,6 +23,7 @@ The corpus contains two sessions:
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import shutil
 from pathlib import Path
@@ -895,6 +896,21 @@ def compress_artifacts(corpus_root: Path) -> None:
             if plain.is_file():
                 (session_dir / f"{name}.zst").write_bytes(compressor.compress(plain.read_bytes()))
                 plain.unlink()
+
+
+_REPUBLISHED = itertools.count(1)
+
+
+def republish(session_dir: Path, **changes: object) -> None:
+    """Rewrite a session's ``meta.json`` as a new materialize write does: a fresh ``materialized_at``.
+
+    ``changes`` are written beside it. The lake sink replaces a session's rows
+    when its ``meta.json`` no longer matches the lake's ``session_meta`` row.
+    """
+    path = session_dir / "meta.json"
+    meta = json.loads(path.read_text())
+    meta["materialized_at"] = f"2026-12-01T00:00:00.{next(_REPUBLISHED):06d}Z"
+    path.write_text(json.dumps({**meta, **changes}, separators=(",", ":")))
 
 
 #: ``{sessions-tree digest: (template corpus root, its lake)}`` for this run.

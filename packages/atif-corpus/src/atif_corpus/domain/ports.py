@@ -178,23 +178,23 @@ class ArtifactProducer(Protocol):
 
 
 class SessionSink(Protocol):
-    """Anything that keeps a copy of published sessions in step with the corpus.
+    """Anything that keeps a copy of a corpus's published sessions in step with it.
 
     atif-cli plugs atif-duck's DuckLake writer in here. The materialize use
-    case calls :meth:`sync_sessions` in the PARENT process only (never in a
-    pool worker, so an implementation need not pickle), after every session
-    in ``session_ids`` has been swapped into ``sessions/<id>/`` (or had its
-    ``meta.json`` rewritten as source-removed), one batch at a time, in plan
-    order.
+    case calls :meth:`sync_corpus` once per pass, in the PARENT process only
+    (never in a pool worker, so an implementation need not pickle), after
+    every session the pass publishes has been swapped into ``sessions/<id>/``
+    and every source-removed mark written.
 
-    Returning normally means the copy now matches those sessions' published
-    artifacts (an implementation with no copy to keep, say because none has
-    been created yet, may simply return). Raising means it may not: the use
-    case records every session of the batch, and every later batch, in
-    ``<corpus_root>/sink_pending.json`` and hands them to the sink again next
-    pass, so the copy never silently diverges from the corpus.
+    The sink finds the sessions to copy itself, by comparing the corpus with
+    its copy: a pass hands over no list, so sessions an earlier pass
+    published without the sink (a failed sync, a pass that ran without one)
+    reach the copy the same way. Returning normally means the copy now
+    matches the corpus (an implementation with no copy to keep, say because
+    none has been created yet, may simply return 0). Raising means it may
+    not; the next call compares again.
     """
 
-    def sync_sessions(self, *, corpus_root: Path, agent: str, session_ids: Sequence[str]) -> None:
-        """Make the copy's rows for ``session_ids`` equal their published artifacts."""
+    def sync_corpus(self, *, corpus_root: Path, agent: str) -> int:
+        """Make the copy match the corpus's published sessions; return how many sessions it wrote."""
         ...

@@ -49,8 +49,6 @@ proofs are out of scope for the workspace.
   watermark.json                   # {path: mtime_ns} across source corpus
   empty_sessions.json              # {session_id: {converter_schema, ...}} for
                                    #  transcripts with nothing to convert
-  sink_pending.json                # {session_ids: [...]}: sessions the SessionSink
-                                   #  hasn't taken yet; absent when none are pending
 
 <lake_root>/                       # default: ~/.atif-sql/lake/ (ATIF_SQL_LAKE_ROOT)
   catalog.duckdb                   # the writer's DuckLake catalog
@@ -301,12 +299,15 @@ proofs are out of scope for the workspace.
 - Macro signatures are pinned against the DDL by a drift test.
 - sessions view carries `corpus`, the corpus directory's name, on both read
   paths.
-- DuckLakeSessionSink is the SessionSink implementation: per batch, one lake
-  transaction that deletes the batch's sessions from every lake table and
-  inserts their rows from the registry's raw relations over the published
-  artifacts, then publishes catalog.reader.duckdb. It does nothing when the
-  lake doesn't exist, rebuilds a lake whose recorded schema is stale, and
-  loads a corpus the lake doesn't hold yet in full.
+- DuckLakeSessionSink is the SessionSink implementation. sync_corpus compares
+  every session's meta.json with its session_meta row (materialized_at,
+  source_mtime_ns, source_present, source_removed_at) and, per batch of the
+  sessions that differ or are missing, runs one lake transaction that deletes
+  them from every lake table and inserts their rows from the registry's raw
+  relations over the published artifacts, then publishes
+  catalog.reader.duckdb. It does nothing when the lake doesn't exist,
+  rebuilds a lake whose recorded schema is stale, and loads a corpus the lake
+  doesn't hold yet in full.
 - register(con, corpus_root, lake=LakeReader) binds the raw relations as views
   over the lake tables (scoped to one corpus, or every corpus) instead of the
   TEMP-table readers; every view and macro above binds over them unchanged.

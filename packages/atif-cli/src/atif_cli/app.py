@@ -927,13 +927,14 @@ def materialize(
         converts sessions in parallel and writes byte-identical artifacts.
         Below ``1`` exits 64.
     lake
-        After the sessions are swapped into place, replace their rows in the
-        DuckLake at ``ATIF_SQL_LAKE_ROOT`` (default ``~/.atif-sql/lake``), one
+        After the sessions are swapped into place, replace the rows of every
+        session whose rows in the DuckLake at ``ATIF_SQL_LAKE_ROOT`` (default
+        ``~/.atif-sql/lake``) are missing or older than its ``meta.json``, one
         transaction per batch, in this process. Does nothing until ``atif-sql
-        lake rebuild`` has created the lake. A failed lake write leaves the
-        sessions in ``<corpus>/sink_pending.json`` and the next pass retries
-        them; the report's ``lake_pending`` counts them. ``--no-lake`` skips the
-        lake and leaves that file alone.
+        lake rebuild`` has created the lake. A failed lake write is reported,
+        with the sessions this pass published in ``lake_pending``, and the
+        next pass with the lake syncs whatever is still behind. ``--no-lake``
+        skips the lake; ``status`` counts the sessions that leaves behind.
     fmt
         Report format; ``auto`` = human lines on TTY, JSON on a pipe.
     """
@@ -1001,13 +1002,13 @@ def materialize(
                     LakeLayout(lake_settings.lake_root),
                     lock_timeout_seconds=lake_settings.lake_lock_timeout_seconds,
                     load_batch_size=lake_settings.lake_load_batch_size,
+                    sync_batch_size=lake_settings.lake_sync_batch_size,
                     memory_limit_bytes=_query_memory_limit_bytes(),
                     stage_workers=lake_settings.lake_stage_workers,
                 )
                 if lake
                 else None
             ),
-            sink_batch_size=lake_settings.lake_sync_batch_size,
         )
     except SuspiciousEmptyScanError as exc:
         # The corpus's loudest data-loss tripwire, so it gets a code an
