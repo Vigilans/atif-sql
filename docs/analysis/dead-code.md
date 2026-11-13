@@ -178,16 +178,16 @@ intra-module use site is named after the table.
 | `INFO_COLUMNAR_SCHEMA` | `packages/atif-duck/src/atif_duck/domain/lake.py:116` | 2026-09-28 |
 | `LAKE_INFO_COLUMNS` | `packages/atif-duck/src/atif_duck/domain/lake.py:122` | 2026-09-28 |
 | `CORPORA_COLUMNS` | `packages/atif-duck/src/atif_duck/domain/lake.py:123` | 2026-09-28 |
-| `DUCKLAKE_EXTENSION` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:113` | 2026-09-28 |
-| `CLEANUP_GRACE_HOURS` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:142` | 2026-09-28 |
-| `LakeExtensionMissingError` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:169` | 2026-09-28 |
-| `ducklake_extension_installed` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:316` | 2026-09-28 |
-| `RebuildReport` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:751` | 2026-09-28 |
-| `LakeMismatch` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1113` | 2026-09-28 |
-| `VerifyReport` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1124` | 2026-09-28 |
-| `LakeStatus` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1226` | 2026-09-28 |
-| `CompactReport` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1324` | 2026-09-28 |
-| `DEFAULT_READER_MEMORY_BYTES` | `packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:57` | 2026-09-28 |
+| `DUCKLAKE_EXTENSION` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:114` | 2026-09-28 |
+| `CLEANUP_GRACE_HOURS` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:143` | 2026-09-28 |
+| `LakeExtensionMissingError` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:170` | 2026-09-28 |
+| `ducklake_extension_installed` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:367` | 2026-09-28 |
+| `RebuildReport` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:802` | 2026-09-28 |
+| `LakeMismatch` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1164` | 2026-09-28 |
+| `VerifyReport` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1175` | 2026-09-28 |
+| `LakeStatus` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1277` | 2026-09-28 |
+| `CompactReport` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1375` | 2026-09-28 |
+| `DEFAULT_READER_MEMORY_BYTES` | `packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:58` | 2026-09-28 |
 | `STEPS_TABLE` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:52` | 2026-09-28 |
 | `STEP_TEXTS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:67` | 2026-09-28 |
 | `CHANGED_STEP_TEXTS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:75` | 2026-09-28 |
@@ -292,14 +292,14 @@ numbers follow it as plain numbers.
   `INFO_SCHEMA_DIGEST`, and `INFO_COLUMNAR_SCHEMA` are the keys of
   `expected_lake_info` at `:383-385`.
 - In `packages/atif-duck/src/atif_duck/infrastructure/lake.py`,
-  `DUCKLAKE_EXTENSION` is bound into the install probe at `:319`;
-  `ducklake_extension_installed` is called at `:330`;
-  `LakeExtensionMissingError` is raised at `:344`; `CLEANUP_GRACE_HOURS` is
-  interpolated into the cleanup call at `:1372`; `RebuildReport`,
-  `VerifyReport`, `LakeStatus`, and `CompactReport` are return types at `:807`,
-  `:1151`, `:1264`, and `:1347`; `LakeMismatch` annotates `:1129`.
+  `DUCKLAKE_EXTENSION` is bound into the install probe at `:370`;
+  `ducklake_extension_installed` is called at `:381`;
+  `LakeExtensionMissingError` is raised at `:395`; `CLEANUP_GRACE_HOURS` is
+  interpolated into the cleanup call at `:1423`; `RebuildReport`,
+  `VerifyReport`, `LakeStatus`, and `CompactReport` are return types at `:858`,
+  `:1202`, `:1315`, and `:1398`; `LakeMismatch` annotates `:1180`.
 - `DEFAULT_READER_MEMORY_BYTES` is the reader's fallback memory limit at
-  `packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:95`.
+  `packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:96`.
 - In `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py`,
   `STEPS_TABLE` is interpolated at `:60`; `STEP_TEXTS_SQL`,
   `CHANGED_STEP_TEXTS_SQL`, `STEP_KEYS_SQL`, `REGISTERED_AT_SQL`, and
@@ -374,10 +374,10 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
 
 The rest sit in modules that do declare an `__all__` and are deliberately
 absent from it, which is the module saying they aren't exported:
-`packages/atif-cli/src/atif_cli/app.py:2315` (`search_rows`),
+`packages/atif-cli/src/atif_cli/app.py:2320` (`search_rows`),
 `packages/atif-cli/src/atif_cli/corpus.py:71` (`SessionLayout`) and `:158`
 (`CorpusSlimReport`), and
-`packages/atif-duck/src/atif_duck/infrastructure/lake.py:117`
+`packages/atif-duck/src/atif_duck/infrastructure/lake.py:118`
 (`DEFAULT_AGENT`).
 
 ## Unreferenced files
@@ -472,11 +472,11 @@ write, over every tracked file:
 Every real consumer bypasses the facade for the deep module:
 
 - `packages/atif-cli/src/atif_cli/app.py:1532` and
-  `packages/atif-cli/src/atif_cli/app.py:2177-2181` import `register` from
+  `packages/atif-cli/src/atif_cli/app.py:2182-2186` import `register` from
   `atif_duck.infrastructure.registry`.
-- `packages/atif-cli/src/atif_cli/app.py:2384`:
+- `packages/atif-cli/src/atif_cli/app.py:2389`:
   `from atif_duck.domain.examples import (...)`.
-- `packages/atif-cli/src/atif_cli/app.py:2466`:
+- `packages/atif-cli/src/atif_cli/app.py:2471`:
   `from atif_duck.domain.catalog import (...)`, which takes `MACRO_SIGNATURES`
   and `VIEW_SCHEMA` with their analytics counterparts.
 - `packages/atif-cli/src/atif_cli/duck_errors.py:27`,

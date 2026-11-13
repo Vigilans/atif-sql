@@ -93,7 +93,7 @@ it, and every reader accepts either spelling. The parquet files are a cache of w
 compute from the trajectory, never a source of truth, and materialize doesn't write them: the CLI
 passes no artifact producer (`packages/atif-cli/src/atif_cli/app.py:989-991`), and the lake loader
 runs atif-duck's `ColumnarArtifactProducer` to stage each session it loads
-(`packages/atif-duck/src/atif_duck/infrastructure/lake.py:586`). atif-duck reads a session's own
+(`packages/atif-duck/src/atif_duck/infrastructure/lake.py:637`). atif-duck reads a session's own
 parquet files only when `meta.columnar_schema` matches its version and all five are present and
 non-empty (`packages/atif-duck/src/atif_duck/infrastructure/columnar.py:116`), and falls back to
 the trajectory per session otherwise. The names and the schema version live in
@@ -135,8 +135,8 @@ every one of them; atif-models reaches it through atif-analytics, which imports 
 `docs/CONTRACT.md:17-19` leaves VSS/`semantic_search` and the analytics pipelines to
 `docs/CONTRACT-V2.md` rather than ruling them out; both are shipped commands (the `atif-analytics`
 and `atif-embed` pins at `packages/atif-cli/pyproject.toml:32` and `:36`, plus the `analyze`,
-`embed`, and `search` commands at `packages/atif-cli/src/atif_cli/app.py:1710`, `:1878`, and
-`:2108`). Read `docs/CONTRACT.md:22-60` as authoritative for the layout (that's the part the
+`embed`, and `search` commands at `packages/atif-cli/src/atif_cli/app.py:1715`, `:1883`, and
+`:2113`). Read `docs/CONTRACT.md:22-60` as authoritative for the layout (that's the part the
 packages actually implement) and the manifests as authoritative for who imports whom.
 
 **Drift risk:** a new artifact, a renamed file, or a new `meta.json` key must be applied in every
@@ -156,12 +156,12 @@ write side. Any layout change starts there and then greps the reader modules nam
 
 **Consumers:**
 
-- `packages/atif-cli/src/atif_cli/app.py:2449-2501`: the `schema` command reads `VIEW_SCHEMA`,
+- `packages/atif-cli/src/atif_cli/app.py:2454-2506`: the `schema` command reads `VIEW_SCHEMA`,
   `MACRO_SIGNATURES`, `ANALYTICS_VIEW_SCHEMA`, and `ANALYTICS_MACRO_SIGNATURES`, tags each object
   with its `requires` value, and answers with no DuckDB connection.
 - `packages/atif-duck/src/atif_duck/domain/examples.py:35-44`: the examples generator imports every
   catalog and derives one runnable query per object.
-- `packages/atif-cli/src/atif_cli/app.py:2408`: the `examples` command calls
+- `packages/atif-cli/src/atif_cli/app.py:2413`: the `examples` command calls
   `build_examples()`.
 - `packages/atif-duck/tests/test_duck_views.py:51` and `:67`: the `DESCRIBE`-vs-`VIEW_SCHEMA` and
   DDL-vs-`MACRO_SIGNATURES` drift tests.
@@ -213,7 +213,7 @@ MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
   `SELECT * FROM name(args)` for a member and `SELECT name(args)` otherwise, so a macro whose DDL
   gains or loses `AS TABLE` breaks every derived example, pinned by the regex test at
   `packages/atif-duck/tests/test_examples.py:227`.
-- **The catalog is answerable without a corpus.** `packages/atif-cli/src/atif_cli/app.py:2458-2460` states the sub-50 ms,
+- **The catalog is answerable without a corpus.** `packages/atif-cli/src/atif_cli/app.py:2463-2465` states the sub-50 ms,
   no-DuckDB-bind guarantee the `schema` command rests on; a runtime `DESCRIBE` would violate it.
 - **The raw readers are deliberately NOT in `VIEW_NAMES`** (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:141-142`), so a
   consumer enumerating `VIEW_NAMES` does not see `v_raw_trajectories` and friends.
@@ -550,7 +550,7 @@ class TextRowsPort(Protocol):
   yielded with `replaces_existing=True` (`packages/atif-embed/src/atif_embed/domain/ports.py:108-111`), and the caller must delete before
   appending or the uuid fans out to two vectors
   (`packages/atif-embed/src/atif_embed/application/embed.py:219-226`).
-- **The CLI injects only the text-rows port.** `packages/atif-cli/src/atif_cli/app.py:2017-2023` calls
+- **The CLI injects only the text-rows port.** `packages/atif-cli/src/atif_cli/app.py:2022-2028` calls
   `run_backfill` with `corpus_root`, `settings`, `text_rows` (`DuckDbTextRows`, wrapped in
   `LakeTextRows` unless `--no-lake` is passed), `limit`, and `dry_run`; the use case constructs the
   default store and embedder itself under deferred imports (`packages/atif-embed/src/atif_embed/application/embed.py:114-117`, `packages/atif-embed/src/atif_embed/application/embed.py:173-176`),
@@ -981,7 +981,7 @@ rather than skipping a file that no longer contains the current version; the gua
   `ColumnarArtifactProducer` fits (`packages/atif-duck/src/atif_duck/infrastructure/columnar.py:450`)
   and which the CLI's `materialize` doesn't inject, and `SessionSink`
   (`packages/atif-corpus/src/atif_corpus/domain/ports.py:180`), which atif-duck's
-  `DuckLakeSessionSink` fits (`packages/atif-duck/src/atif_duck/infrastructure/lake.py:909`) and
+  `DuckLakeSessionSink` fits (`packages/atif-duck/src/atif_duck/infrastructure/lake.py:960`) and
   the CLI wires in at `packages/atif-cli/src/atif_cli/app.py:1000`; atif-embed's `LakeStepsPort` and
   `LakeStepSnapshot` (`packages/atif-embed/src/atif_embed/domain/ports.py:198` and `:150`), which
   atif-cli's `DuckLakeSteps` fits (`packages/atif-cli/src/atif_cli/embed_lake.py:70`); and

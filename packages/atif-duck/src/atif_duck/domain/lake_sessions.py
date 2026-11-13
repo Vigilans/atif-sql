@@ -31,10 +31,14 @@ Pure: no duckdb import, no filesystem access.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from atif_duck.domain.lake import LAKE_ALIAS, SESSION_KEY
 from atif_duck.domain.raw_readers import CORPUS_COLUMN
 from atif_duck.domain.sql_literal import SqlFragment
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _SCOPE: str = f"{CORPUS_COLUMN} = ? AND {SESSION_KEY} IN (SELECT unnest(?::VARCHAR[]))"
 _ORDER: str = f"ORDER BY {SESSION_KEY}, step_id, rowid"
@@ -69,6 +73,19 @@ class SessionFreshness:
     source_mtime_ns: int | None
     source_present: bool | None
     source_removed_at: str | None
+
+
+def session_freshness(rows: Iterable[tuple[Any, ...]]) -> dict[str, SessionFreshness]:
+    """:data:`SESSION_FRESHNESS_SQL`'s rows as ``{session_id: SessionFreshness}``."""
+    return {
+        str(sid): SessionFreshness(
+            materialized_at=None if materialized is None else str(materialized),
+            source_mtime_ns=None if mtime is None else int(mtime),
+            source_present=None if present is None else bool(present),
+            source_removed_at=None if removed is None else str(removed),
+        )
+        for sid, materialized, mtime, present, removed in rows
+    }
 
 
 def is_current(meta: object, recorded: SessionFreshness | None) -> bool:
@@ -130,4 +147,5 @@ __all__ = [
     "TURNS_SQL",
     "SessionFreshness",
     "is_current",
+    "session_freshness",
 ]

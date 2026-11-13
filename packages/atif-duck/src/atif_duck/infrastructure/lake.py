@@ -96,6 +96,7 @@ from atif_duck.domain.lake import (
     expected_lake_info,
     lake_info_mismatches,
 )
+from atif_duck.domain.lake_sessions import SESSION_FRESHNESS_SQL, is_current, session_freshness
 from atif_duck.domain.raw_readers import CORPUS_COLUMN
 from atif_duck.domain.session_id import session_id_rejection
 from atif_duck.domain.sql_literal import SqlFragment, sql_literal
@@ -285,6 +286,56 @@ def corpus_session_ids(corpus_root: Path) -> list[str]:
         and session_id_rejection(entry.name) is None
         and (entry / "meta.json").is_file()
     )
+
+
+def _read_meta(session_dir: Path) -> object:
+    """A session's parsed ``meta.json``, ``None`` when it cannot be read."""
+    import json
+
+    try:
+        return json.loads((session_dir / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def pending_session_ids(con: duckdb.DuckDBPyConnection, corpus_root: Path) -> tuple[str, ...]:
+    """The corpus's sessions whose lake rows are missing or older than their ``meta.json``, sorted.
+
+    ``con`` has the lake attached as :data:`LAKE_ALIAS`. A session counts as
+    current when its ``session_meta`` row says what its ``meta.json`` says now
+    (:func:`atif_duck.domain.lake_sessions.is_current`); every other one is
+    pending, whichever pass published it, with or without the lake.
+    """
+    recorded = session_freshness(con.execute(SESSION_FRESHNESS_SQL, [corpus_root.name]).fetchall())
+    sessions = corpus_root / "sessions"
+    return tuple(
+        sid
+        for sid in corpus_session_ids(corpus_root)
+        if not is_current(_read_meta(sessions / sid), recorded.get(sid))
+    )
+
+
+def lake_pending_session_ids(layout: LakeLayout, corpus_root: Path) -> tuple[str, ...]:
+    """:func:`pending_session_ids` over the published catalog.
+
+    Empty when the lake cannot serve the corpus (:func:`attach_lake_for_query`
+    says why): the lake's state reports that, and the next materialize loads
+    the corpus whole.
+    """
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        if not isinstance(
+            attach_lake_for_query(con, layout, corpus_root=corpus_root, all_corpora=False),
+            LakeReader,
+        ):
+            return ()
+        return pending_session_ids(con, corpus_root)
+    except duckdb.Error:
+        return ()
+    finally:
+        con.close()
 
 
 @contextlib.contextmanager
@@ -1415,8 +1466,10 @@ __all__ = [
     "corpus_session_ids",
     "ducklake_extension_installed",
     "install_ducklake_extension",
+    "lake_pending_session_ids",
     "lake_status",
     "load_ducklake",
+    "pending_session_ids",
     "rebuild_lake",
     "register_lake_raw",
     "registered_corpora",

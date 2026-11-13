@@ -319,7 +319,11 @@ copy of the queryable rows:
   parses every trajectory on each run and holds each one in memory, so it's
   slow on a large corpus, and a full scan of `tool_calls` or `tool_results`
   there can run out of query memory. That error's hint points at `lake
-  rebuild`. `search` reads the same way. Each corpus keeps its own embeddings store in its directory,
+  rebuild`. A session is pending a lake write when its `session_meta` row is
+  missing or differs from its `meta.json` in `materialized_at`,
+  `source_mtime_ns`, `source_present` or `source_removed_at`
+  (`pending_session_ids`); query still reads the lake for a corpus with
+  pending sessions, after one warning naming how many. `search` reads the same way. Each corpus keeps its own embeddings store in its directory,
   and under `--all-corpora` `message_embeddings` is the union of every
   corpus's store (one store for all when `ATIF_SQL_LANCE_URI` pins it). The
   analytics views read each corpus's `analytics/` parquets on either path,
@@ -373,7 +377,7 @@ copy of the queryable rows:
   table, between the lake and its artifacts and exits 65 on a difference (78
   with no usable lake). `lake status` reports the state, corpora, snapshots,
   files, and last write; `atif-sql status` folds the same into its lake
-  section and adds the corpus's pending sessions. `lake compact`
+  section and adds the count of the corpus's pending sessions. `lake compact`
   merges small files, rewrites delete-heavy ones, expires snapshots older than
   `--expire-older-than-days` (default 30) and removes unreferenced files once
   they're an hour old, so a reader on the previous catalog copy still finds

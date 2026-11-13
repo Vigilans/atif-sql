@@ -61,8 +61,8 @@ The catalogs (`VIEW_NAMES`, `MACRO_NAMES`, `ANALYTICS_VIEW_NAMES`,
 | `atif_duck.infrastructure.registry`: owns the real DDL and imports `DEFAULT_PRICING` | direct import | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:87` |
 | `atif_duck.infrastructure.analytics`: `register_analytics` and `register_analytics_macros` own the DDL the analytics catalogs describe | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119` and `packages/atif-duck/src/atif_duck/infrastructure/analytics.py:236` |
 | `atif_duck.infrastructure.authorship`: `register_authorship` owns the DDL for `step_author`, `user_steps`, `human_turns`, and `session_outcomes` | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/authorship.py:38` |
-| `atif_cli.app.schema`: deferred import of `VIEW_SCHEMA`, `MACRO_SIGNATURES`, `ANALYTICS_VIEW_SCHEMA`, and `ANALYTICS_MACRO_SIGNATURES` | direct import | no | `packages/atif-cli/src/atif_cli/app.py:2466-2471` |
-| `atif_cli.app.examples`: deferred import of `build_examples` + the two value tuples | direct import | no | `packages/atif-cli/src/atif_cli/app.py:2384-2388` |
+| `atif_cli.app.schema`: deferred import of `VIEW_SCHEMA`, `MACRO_SIGNATURES`, `ANALYTICS_VIEW_SCHEMA`, and `ANALYTICS_MACRO_SIGNATURES` | direct import | no | `packages/atif-cli/src/atif_cli/app.py:2471-2476` |
+| `atif_cli.app.examples`: deferred import of `build_examples` + the two value tuples | direct import | no | `packages/atif-cli/src/atif_cli/app.py:2389-2393` |
 | `test_examples.py::test_every_example_executes`: parametrized over every derived example, `fetchall()` forces materialization | test | yes | `packages/atif-duck/tests/test_examples.py:102-109` |
 | `test_examples.py` drift catchers: description coverage, exemplar coverage, `AS TABLE` set equality, example-or-exclusion coverage | test | yes | `packages/atif-duck/tests/test_examples.py:190-241` |
 | `test_duck_views.py::test_view_schema_matches_describe`: `DESCRIBE` output equals `VIEW_SCHEMA` column-for-column | test | yes | `packages/atif-duck/tests/test_duck_views.py:51-59` |
@@ -79,7 +79,7 @@ The catalogs (`VIEW_NAMES`, `MACRO_NAMES`, `ANALYTICS_VIEW_NAMES`,
   emits an example) fails `test_exclusions_reference_real_catalog_objects`
   (`packages/atif-duck/tests/test_examples.py:200`).
 - **`atif-sql schema` prints every catalog, each object tagged with its `requires` value.** It
-  reads the core and analytics schema and signature dicts (`packages/atif-cli/src/atif_cli/app.py:2466-2471`)
+  reads the core and analytics schema and signature dicts (`packages/atif-cli/src/atif_cli/app.py:2471-2476`)
   and labels every name through `object_requires`, so a new view or macro lands in both
   `atif-sql schema` and `atif-sql examples` output. `packages/atif-cli/tests/test_app.py:146`
   asserts set equality against the union of `VIEW_SCHEMA` and `ANALYTICS_VIEW_SCHEMA`, and
@@ -257,9 +257,9 @@ driving the CLI reads, so the dict is the surface, not the individual numbers, a
 | `atif_cli.app`: the module-scope import; the dict is on the lean path | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:73` |
 | `atif_cli.app.convert`: exits `invalid_input`, `empty_session`, `runtime_error`, `validation_error` | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:742-772` |
 | `atif_cli.app.query`: `parse_error`, raised after the classified envelope is emitted | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:1502-1513` |
-| `atif_cli.app.embed`: `invalid_input` plus a `EXIT_CODES[kind]` dispatch over the classifier's verdict | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:1988-2039` |
-| `atif_cli.app.search`: `no_embeddings`, the exit that tells an operator to run `embed` | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:2241-2268` |
-| `atif_cli.app.examples`: `invalid_input` on an unknown `--category` / `--requires` value | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:2394-2404` |
+| `atif_cli.app.embed`: `invalid_input` plus a `EXIT_CODES[kind]` dispatch over the classifier's verdict | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:1993-2044` |
+| `atif_cli.app.search`: `no_embeddings`, the exit that tells an operator to run `embed` | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:2246-2273` |
+| `atif_cli.app.examples`: `invalid_input` on an unknown `--category` / `--requires` value | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:2399-2409` |
 | `atif_cli.duck_errors`: classifies `duckdb.Error` into parse / catalog / runtime plus `embedding_mismatch` | direct import | yes | `packages/atif-cli/src/atif_cli/duck_errors.py:26` and `packages/atif-cli/src/atif_cli/duck_errors.py:35-90` |
 | `atif_cli.cron`: the `install` / `status` companion to the cron lanes, which exits `invalid_input` when it can't find the refresh script; the lane itself, `scripts/atif-sql-refresh.sh`, suppresses retries on code 78 | direct import | likely | `packages/atif-cli/src/atif_cli/cron.py:32` and `packages/atif-cli/src/atif_cli/cron.py:181`, `scripts/atif-sql-refresh.sh:489` |
 | `ClassifiedError.to_payload()`: the JSON error envelope on non-TTY stderr | indirect | likely | `packages/atif-cli/src/atif_cli/errors.py:78-86` |
@@ -338,7 +338,7 @@ it.
 | `atif_cli.errors`: kept `atif_*`-free and duckdb-free so it stays on the lean path | direct import | yes | `packages/atif-cli/src/atif_cli/errors.py:19-21` |
 | `atif_cli.duck_errors`: the concrete `duckdb.Error` classifier, split out for exactly that reason | direct import | yes | `packages/atif-cli/src/atif_cli/duck_errors.py:26` and `packages/atif-cli/src/atif_cli/duck_errors.py:35` |
 | `atif_duck.domain.examples`: a pure domain module with no duckdb import, safe on the lean path | direct import | yes | `packages/atif-duck/src/atif_duck/domain/examples.py:26-27` |
-| Deferred imports inside command bodies (`convert`, `materialize`, `status`, `query`, `analyze`, `embed`, `search`, `examples`, `schema`) | runtime dispatch | likely | `packages/atif-cli/src/atif_cli/app.py:727`, `packages/atif-cli/src/atif_cli/app.py:1529`, `packages/atif-cli/src/atif_cli/app.py:2466` |
+| Deferred imports inside command bodies (`convert`, `materialize`, `status`, `query`, `analyze`, `embed`, `search`, `examples`, `schema`) | runtime dispatch | likely | `packages/atif-cli/src/atif_cli/app.py:727`, `packages/atif-cli/src/atif_cli/app.py:1529`, `packages/atif-cli/src/atif_cli/app.py:2471` |
 | `atif_cli.cron`: imported at module scope, so it must itself stay lean | direct import | yes | `packages/atif-cli/src/atif_cli/app.py:72` |
 | `if TYPE_CHECKING:` blocks: the only way to name a heavy type in an annotation on this path | direct import | likely | `packages/atif-cli/src/atif_cli/app.py:84` |
 

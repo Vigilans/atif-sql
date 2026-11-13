@@ -44,6 +44,7 @@ from atif_duck.infrastructure.lake import (
     LakeUnavailable,
     attach_lake_for_query,
     compact_lake,
+    lake_pending_session_ids,
     lake_status,
     rebuild_lake,
     verify_lake,
@@ -290,6 +291,43 @@ class TestSharedCorpus:
         )
         assert self._agents(_writer(layout)) == before
         assert verify_lake(layout).clean
+
+
+# ---------------------------------------------------------------------------
+# Pending sessions: the corpus compared with the lake
+# ---------------------------------------------------------------------------
+
+
+def _rewrite_meta(session_dir: Path, **changes: object) -> None:
+    path = session_dir / "meta.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), **changes}))
+
+
+class TestPending:
+    def test_a_freshly_loaded_corpus_has_none(self, tmp_path: Path) -> None:
+        corpus = _corpus(tmp_path / "corpus")
+        assert lake_pending_session_ids(_lake(tmp_path, corpus), corpus.root) == ()
+
+    def test_republished_marked_and_unloaded_sessions_are_pending(self, tmp_path: Path) -> None:
+        corpus = _corpus(tmp_path / "corpus")
+        layout = _lake(tmp_path, corpus)
+        sessions = corpus.root / "sessions"
+        _rewrite_meta(sessions / SESSION_IDS[0], materialized_at="2026-12-01T00:00:00Z")
+        _rewrite_meta(
+            sessions / SESSION_IDS[1],
+            source_present=False,
+            source_removed_at="2026-12-01T00:00:00Z",
+        )
+        write_codex_session(corpus.root)
+        assert lake_pending_session_ids(layout, corpus.root) == tuple(
+            sorted([*SESSION_IDS, CODEX_SESSION_ID])
+        )
+
+    def test_a_lake_that_cannot_serve_the_corpus_reports_none(self, tmp_path: Path) -> None:
+        corpus = _corpus(tmp_path / "corpus")
+        assert lake_pending_session_ids(LakeLayout(tmp_path / "lake"), corpus.root) == ()
+        other = _corpus(tmp_path / "other")
+        assert lake_pending_session_ids(_lake(tmp_path, other), corpus.root) == ()
 
 
 # ---------------------------------------------------------------------------

@@ -233,6 +233,7 @@ class TestMaterializeKeepsTheLakeCurrent:
         source_root: Path,
         lake_corpus: Path,
         capsys: pytest.CaptureFixture[str],
+        warnings: list[str],
     ) -> None:
         _append_turn(source_root, SESSION_A)
         report = _materialize(source_root, lake_corpus, capsys, lake=False)
@@ -241,6 +242,11 @@ class TestMaterializeKeepsTheLakeCurrent:
         assert _exit_code(verify, fmt="json") == EXIT_CODES["lake_mismatch"]
         mismatch = _json(capsys)
         assert {m["session_id"] for m in mismatch["mismatches"]} == {SESSION_A}
+        # The lake is behind the corpus, and status and query say so.
+        status(source_root=source_root, corpus_root=lake_corpus, fmt="json")  # type: ignore[arg-type]
+        assert _json(capsys)["lake"]["pending"] == 1
+        _query("SELECT 1 AS one", lake_corpus, capsys)
+        assert any("1 session(s) of this corpus are pending a lake write" in w for w in warnings)
 
 
 class TestPoolAndSingleWorkerWriteTheSameLake:

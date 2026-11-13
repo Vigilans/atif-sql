@@ -1103,14 +1103,14 @@ def _lake_surface(corpus_root: Path) -> dict[str, Any]:
     ``state`` is ``ready`` (query reads the lake), ``absent``, ``stale``,
     ``extension_missing``, or ``corpus_missing`` (the lake does not hold this
     corpus yet; the next materialize loads it). ``pending`` counts this
-    corpus's sessions waiting for a lake write.
+    corpus's sessions whose lake rows are missing or older than their
+    ``meta.json``.
     """
-    from atif_corpus.application.materialize import read_sink_pending
-    from atif_corpus.domain.layout import CorpusLayout
-    from atif_duck.infrastructure.lake import LakeLayout, lake_status
+    from atif_duck.infrastructure.lake import LakeLayout, lake_pending_session_ids, lake_status
     from atif_duck.infrastructure.lake_settings import LakeSettings
 
-    state = lake_status(LakeLayout(LakeSettings().lake_root)).as_dict()
+    layout = LakeLayout(LakeSettings().lake_root)
+    state = lake_status(layout).as_dict()
     registered = {c["corpus"]: c for c in state["corpora"]}
     mine = registered.get(corpus_root.name)
     if not state["present"]:
@@ -1132,7 +1132,7 @@ def _lake_surface(corpus_root: Path) -> dict[str, Any]:
         "data_files": state["data_files"],
         "last_write": state["last_write"],
         "sessions": mine["sessions"] if mine else 0,
-        "pending": len(read_sink_pending(CorpusLayout(corpus_root=corpus_root).sink_pending_path)),
+        "pending": len(lake_pending_session_ids(layout, corpus_root)) if name == "ready" else 0,
     }
 
 
@@ -1659,14 +1659,18 @@ def _attach_query_lake(
     """Attach the lake for ``query``, or warn once and return ``None`` for the per-session path.
 
     With ``all_corpora`` there is no per-session equivalent, so an unusable
-    lake exits 78 instead. A corpus whose last pass left sessions pending
-    for the lake still reads the lake, after a warning naming how many.
+    lake exits 78 instead. A corpus with sessions whose lake rows are missing
+    or older than their ``meta.json`` still reads the lake, after a warning
+    naming how many.
     """
     from loguru import logger
 
-    from atif_corpus.application.materialize import read_sink_pending
-    from atif_corpus.domain.layout import CorpusLayout
-    from atif_duck.infrastructure.lake import LakeLayout, LakeReader, attach_lake_for_query
+    from atif_duck.infrastructure.lake import (
+        LakeLayout,
+        LakeReader,
+        attach_lake_for_query,
+        pending_session_ids,
+    )
     from atif_duck.infrastructure.lake_settings import LakeSettings
 
     attached = attach_lake_for_query(
@@ -1690,11 +1694,12 @@ def _attach_query_lake(
         )
         return None
     if attached.corpus is not None:
-        pending = read_sink_pending(CorpusLayout(corpus_root=corpus_root).sink_pending_path)
+        pending = pending_session_ids(con, corpus_root)
         if pending:
             logger.warning(
                 "{}: {} session(s) of this corpus are pending a lake write; "
-                "their rows show the previous materialize until the next pass lands",
+                "their lake rows are missing or older than their artifacts until the next "
+                "materialize pass syncs the lake",
                 command,
                 len(pending),
             )
@@ -2046,8 +2051,8 @@ def embed(
 def _prune_orphans(corpus_root: Path | None, *, dry_run: bool, fmt: OutputFormat) -> None:
     """``embed --prune-orphans``: count, and unless ``dry_run`` delete, the store's orphan rows."""
     from atif_cli.embed_lake import lake_steps_port
-    from atif_corpus.application.materialize import read_sink_pending
-    from atif_corpus.domain.layout import CorpusLayout
+    from atif_duck.infrastructure.lake import LakeLayout, lake_pending_session_ids
+    from atif_duck.infrastructure.lake_settings import LakeSettings
     from atif_embed.application.prune import prune_orphans
     from atif_embed.domain.errors import DomainError
     from atif_embed.infrastructure.lance_store import LanceVectorStore
@@ -2055,7 +2060,7 @@ def _prune_orphans(corpus_root: Path | None, *, dry_run: bool, fmt: OutputFormat
     settings = _corpus_settings(None, corpus_root)
     embed_settings = _embed_settings(fmt)
     lance_uri = embed_settings.resolve_lance_uri(settings.corpus_root)
-    pending = read_sink_pending(CorpusLayout(corpus_root=settings.corpus_root).sink_pending_path)
+    pending = lake_pending_session_ids(LakeLayout(LakeSettings().lake_root), settings.corpus_root)
     if pending and not dry_run:
         emit_error(
             ClassifiedError(

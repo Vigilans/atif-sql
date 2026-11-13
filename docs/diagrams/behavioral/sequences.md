@@ -125,8 +125,8 @@ sequenceDiagram
 
 Sources, in dispatch order:
 
-- CLI analyze: `packages/atif-cli/src/atif_cli/app.py:1710`; settings resolved at `:1776-1783`,
-  `run_analyze` called at `:1794`.
+- CLI analyze: `packages/atif-cli/src/atif_cli/app.py:1715`; settings resolved at `:1781-1788`,
+  `run_analyze` called at `:1799`.
 - run_analyze: `packages/atif-analytics/src/atif_analytics/application/analyze.py:37`; the
   `stages` list at `:103-108`, each stage invoked at `:129`.
 - CorpusReader: `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:314`,

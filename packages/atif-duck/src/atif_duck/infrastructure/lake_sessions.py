@@ -35,7 +35,7 @@ from atif_duck.domain.lake_sessions import (
     TOOL_CALLS_SQL,
     TOOL_RESULTS_SQL,
     TURNS_SQL,
-    SessionFreshness,
+    session_freshness,
 )
 from atif_duck.domain.sql_literal import sql_literal
 from atif_duck.infrastructure.lake import (
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 
     import duckdb
 
+    from atif_duck.domain.lake_sessions import SessionFreshness
     from atif_duck.infrastructure.lake import LakeLayout
 
 #: The reader's DuckDB memory cap (lowered further by the caller's). A batch
@@ -139,16 +140,7 @@ class LakeSessionReader:
 
     def freshness(self) -> dict[str, SessionFreshness]:
         """``{session_id: SessionFreshness}`` for every session the lake holds for the corpus."""
-        rows = self._fetch(SESSION_FRESHNESS_SQL, [self._corpus])
-        return {
-            str(sid): SessionFreshness(
-                materialized_at=None if materialized is None else str(materialized),
-                source_mtime_ns=None if mtime is None else int(mtime),
-                source_present=None if present is None else bool(present),
-                source_removed_at=None if removed is None else str(removed),
-            )
-            for sid, materialized, mtime, present, removed in rows
-        }
+        return session_freshness(self._fetch(SESSION_FRESHNESS_SQL, [self._corpus]))
 
     def last_edge_ts(self) -> dict[str, datetime | None]:
         """``{session_id: newest record ts}`` (aware, UTC) over the corpus's edges."""

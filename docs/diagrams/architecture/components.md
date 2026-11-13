@@ -66,16 +66,16 @@ in `ModelRegistry`: `spec_for` is a method of `LlmSettings`, and `classify_struc
 method.
 `AtifCliApp`'s entries each carry an `@app.command` decorator on the line
 above; `app` is the `cyclopts.App` at `packages/atif-cli/src/atif_cli/app.py:90`
-and `main` at `packages/atif-cli/src/atif_cli/app.py:2523` is the `atif-sql`
+and `main` at `packages/atif-cli/src/atif_cli/app.py:2528` is the `atif-sql`
 console script declared at `pyproject.toml:74`.
 
 | Class | Workspace member | Method entry | Declared at |
 | --- | --- | --- | --- |
 | `AtifCliApp` | atif-cli | `materialize` | `packages/atif-cli/src/atif_cli/app.py:878` |
 | `AtifCliApp` | atif-cli | `query` | `packages/atif-cli/src/atif_cli/app.py:1374` |
-| `AtifCliApp` | atif-cli | `analyze` | `packages/atif-cli/src/atif_cli/app.py:1710` |
-| `AtifCliApp` | atif-cli | `embed` | `packages/atif-cli/src/atif_cli/app.py:1878` |
-| `AtifCliApp` | atif-cli | `search` | `packages/atif-cli/src/atif_cli/app.py:2108` |
+| `AtifCliApp` | atif-cli | `analyze` | `packages/atif-cli/src/atif_cli/app.py:1715` |
+| `AtifCliApp` | atif-cli | `embed` | `packages/atif-cli/src/atif_cli/app.py:1883` |
+| `AtifCliApp` | atif-cli | `search` | `packages/atif-cli/src/atif_cli/app.py:2113` |
 | `AtifConverter` | atif-converter | `convert_and_audit` | `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220` |
 | `AtifConverter` | atif-converter | `convert_session` | `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:165` |
 | `AtifConverter` | atif-converter | `enrich_trajectory` | `packages/atif-converter/src/atif_converter/domain/enrichment.py:198` |
@@ -133,9 +133,9 @@ root. Those edges are the whole of its outbound surface: an unanchored grep for
 | --- | --- | --- | --- |
 | `AtifCliApp -> AtifConverter` | converts | `packages/atif-cli/src/atif_cli/app.py:727` | `packages/atif-cli/src/atif_cli/app.py:741` |
 | `AtifCliApp -> CorpusMaterializer` | materializes | `packages/atif-cli/src/atif_cli/app.py:945` | `packages/atif-cli/src/atif_cli/app.py:972` |
-| `AtifCliApp -> DuckRegistry` | registers | `packages/atif-cli/src/atif_cli/app.py:1532`, `packages/atif-cli/src/atif_cli/app.py:2177-2181` | `packages/atif-cli/src/atif_cli/app.py:1559`, `packages/atif-cli/src/atif_cli/app.py:2211` |
-| `AtifCliApp -> AnalyticsPipelines` | dispatches | `packages/atif-cli/src/atif_cli/app.py:1773` | `packages/atif-cli/src/atif_cli/app.py:1794` |
-| `AtifCliApp -> EmbedBackfill` | embeds | `packages/atif-cli/src/atif_cli/app.py:1983` | `packages/atif-cli/src/atif_cli/app.py:2017` |
+| `AtifCliApp -> DuckRegistry` | registers | `packages/atif-cli/src/atif_cli/app.py:1532`, `packages/atif-cli/src/atif_cli/app.py:2182-2186` | `packages/atif-cli/src/atif_cli/app.py:1559`, `packages/atif-cli/src/atif_cli/app.py:2216` |
+| `AtifCliApp -> AnalyticsPipelines` | dispatches | `packages/atif-cli/src/atif_cli/app.py:1778` | `packages/atif-cli/src/atif_cli/app.py:1799` |
+| `AtifCliApp -> EmbedBackfill` | embeds | `packages/atif-cli/src/atif_cli/app.py:1988` | `packages/atif-cli/src/atif_cli/app.py:2022` |
 | `AnalyticsPipelines -> ModelRegistry` | resolves | `packages/atif-analytics/src/atif_analytics/application/use_cases/_shared.py:46` | `packages/atif-analytics/src/atif_analytics/application/use_cases/_shared.py:49`, `packages/atif-analytics/src/atif_analytics/application/use_cases/_shared.py:50` |
 
 ### Relationships the import contracts forbid

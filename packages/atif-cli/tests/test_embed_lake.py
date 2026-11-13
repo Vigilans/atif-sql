@@ -490,9 +490,11 @@ class TestPruneOrphans:
         self, corpus: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _embed_all(corpus, capsys)
-        (corpus / "sink_pending.json").write_text(
-            json.dumps({"session_ids": [SESSION_A]}), encoding="utf-8"
-        )
+        # A pass without the lake republished the session: its lake rows are older.
+        meta_path = corpus / "sessions" / SESSION_A / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["materialized_at"] = "2099-01-01T00:00:00+00:00"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
         code = _exit_code(
             embed, prune_orphans=True, dry_run=False, corpus_root=corpus, fmt=OutputFormat.JSON
         )
