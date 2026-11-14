@@ -154,7 +154,7 @@ pinned by `packages/atif-models/tests/test_anthropic_provider.py:112` and
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
 | Registration order is raw TEMP tables, then views, then VSS, then macros, then the authorship macro and views, then the v2 analytics views and macros; each layer binds against the previous at CREATE time | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2291-2312`; test `packages/atif-duck/tests/test_duck_views.py:675` |
-| `DESCRIPTIONS` covers the catalog exactly | Application code | `packages/atif-duck/src/atif_duck/domain/catalog.py:492`; test `packages/atif-duck/tests/test_examples.py:208` |
+| `DESCRIPTIONS` covers the catalog exactly | Application code | `packages/atif-duck/src/atif_duck/domain/catalog.py:494`; test `packages/atif-duck/tests/test_examples.py:208` |
 | `cost_estimate`'s `est_cost_usd` covers PRICED steps only and is meaningful only when `unpriced_steps = 0`; an inner join would return a partial number indistinguishable from a complete one | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2043-2048`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2056-2072`; tests `packages/atif-duck/tests/test_duck_views.py:464` and `packages/atif-duck/tests/test_duck_views.py:542` |
 | Both `cost_estimate` counters filter on `model_name IS NOT NULL`, because user steps carry no model and would otherwise make every session look like a pricing gap | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2062-2067`; test `packages/atif-duck/tests/test_duck_views.py:425` |
 | An absent or unattachable Lance store degrades to an empty `message_embeddings` TABLE with the right schema, so `semantic_search` always binds | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1759-1790`; tests `packages/atif-duck/tests/test_vss.py:209` and `packages/atif-duck/tests/test_vss.py:345` |
@@ -199,7 +199,7 @@ strips a dated model suffix (`claude-haiku-4-5-20251001` matches `claude-haiku-4
 `DEFAULT_PRICING`, entries of `(in_rate, out_rate)` in **USD per 1,000,000 tokens**,
 base rates only: the prompt-cache write and read multipliers (1.25x, 2x, 0.1x of base
 input) are deliberately not modeled, matching the macro
-(`packages/atif-duck/src/atif_duck/domain/catalog.py:611-635`, pinned by
+(`packages/atif-duck/src/atif_duck/domain/catalog.py:614-638`, pinned by
 `packages/atif-duck/tests/test_duck_views.py:519` against published list rates and by
 `packages/atif-duck/tests/test_duck_views.py:530` for sanity bounds).
 

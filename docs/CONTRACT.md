@@ -331,6 +331,8 @@ proofs are out of scope for the workspace.
   trajectory's own id, and for the root its trajectory_id, else the session
   id; (session_id, trajectory_id, step_id) names one step. Every embedded
   step is is_sidechain, and its agent_id falls back to its trajectory's id.
+- steps (and the parquet and lake tables behind it) carries reasoning_content,
+  the step's ATIF reasoning_content as written, NULL on a step without one.
 - messages-parity view name: `steps` (one row per ATIF step) PLUS a `messages`
   compatibility view reconstructed from edges (uuid-keyed: uuid, parent_uuid,
   session_id, ts, type, is_sidechain, is_compact_summary, message_id,

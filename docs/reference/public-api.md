@@ -314,7 +314,7 @@ MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
 Hand-maintained parameter names for every core macro, kept static because DuckDB's
 `duckdb_functions()` returns NULL `parameters` for table macros and cannot recover them at runtime.
 
-`packages/atif-duck/src/atif_duck/domain/catalog.py:348-359`
+`packages/atif-duck/src/atif_duck/domain/catalog.py:350-361`
 
 ### main
 
@@ -571,7 +571,7 @@ The hand-maintained column schema for every core view, where column order is loa
 test asserts tuple equality against DuckDB `DESCRIBE` output, so editing view DDL without updating
 this dict fails CI instead of surfacing as a runtime mystery.
 
-`packages/atif-duck/src/atif_duck/domain/catalog.py:56-321`
+`packages/atif-duck/src/atif_duck/domain/catalog.py:56-323`
 
 ## See also
 

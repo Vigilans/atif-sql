@@ -96,6 +96,7 @@ STEP_MEMBERS: tuple[str, ...] = (
     "metrics",
     "llm_call_count",
     "extra",
+    "reasoning_content",
 )
 
 
@@ -125,6 +126,8 @@ def step_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
     * ``trajectory_id`` is the :data:`TRAJECTORY_KEY` of the trajectory
       holding the step, so ``(session_id, trajectory_id, step_id)`` names one
       step.
+    * ``reasoning_content`` is ATIF ``Step.reasoning_content`` as written,
+      NULL when the step carries none.
     """
     message_parts = access.json("message", "[*].text")
     return (
@@ -173,6 +176,7 @@ def step_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
         ),
         (access.json("extra", ".images"), "images"),
         (TRAJECTORY_KEY, "trajectory_id"),
+        (access.string("reasoning_content"), "reasoning_content"),
     )
 
 

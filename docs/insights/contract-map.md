@@ -127,7 +127,7 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   `VARCHAR` (`packages/atif-duck/src/atif_duck/domain/raw_readers.py:105`); the CLI supplies it (`packages/atif-cli/src/atif_cli/app.py:983`).
 
 **The hand-written contract and the manifests split the job.** Its CLI heading
-(`docs/CONTRACT.md:357`) names atif-cli the package that composes the others. The atif-cli
+(`docs/CONTRACT.md:359`) names atif-cli the package that composes the others. The atif-cli
 manifest declares five siblings (`packages/atif-cli/pyproject.toml:32-36`) and the CLI imports
 every one of them; atif-models reaches it through atif-analytics, which imports atif-models
 (`packages/atif-analytics/pyproject.toml:23`) as the import-linter contracts permit.
@@ -220,7 +220,7 @@ MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
 **Drift risk:** adding a view or macro without a `DESCRIPTIONS` entry, an `ARG_EXEMPLARS` entry for
 each new parameter name, or `TABLE_MACRO_NAMES` membership fails CI loudly: the risk is inverted
 here, and the real exposure is a *type* that only the fixture corpus produces. Mitigation:
-`VIEW_SCHEMA["message_embeddings"]` at `packages/atif-duck/src/atif_duck/domain/catalog.py:286-292` hardcodes `FLOAT[1024]`, so run the
+`VIEW_SCHEMA["message_embeddings"]` at `packages/atif-duck/src/atif_duck/domain/catalog.py:288-294` hardcodes `FLOAT[1024]`, so run the
 drift test against a store built at a non-default `output_dimension` before changing that setting.
 
 ## The import-linter architecture contracts
@@ -431,7 +431,7 @@ a mismatched adapter fails the typecheck gate.
   `uuid` field for the conflicts pipeline's returned-uuid validity guard.
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:678-681`: writes the lines and
   owns line termination.
-- `packages/atif-duck/src/atif_duck/domain/catalog.py:95`: the `messages` view publishes this
+- `packages/atif-duck/src/atif_duck/domain/catalog.py:96`: the `messages` view publishes this
   surface, every key but `tool_use_ids`, plus `session_id`.
 
 **Shape:**
@@ -666,7 +666,7 @@ the contract, not as a redundant smoke test), and
 ## Token semantics and the pricing table
 
 **Producer:** `packages/atif-duck/src/atif_duck/infrastructure/registry.py:73-76` (the semantics)
-and `packages/atif-duck/src/atif_duck/domain/catalog.py:621` (`DEFAULT_PRICING`)
+and `packages/atif-duck/src/atif_duck/domain/catalog.py:624` (`DEFAULT_PRICING`)
 
 **Consumers:**
 
@@ -676,7 +676,7 @@ and `packages/atif-duck/src/atif_duck/domain/catalog.py:621` (`DEFAULT_PRICING`)
   the pricing override against `DEFAULT_PRICING`.
 - `packages/atif-duck/src/atif_duck/domain/catalog.py:85-88`: the `steps` view schema publishes
   `prompt_tokens`, `completion_tokens`, `cached_tokens`, `cache_creation` to every SQL consumer.
-- `packages/atif-duck/src/atif_duck/domain/catalog.py:566-572`: the agent-facing `cost_estimate`
+- `packages/atif-duck/src/atif_duck/domain/catalog.py:569-575`: the agent-facing `cost_estimate`
   description carries the trust condition.
 
 **Shape:**
@@ -698,28 +698,28 @@ DEFAULT_PRICING: dict[str, tuple[float, float]] = {
 **Assumptions consumers make:**
 
 - **`prompt_tokens` is a CUMULATIVE TOTAL, per step: non-cached + cache_read + cache_creation.**
-  Stated at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:73-76` and read from `metrics.prompt_tokens` at `packages/atif-duck/src/atif_duck/infrastructure/projections.py:155`. The
+  Stated at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:73-76` and read from `metrics.prompt_tokens` at `packages/atif-duck/src/atif_duck/infrastructure/projections.py:158`. The
   identifier does not say so, so a consumer summing `prompt_tokens + cached_tokens` double-counts
   every cache read.
 - **`cached_tokens` is the cache-READ subset of `prompt_tokens`**, not an additional quantity
-  (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:110-111`). `cost_estimate` therefore prices `prompt_tokens - cached_tokens` and
+  (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:111-112`). `cost_estimate` therefore prices `prompt_tokens - cached_tokens` and
   documents that identity at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2033-2036`; cache reads are charged nothing.
 - **`in_rate` / `out_rate` are USD per 1,000,000 tokens.** The unit appears in neither name: only
-  the comment at `packages/atif-duck/src/atif_duck/domain/catalog.py:611` and the `/ 1e6` at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2061` carry it.
+  the comment at `packages/atif-duck/src/atif_duck/domain/catalog.py:614` and the `/ 1e6` at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2061` carry it.
 - **`est_cost_usd` is USD and covers the PRICED steps only.** It is meaningful only when
-  `unpriced_steps = 0`, stated in each of these places: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2043-2048`, `packages/atif-duck/src/atif_duck/domain/catalog.py:566-572`, and the
+  `unpriced_steps = 0`, stated in each of these places: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2043-2048`, `packages/atif-duck/src/atif_duck/domain/catalog.py:569-575`, and the
   `LEFT JOIN` shape itself at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2069`.
 - **`unpriced_steps` counts only steps with a non-NULL `model_name`**, because user steps carry no
   model and cost nothing
   (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2050-2053`). Counting them would put every conversation
   above zero and mask real pricing gaps.
-- **Cache write and read multipliers are NOT modelled.** `packages/atif-duck/src/atif_duck/domain/catalog.py:618-620` states that the 1.25x
+- **Cache write and read multipliers are NOT modelled.** `packages/atif-duck/src/atif_duck/domain/catalog.py:621-623` states that the 1.25x
   / 2x / 0.1x tiers are out of scope, so `est_cost_usd` under-reports a cache-heavy session.
 - **A step's `model_name` matches a pricing row by exact name once a trailing `-YYYYMMDD` is stripped**
   (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2070`), so `claude-haiku-4-5-20251001` prices as `claude-haiku-4-5`.
 
 **Drift risk:** `cached_tokens` exists in two coordinate spaces under one name: atif-duck's
-per-step cache-read count (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:157`) and atif-models' per-call
+per-step cache-read count (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:160`) and atif-models' per-call
 `CallUsage.cached_tokens` (`packages/atif-models/src/atif_models/domain/ports.py:77`). Neither
 name states its scope, so a cross-plane join or a copied formula silently mixes them. Mitigation:
 attribute the field by module path, and read the producer docstring
@@ -915,14 +915,14 @@ rather than skipping a file that no longer contains the current version; the gua
   list of enum values.
 - **The `meta.json` provenance record**: written at
   `packages/atif-corpus/src/atif_corpus/application/materialize.py:689-715`, projected at
-  `packages/atif-duck/src/atif_duck/domain/raw_readers.py:99-124`. `harbor_version` (the vendored
+  `packages/atif-duck/src/atif_duck/domain/raw_readers.py:99-127`. `harbor_version` (the vendored
   models' upstream release) and `converter_version` (the `atif-sql` release) are supplied by the
   CLI (`packages/atif-cli/src/atif_cli/app.py:986` and `:991`), so the corpus records which
   converter built it without atif-corpus importing either.
 - **The embeddings-store row shape**: the Arrow fields written at
   `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:182-188`, of which the
   `message_embeddings` view exposes only some
-  (`packages/atif-duck/src/atif_duck/domain/catalog.py:286-292`). `text_hash` and `truncated` are
+  (`packages/atif-duck/src/atif_duck/domain/catalog.py:288-294`). `text_hash` and `truncated` are
   unreachable from SQL, so a query cannot distinguish a row embedded from its head alone from a complete one.
 - **The Lance schema version sidecar**: `SCHEMA_VERSION = 2` and `schema_version.json` at
   `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:83-89`, kept as a sidecar rather

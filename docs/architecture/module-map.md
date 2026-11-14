@@ -101,8 +101,8 @@ it carries no layers contract (`pyproject.toml:557`).
   `ATIF_SQL_`-prefixed lake root, corpus base, batch sizes, stage worker count, lock timeout and
   snapshot expiry.
 - `packages/atif-duck/src/atif_duck/domain/catalog.py`: `VIEW_NAMES`
-  (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`), `MACRO_SIGNATURES` (`:348`), the
-  analytics catalogs (`:375-467`), and one `DESCRIPTIONS` entry per object (`:492`).
+  (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`), `MACRO_SIGNATURES` (`:350`), the
+  analytics catalogs (`:377-469`), and one `DESCRIPTIONS` entry per object (`:494`).
 - `packages/atif-duck/src/atif_duck/infrastructure/analytics.py`: the v2 views and macros
   over the analytics parquet outputs, gated on file presence
   (`packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119`).

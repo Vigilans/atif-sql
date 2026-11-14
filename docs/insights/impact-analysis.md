@@ -55,9 +55,9 @@ The catalogs (`VIEW_NAMES`, `MACRO_NAMES`, `ANALYTICS_VIEW_NAMES`,
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | `atif_duck.domain.examples`: derives every example from every catalog | direct import | yes | `packages/atif-duck/src/atif_duck/domain/examples.py:35-44` |
-| `DESCRIPTIONS`: one entry per object; `_description()` raises `KeyError` without it | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:492` and `packages/atif-duck/src/atif_duck/domain/examples.py:182-188` |
+| `DESCRIPTIONS`: one entry per object; `_description()` raises `KeyError` without it | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:494` and `packages/atif-duck/src/atif_duck/domain/examples.py:182-188` |
 | `ARG_EXEMPLARS`: needed only when a macro introduces a NEW parameter name; `_macro_sql()` raises `KeyError` without it | direct import | yes | `packages/atif-duck/src/atif_duck/domain/examples.py:76-93` and `packages/atif-duck/src/atif_duck/domain/examples.py:163-171` |
-| `TABLE_MACRO_NAMES`: membership required when the DDL says `AS TABLE`, or the derived SQL uses the wrong call shape | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:474` |
+| `TABLE_MACRO_NAMES`: membership required when the DDL says `AS TABLE`, or the derived SQL uses the wrong call shape | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:476` |
 | `atif_duck.infrastructure.registry`: owns the real DDL and imports `DEFAULT_PRICING` | direct import | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:87` |
 | `atif_duck.infrastructure.analytics`: `register_analytics` and `register_analytics_macros` own the DDL the analytics catalogs describe | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119` and `packages/atif-duck/src/atif_duck/infrastructure/analytics.py:236` |
 | `atif_duck.infrastructure.authorship`: `register_authorship` owns the DDL for `step_author`, `user_steps`, `human_turns`, and `session_outcomes` | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/authorship.py:38` |
@@ -265,7 +265,7 @@ driving the CLI reads, so the dict is the surface, not the individual numbers, a
 | `ClassifiedError.to_payload()`: the JSON error envelope on non-TTY stderr | indirect | likely | `packages/atif-cli/src/atif_cli/errors.py:78-86` |
 | `test_app.py`: asserts against the dict, never against a literal, except where the number itself is the claim | test | yes | `packages/atif-cli/tests/test_app.py:42` and `packages/atif-cli/tests/test_app.py:1542` |
 | `test_cron.py`, `test_integration.py`, `test_vss_commands.py`: more suites keyed off the dict | test | yes | `packages/atif-cli/tests/test_cron.py:28`, `packages/atif-cli/tests/test_integration.py:147`, `packages/atif-cli/tests/test_vss_commands.py:23` |
-| `docs/CONTRACT.md:357-393` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:357-393` |
+| `docs/CONTRACT.md:359-395` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:359-395` |
 
 ### Blast-radius notes
 
@@ -356,7 +356,7 @@ it.
 
 ## Other notable surfaces
 
-- **`DEFAULT_PRICING`** (`packages/atif-duck/src/atif_duck/domain/catalog.py:621`): models with
+- **`DEFAULT_PRICING`** (`packages/atif-duck/src/atif_duck/domain/catalog.py:624`): models with
   published list rates. A model absent here lands in `cost_estimate`'s `unpriced_steps` rather than
   being dropped, and tests pin the table: an exact oracle
   (`packages/atif-duck/tests/test_duck_views.py:519`) and a corpus-coverage gate

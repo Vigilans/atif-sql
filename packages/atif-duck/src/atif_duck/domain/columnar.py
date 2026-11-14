@@ -52,7 +52,9 @@ if TYPE_CHECKING:
 #:
 #: 3: ``steps`` / ``tool_calls`` / ``tool_results`` hold the steps of every
 #: embedded ``subagent_trajectories`` entry too, and gained ``trajectory_id``.
-COLUMNAR_SCHEMA_VERSION: int = 3
+#:
+#: 4: ``steps`` gained ``reasoning_content``.
+COLUMNAR_SCHEMA_VERSION: int = 4
 
 #: The ``meta.json`` key that records which columnar schema a session's
 #: parquet files were written against. Absent on sessions materialized

@@ -307,7 +307,7 @@ numbers follow it as plain numbers.
   `:204`.
 - `StepMemberAccess` is constructed at
   `packages/atif-duck/src/atif_duck/infrastructure/projections.py:74` and
-  annotates `:102`.
+  annotates `:103`.
 - `is_compressed` is called at
   `packages/atif-duck/src/atif_duck/infrastructure/stored_artifacts.py:58`.
 - `SqlFragment` is the return type of `sql_literal` at

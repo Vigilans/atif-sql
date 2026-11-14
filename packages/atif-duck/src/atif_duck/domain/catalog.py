@@ -91,6 +91,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
         ("agent_id", "VARCHAR"),
         ("images", "JSON"),
         ("trajectory_id", "VARCHAR"),
+        ("reasoning_content", "VARCHAR"),
     ),
     "messages": (
         ("uuid", "VARCHAR"),
@@ -221,6 +222,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
         ("agent_id", "VARCHAR"),
         ("images", "JSON"),
         ("trajectory_id", "VARCHAR"),
+        ("reasoning_content", "VARCHAR"),
     ),
     "subagents": (
         ("session_id", "VARCHAR"),
@@ -501,7 +503,8 @@ DESCRIPTIONS: dict[str, str] = {
     ),
     "steps": (
         "One row per ATIF step (turn), subagent trajectories' included: flattened message "
-        "text plus token metrics. A step is (session_id, trajectory_id, step_id)."
+        "text plus token metrics, and the step's reasoning_content. A step is "
+        "(session_id, trajectory_id, step_id)."
     ),
     "messages": "Raw-record identity from edges.jsonl: uuid, parent_uuid, type, timestamp.",
     "tool_calls": "One row per tool call: tool_name plus JSON tool_input.",

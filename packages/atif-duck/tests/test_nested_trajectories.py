@@ -143,3 +143,53 @@ def test_the_parquet_artifacts_hold_the_embedded_steps(tmp_path: Path) -> None:
         ("child-a", 2),
         ("grand-b", 1),
     ]
+
+
+#: ``(trajectory_id, step_id, reasoning_content)`` once :func:`_with_reasoning`
+#: has run: one root step and one embedded step carry reasoning, the rest none.
+EXPECTED_REASONING = [
+    (NESTED_SESSION_ID, 1, None),
+    (NESTED_SESSION_ID, 2, "root thinking"),
+    ("child-a", 1, None),
+    ("child-a", 2, "child thinking"),
+    ("grand-b", 1, None),
+]
+
+
+def _with_reasoning(root: Path) -> Path:
+    """Give the root's and ``child-a``'s agent steps a ``reasoning_content``."""
+    path = root / "sessions" / NESTED_SESSION_ID / "trajectory.json"
+    document = json.loads(path.read_text())
+    document["steps"][1]["reasoning_content"] = "root thinking"
+    document["subagent_trajectories"][0]["steps"][1]["reasoning_content"] = "child thinking"
+    path.write_text(json.dumps(document, separators=(",", ":")))
+    return root
+
+
+_REASONING_SQL = "SELECT trajectory_id, step_id, reasoning_content FROM steps ORDER BY ALL"
+
+
+def test_every_read_path_reads_reasoning_content(tmp_path: Path, read_path: str) -> None:
+    root = _with_reasoning(_corpus(tmp_path))
+    con = duckdb.connect()
+    register_via(con, root, read_path)
+    assert _rows(con, _REASONING_SQL) == EXPECTED_REASONING
+    assert _rows(
+        con, "SELECT trajectory_id, step_id, reasoning_content FROM subagent_steps ORDER BY ALL"
+    ) == [row for row in EXPECTED_REASONING if row[0] != NESTED_SESSION_ID]
+
+
+def test_the_parquet_artifacts_hold_reasoning_content(tmp_path: Path) -> None:
+    root = _with_reasoning(_corpus(tmp_path))
+    session_dir = root / "sessions" / NESTED_SESSION_ID
+    trajectory = json.loads((session_dir / "trajectory.json").read_text())
+    extras = ColumnarArtifactProducer().produce(
+        session_dir, session_id=NESTED_SESSION_ID, trajectory=trajectory
+    )
+    meta = json.loads((session_dir / "meta.json").read_text())
+    (session_dir / "meta.json").write_text(json.dumps({**meta, **extras}))
+    (session_dir / "trajectory.json").unlink()
+    con = duckdb.connect()
+    sources = register(con, root)
+    assert len(sources.columnar_session_ids) == 1
+    assert _rows(con, _REASONING_SQL) == EXPECTED_REASONING

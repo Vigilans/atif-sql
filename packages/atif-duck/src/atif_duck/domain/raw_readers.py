@@ -111,6 +111,9 @@ META_COLUMNS: dict[str, str] = {
     # Which machine converted the session under ``materialize --relocatable``;
     # NULL on sessions materialized by an ordinary pass.
     "host": "VARCHAR",
+    # True on a session ``materialize --filter`` published; NULL on one an
+    # unfiltered pass wrote.
+    "filtered": "BOOLEAN",
     # Which columnar schema the session's parquet artifacts were written
     # against. Absent (NULL) on a session materialized before the artifacts
     # existed; that session is read from trajectory.json, which is always
