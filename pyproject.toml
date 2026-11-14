@@ -122,6 +122,10 @@ resolution = "highest"
 # No square bracket may appear in this comment: the Semgrep rule reads the table as
 # everything up to the next one.
 exclude-newer = "7 days"
+# harbor 0.26.0, the parity oracle, was uploaded 2026-11-13T23:49:05Z and is admitted
+# here from that upload on. Delete this exemption in the next `uv lock --upgrade`
+# after 2026-11-20T23:50Z, when the global window reaches it.
+exclude-newer-package = { harbor = "2026-11-13T23:50:00Z" }
 python-preference = "only-managed"
 python-downloads = "automatic"
 compile-bytecode = true
@@ -155,7 +159,7 @@ dev = [
     # packages/atif-converter/tests/test_dev_only_imports_guard.py): harbor for
     # the parity oracle and the vendored-ATIF conformance test, litellm for the
     # pricing identity test.
-    "harbor>=0.22.0,<1",
+    "harbor>=0.26.0,<1",
     "litellm>=1.92.0",
     "hypothesis>=6.157.0",
     "import-linter>=2.3",

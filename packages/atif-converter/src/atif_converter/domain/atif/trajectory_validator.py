@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Vendored from harbor 0.24.0, src/harbor/utils/trajectory_validator.py
+# Vendored from harbor 0.26.0, src/harbor/utils/trajectory_validator.py
 # (Apache-2.0, Copyright the Harbor authors). Byte for byte upstream apart
 # from these header lines and the import path, which reads
 # atif_converter.domain.atif where upstream reads harbor.models.trajectories.
@@ -10,6 +10,7 @@ the ATIF specification (RFC 0001).
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -133,7 +134,8 @@ class TrajectoryValidator:
         # Load trajectory if it's a string or path
         if isinstance(trajectory, (str, Path)):
             path = Path(trajectory)
-            if path.exists():
+            # Path.exists() can raise for oversized JSON strings on Python <3.14.
+            if os.path.exists(path):
                 self._trajectory_dir = path.parent
                 with open(path, "r") as f:
                     try:

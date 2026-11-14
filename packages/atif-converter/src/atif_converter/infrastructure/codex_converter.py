@@ -20,10 +20,9 @@ where ``str.splitlines`` also splits on U+2028 / U+2029 / form feed, which are
 legal unescaped inside a JSON string — a rollout carrying one would parse into
 different records under the two loops.
 
-What differs from harbor's read is the ``session_id`` fallback for a rollout
-with no ``session_meta``: harbor uses the directory's name, which in its own
-layout is the ``<DD>`` day directory; here that is the rollout's parent
-directory name, the same value on a real Codex tree.
+A rollout whose ``session_meta`` names no thread id takes the rollout's stem
+as its ``session_id``, as harbor 0.26.0 does; a ``.jsonl.zst`` rollout's stem
+drops both suffixes, so it reads as the plain file it compresses.
 """
 
 from __future__ import annotations
@@ -38,6 +37,11 @@ from atif_converter.infrastructure.raw_records import (
     parse_jsonl_records,
     text_stream,
 )
+
+
+def rollout_stem(rollout_jsonl: Path) -> str:
+    """The rollout's name without ``.jsonl`` (or ``.jsonl.zst``): harbor's ``session_file.stem``."""
+    return rollout_jsonl.name.removesuffix(".zst").removesuffix(".jsonl")
 
 
 def read_codex_rollout(rollout_jsonl: Path) -> list[dict[str, Any]]:
@@ -68,7 +72,7 @@ def convert_codex_rollout(rollout_jsonl: Path) -> Trajectory | None:
         OSError: the file cannot be opened or read.
     """
     raw_events = read_codex_rollout(rollout_jsonl)
-    return convert_codex_records(raw_events, fallback_session_id=rollout_jsonl.parent.name)
+    return convert_codex_records(raw_events, fallback_session_id=rollout_stem(rollout_jsonl))
 
 
 def convert_loaded_codex_rollout(loaded: LoadedSession) -> Trajectory | None:
@@ -80,7 +84,9 @@ def convert_loaded_codex_rollout(loaded: LoadedSession) -> Trajectory | None:
     business, as it was before.
     """
     rollout_jsonl = loaded.snapshot.session_jsonl
-    return convert_codex_records(loaded.main_records, fallback_session_id=rollout_jsonl.parent.name)
+    return convert_codex_records(
+        loaded.main_records, fallback_session_id=rollout_stem(rollout_jsonl)
+    )
 
 
 def convert_codex_record_list(records: list[Any], rollout_jsonl: Path) -> Trajectory | None:
@@ -89,7 +95,7 @@ def convert_codex_record_list(records: list[Any], rollout_jsonl: Path) -> Trajec
     The same conversion as :func:`convert_loaded_codex_rollout`, over records the
     caller assembled (a session's rollouts in conversion order).
     """
-    return convert_codex_records(records, fallback_session_id=rollout_jsonl.parent.name)
+    return convert_codex_records(records, fallback_session_id=rollout_stem(rollout_jsonl))
 
 
 __all__ = [
@@ -97,4 +103,5 @@ __all__ = [
     "convert_codex_rollout",
     "convert_loaded_codex_rollout",
     "read_codex_rollout",
+    "rollout_stem",
 ]

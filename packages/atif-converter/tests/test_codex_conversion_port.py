@@ -802,6 +802,31 @@ class TestModelAndCost:
         assert all(c > 0 for c in costs)
         assert trajectory["final_metrics"]["total_cost_usd"] == pytest.approx(sum(costs))
 
+    def test_each_request_takes_the_model_its_turn_context_names(self, tmp_path: Path) -> None:
+        """harbor 0.26.0: a model switch prices and stamps the requests after it.
+
+        The first request's model is the trajectory's; a ``turn_context`` seen
+        before a request's first output names that request's model too.
+        """
+        records = [
+            _session_meta(),
+            _turn_context(model=PRICED_MODEL),
+            _user("q"),
+            _assistant("a"),
+            _token_count(1000, 20),
+            _turn_context(model=CODEX_MODEL, turn_id="turn-2"),
+            _user("q2"),
+            _assistant("b"),
+            _token_count(2000, 30),
+        ]
+        trajectory = _convert(tmp_path, records)
+        assert trajectory is not None
+        assert trajectory["agent"]["model_name"] == PRICED_MODEL
+        assert [s.get("model_name") for s in _agent_steps(trajectory)] == [
+            PRICED_MODEL,
+            CODEX_MODEL,
+        ]
+
     def test_info_total_cost_overrides_the_estimate_even_when_zero(self, tmp_path: Path) -> None:
         """``is None`` checks: a reported ``total_cost`` of 0 is a value, not a miss."""
         records = [
@@ -820,7 +845,7 @@ class TestModelAndCost:
 
 class TestFinalMetricsAndIdentity:
     def test_final_metrics_come_from_the_last_token_count_with_totals(self, tmp_path: Path) -> None:
-        """The LAST ``token_count`` carrying ``total_token_usage`` wins; zero prompt -> absent."""
+        """The LAST ``token_count`` carrying ``total_token_usage`` wins; a zero total is kept."""
         records = [
             _session_meta(),
             _turn_context(),
@@ -844,7 +869,7 @@ class TestFinalMetricsAndIdentity:
         trajectory = _convert(tmp_path, records)
         assert trajectory is not None
         final = trajectory["final_metrics"]
-        assert "total_prompt_tokens" not in final
+        assert final["total_prompt_tokens"] == 0
         assert final["total_completion_tokens"] == 5
         assert final["total_cached_tokens"] == 7
         assert final["total_steps"] == 3
@@ -881,19 +906,15 @@ class TestFinalMetricsAndIdentity:
         assert trajectory is not None
         assert trajectory["agent"]["version"] == CODEX_CLI_VERSION
 
-    def test_no_session_meta_uses_the_parent_directory_name(self, tmp_path: Path) -> None:
-        """harbor falls back to ``session_dir.name``: the ``<DD>`` day directory in its layout.
-
-        Not cross-checked: the oracle stages into a directory named ``sessions``,
-        so harbor's answer there is a staging artifact, not the behavior pinned.
-        """
+    def test_no_session_meta_uses_the_rollout_stem(self, tmp_path: Path) -> None:
+        """harbor 0.26.0 falls back to the rollout file's stem as the thread id."""
         records = [_turn_context(), _user("q"), _assistant("a")]
-        rollout = write_codex_rollout(tmp_path / "sessions", records)
-        ours = convert_codex_rollout(rollout)
-        assert ours is not None
-        assert ours.session_id == rollout.parent.name == "11"
-        assert ours.agent.version == "unknown"
-        assert ours.agent.extra is None
+        trajectory = _convert(tmp_path, records)
+        assert trajectory is not None
+        rollout = write_codex_rollout(tmp_path / "again", records)
+        assert trajectory["session_id"] == rollout.name.removesuffix(".jsonl")
+        assert trajectory["agent"]["version"] == "unknown"
+        assert "extra" not in trajectory["agent"]
 
     def test_developer_role_is_system_and_missing_role_is_user(self, tmp_path: Path) -> None:
         """Any role but ``user`` / ``assistant`` -> ``system``; no role at all -> ``user``."""

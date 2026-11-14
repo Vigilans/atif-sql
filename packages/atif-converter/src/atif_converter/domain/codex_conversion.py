@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Ported from harbor 0.22.0, src/harbor/agents/installed/codex.py (Apache-2.0,
-# Copyright the Harbor authors), brought to harbor 0.24.0, onto the ATIF models vendored in
+# Copyright the Harbor authors), brought to harbor 0.26.0, onto the ATIF models vendored in
 # atif_converter.domain.atif, so atif-converter doesn't depend on harbor.
 
 """Codex rollout records -> ATIF trajectory, as one pure function.
 
-This is harbor's ``Codex._convert_events_to_trajectory`` and the helpers it
+This is harbor's ``Codex._convert_session_events`` and the helpers it
 calls, ported line for line onto harbor's ``harbor.models.trajectories``
 data classes, which are vendored as :mod:`atif_converter.domain.atif`. harbor
 documents those classes and the validator and nothing else, so the converter
@@ -19,12 +19,14 @@ upstream diff can be re-applied by hand. harbor 0.24.0's two Codex changes
 are applied: a ``web_search_call`` keeps its item id or gets
 ``<api call>_web_search_<n>`` (harbor #2972), and a structured tool output (a
 list of MCP content blocks or content items) becomes text rather than Python's
-``str()`` of the list (harbor #3467). The one departure is an inline image in
+``str()`` of the list (harbor #3467). So is harbor 0.26.0's conversion of one
+thread: each model request takes the model its own ``turn_context`` names, and
+the final token totals keep a zero. The one departure is an inline image in
 such an output, which harbor saves to a file and this pure function writes as
 its blob placeholder (:func:`_tool_output_content` says why):
 
 =================================  =========================================
-harbor 0.22.0                       here
+harbor 0.26.0                       here
 =================================  =========================================
 ``_extract_message_text``           :func:`~atif_converter.domain.codex_enrichment.message_text`
 ``_parse_output_blob``              :func:`_parse_output_blob`
@@ -32,7 +34,7 @@ harbor 0.22.0                       here
 ``_metrics_from_token_count_payload``  :func:`_metrics_from_token_count_payload`
 ``_convert_event_to_step``          :func:`_convert_event_to_step`
 ``_compute_cost_from_pricing``      :func:`_compute_cost_from_pricing`
-``_convert_events_to_trajectory``   :func:`convert_codex_records` (+ the three
+``_convert_session_events``         :func:`convert_codex_records` (+ the three
                                     ``_normalize_events`` /
                                     ``_attach_api_call_metrics`` /
                                     ``_final_metrics`` slices it was cut into
@@ -45,7 +47,7 @@ The three instance attributes the method read are replaced as follows:
     loguru's ``logger``; the message texts are harbor's.
 ``self.model_name``
     the ``model_name`` parameter, default ``None`` — the adapter this replaces
-    never set one, so every step's model comes from ``turn_context``.
+    never set one, so every step's model comes from a ``turn_context``.
 ``self._version``
     ``None``. harbor only consults it when ``session_meta`` carries no
     ``cli_version``, and the adapter never set it either, so ``agent.version``
@@ -65,6 +67,7 @@ Pure over already-parsed records in FILE order: no file I/O, no
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from loguru import logger
@@ -619,19 +622,51 @@ def _compute_cost_from_pricing(
     return float(input_cost + output_cost)
 
 
+def _reasoning_summary(payload: dict[str, Any]) -> str | None:
+    """A ``reasoning`` item's summary texts joined by newlines, or ``None`` when it has none."""
+    summary = payload.get("summary")
+    if not isinstance(summary, list) or not summary:
+        return None
+    reasoning_parts: list[str] = []
+    for item in summary:
+        if isinstance(item, str):
+            reasoning_parts.append(item)
+        elif isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str):
+                reasoning_parts.append(text)
+    return "\n".join(reasoning_parts) if reasoning_parts else None
+
+
+@dataclass(slots=True)
+class _NormalizedSession:
+    """What the "normalize events" pass hands the step builder."""
+
+    events: list[dict[str, Any]]
+    #: Per-API-call metrics, keyed ``api_call_<n>``.
+    api_call_metrics: dict[str, dict[str, Any]]
+    #: Per-API-call model: the one the latest ``turn_context`` named when the
+    #: request first produced output (``None`` before any did).
+    api_call_models: dict[str, str | None]
+    #: The model of the first request that produced output, else ``model_name``.
+    default_model_name: str | None
+
+
 def _normalize_events(
     raw_events: list[dict[str, Any]],
-    default_model_name: str | None,
     model_name: str | None,
-) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """The "normalize events" pass of harbor's ``_convert_events_to_trajectory``.
+) -> _NormalizedSession:
+    """The "normalize events" pass of harbor's ``_convert_session_events``.
 
     Walks the raw records once and returns the normalized event list plus the
-    per-API-call metrics, keyed ``api_call_<n>``. The counter advances on a
-    ``token_count`` event only when the request it closes produced model
-    output (an assistant message, a web search or a tool call); a tool call's
-    normalized event is emitted when its OUTPUT arrives but carries the request
-    id current when the CALL was seen.
+    per-API-call metrics and models, keyed ``api_call_<n>``. The counter
+    advances on a ``token_count`` event only when the request it closes
+    produced model output (an assistant message, a web search or a tool call);
+    a tool call's normalized event is emitted when its OUTPUT arrives but
+    carries the request id current when the CALL was seen. A ``turn_context``
+    names the model of the requests after it, and of the current request too
+    while that one has produced no output yet; each request is priced at its
+    own model.
     """
     normalized_events: list[dict[str, Any]] = []
     pending_calls: dict[str, dict[str, Any]] = {}
@@ -640,12 +675,18 @@ def _normalize_events(
     api_call_index = 1
     current_api_call_id = f"api_call_{api_call_index}"
     api_call_metrics: dict[str, dict[str, Any]] = {}
+    api_call_models: dict[str, str | None] = {}
+    active_model_name = model_name
+    default_model_name: str | None = None
     saw_model_output_in_api_call = False
     tool_order_counter = 0
 
     def record_model_output() -> None:
-        nonlocal saw_model_output_in_api_call
+        nonlocal saw_model_output_in_api_call, default_model_name
         saw_model_output_in_api_call = True
+        api_call_models.setdefault(current_api_call_id, active_model_name)
+        if default_model_name is None:
+            default_model_name = active_model_name
 
     def finish_api_call(token_count_payload: dict[str, Any]) -> None:
         nonlocal api_call_index, current_api_call_id, saw_model_output_in_api_call
@@ -662,7 +703,7 @@ def _normalize_events(
                 completion_tokens=metrics.get("completion_tokens"),
                 cached_tokens=metrics.get("cached_tokens"),
                 cache_write_tokens=cache_write_tokens,
-                model_name=default_model_name,
+                model_name=api_call_models.get(current_api_call_id),
                 fallback_model_name=model_name,
             )
             api_call_metrics[current_api_call_id] = metrics
@@ -693,6 +734,11 @@ def _normalize_events(
             turn_id = payload.get("turn_id") if isinstance(payload, dict) else None
             if isinstance(turn_id, str) and codex_turn_id is None:
                 codex_turn_id = turn_id
+            turn_model_name = payload.get("model") if isinstance(payload, dict) else None
+            if isinstance(turn_model_name, str):
+                active_model_name = turn_model_name
+                if not saw_model_output_in_api_call:
+                    api_call_models[current_api_call_id] = turn_model_name
             continue
 
         if etype != "response_item":
@@ -700,19 +746,7 @@ def _normalize_events(
 
         payload_type = payload.get("type")
         if payload_type == "reasoning":
-            summary = payload.get("summary")
-            if isinstance(summary, list) and summary:
-                reasoning_parts: list[str] = []
-                for item in summary:
-                    if isinstance(item, str):
-                        reasoning_parts.append(item)
-                    elif isinstance(item, dict):
-                        text = item.get("text")
-                        if isinstance(text, str):
-                            reasoning_parts.append(text)
-                pending_reasoning = "\n".join(reasoning_parts) if reasoning_parts else None
-            else:
-                pending_reasoning = None
+            pending_reasoning = _reasoning_summary(payload)
             continue
 
         if payload_type == "message":
@@ -842,7 +876,12 @@ def _normalize_events(
             pending_reasoning = None
             continue
 
-    return normalized_events, api_call_metrics
+    return _NormalizedSession(
+        events=normalized_events,
+        api_call_metrics=api_call_metrics,
+        api_call_models=api_call_models,
+        default_model_name=default_model_name if default_model_name is not None else model_name,
+    )
 
 
 def _attach_api_call_metrics(
@@ -868,7 +907,7 @@ def _final_metrics(
     """Final metrics from the LAST ``token_count`` event carrying totals.
 
     The "Extract final metrics" pass of harbor's
-    ``_convert_events_to_trajectory``. Codex CLI does not include cost in
+    ``_convert_session_events``. Codex CLI does not include cost in
     ``token_count`` events, so ``total_cost`` / ``cost_usd`` in ``info`` win
     when present and the LiteLLM estimate fills in otherwise — explicit
     ``is None`` checks so a legitimate $0 is not mistaken for a missing field.
@@ -910,9 +949,9 @@ def _final_metrics(
             final_extra["total_cache_write_input_tokens"] = cache_write_tokens
 
         return FinalMetrics(
-            total_prompt_tokens=prompt_tokens or None,
-            total_completion_tokens=completion_tokens or None,
-            total_cached_tokens=cached_tokens or None,
+            total_prompt_tokens=prompt_tokens,
+            total_completion_tokens=completion_tokens,
+            total_cached_tokens=cached_tokens,
             total_cost_usd=total_cost_usd,
             total_steps=total_steps,
             extra=final_extra,
@@ -929,7 +968,7 @@ def convert_codex_records(
 ) -> Trajectory | None:
     """Convert one rollout's parsed records into an ATIF trajectory.
 
-    harbor's ``Codex._convert_events_to_trajectory`` from the point where the
+    harbor's ``Codex._convert_session_events`` from the point where the
     file has been read. Returns ``None`` exactly when harbor does: no records
     at all, or no record that becomes a step.
 
@@ -939,10 +978,8 @@ def convert_codex_records(
         The rollout's JSON records in FILE order, malformed lines already
         dropped (see :mod:`atif_converter.infrastructure.codex_converter`).
     fallback_session_id
-        ``session_id`` when the rollout carries no ``session_meta`` record.
-        harbor uses the session DIRECTORY's name, so the reader passes the
-        rollout's parent directory name — the ``<DD>`` of Codex's
-        ``sessions/<YYYY>/<MM>/<DD>/`` layout.
+        ``session_id`` when the rollout's ``session_meta`` names no thread id.
+        harbor 0.26.0 uses the rollout file's stem, so the reader passes it.
     model_name
         harbor's ``self.model_name``: the fallback model when no
         ``turn_context`` names one, and the pricing fallback. ``None`` in
@@ -952,16 +989,16 @@ def convert_codex_records(
         return None
 
     session_meta = next((e for e in raw_events if e.get("type") == "session_meta"), None)
-    # harbor: ``if session_meta and isinstance(session_meta, dict)`` — the
-    # isinstance is redundant on a list of dicts and the type checkers say so.
-    session_id = session_meta.get("payload", {}).get("id") if session_meta else fallback_session_id
+    payload = session_meta.get("payload", {}) if session_meta else {}
+    # harbor 0.26.0's ``_read_rollout``: the thread id is the metadata's
+    # non-empty ``id``, else the rollout's stem.
+    meta_id = payload.get("id") if isinstance(payload, dict) else None
+    session_id = meta_id if isinstance(meta_id, str) and meta_id else fallback_session_id
 
     agent_version = _UNKNOWN_VERSION
     agent_extra: dict[str, Any] | None = None
-    default_model_name: str | None = None
 
-    if session_meta:
-        payload = session_meta.get("payload", {})
+    if session_meta and isinstance(payload, dict):
         agent_version = payload.get("cli_version") or agent_version
         extra: dict[str, Any] = {}
         for key in ("originator", "cwd", "git", "instructions"):
@@ -974,33 +1011,26 @@ def convert_codex_records(
     # version probed at install time. Never set in this port (see the module
     # docstring), so "unknown" stands.
 
-    for event in raw_events:
-        if event.get("type") == "turn_context":
-            turn_model_name = event.get("payload", {}).get("model")
-            if isinstance(turn_model_name, str):
-                default_model_name = turn_model_name
-                break
-
-    if default_model_name is None:
-        default_model_name = model_name
-
-    normalized_events, api_call_metrics = _normalize_events(
-        raw_events, default_model_name, model_name
-    )
-    _attach_api_call_metrics(normalized_events, api_call_metrics)
-    grouped_events = _group_events_by_api_call_id(normalized_events)
+    normalized = _normalize_events(raw_events, model_name)
+    default_model_name = normalized.default_model_name
+    api_call_metrics = normalized.api_call_metrics
+    _attach_api_call_metrics(normalized.events, api_call_metrics)
+    grouped_events = _group_events_by_api_call_id(normalized.events)
 
     steps: list[Step] = []
     for idx, norm_event in enumerate(grouped_events, start=1):
+        # harbor 0.26.0: a step takes its request's model, else the default.
+        api_call_id = norm_event.get("api_call_id")
+        step_model_name = (
+            normalized.api_call_models.get(api_call_id, default_model_name)
+            if isinstance(api_call_id, str)
+            else default_model_name
+        )
         try:
-            step = _convert_event_to_step(norm_event, idx, model_name)
+            step = _convert_event_to_step(norm_event, idx, step_model_name)
         except ValueError as exc:
             logger.debug("Skipping event during step conversion: {}", exc)
             continue
-
-        # Provide default model name if not set for agent steps
-        if step.source == "agent" and not step.model_name and default_model_name:
-            step.model_name = default_model_name
 
         steps.append(step)
 

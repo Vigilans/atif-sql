@@ -8,12 +8,12 @@ config (`pyproject.toml:1`, `:16`, `:34`). The internal import graph is a
 star: atif-cli declares five of its six siblings as `==`-pinned dependencies
 (`packages/atif-cli/pyproject.toml:32-36`) and reaches atif-models only through atif-analytics,
 plus one further edge from atif-analytics to atif-models that a `forbidden` import-linter contract
-leaves open while it closes every other atif-analytics edge (`pyproject.toml:611`), with every pair
-among the other five members closed by an `independence` contract (`pyproject.toml:606`). Outside
+leaves open while it closes every other atif-analytics edge (`pyproject.toml:615`), with every pair
+among the other five members closed by an `independence` contract (`pyproject.toml:610`). Outside
 atif-cli's adapter modules, which `atif_cli.app` imports only inside command bodies, every
 cross-package import sits inside a function body or a `TYPE_CHECKING` block, so the CLI's fast path
 pulls in no duckdb, harbor, boto3, or polars, which is why `PLC0415` is ignored
-workspace-wide (`pyproject.toml:225`).
+workspace-wide (`pyproject.toml:229`).
 
 ## atif-analytics
 
@@ -32,7 +32,7 @@ response schemas they bind against are pure domain models whose field descriptio
 part of the prompt surface (`packages/atif-analytics/src/atif_analytics/domain/models.py:3`). Who
 wrote a user step comes from `atif_analytics.domain.authorship`, a pinned twin of atif-duck's rule
 table (`packages/atif-analytics/src/atif_analytics/domain/authorship.py`). Apart from atif-cli, this
-is the one member permitted to import a sibling: atif-models and nothing else (`pyproject.toml:611`).
+is the one member permitted to import a sibling: atif-models and nothing else (`pyproject.toml:615`).
 
 - `packages/atif-analytics/src/atif_analytics/application/prompts.py`: the task-framing
   system prompts, public constants assembled at
@@ -75,7 +75,7 @@ macros register separately, each only when its backing parquet is populated, bec
 `atif-sql analyze` run is the default state
 (`packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119`). It has `domain/` and
 `infrastructure/` but no `application/`, and unlike atif-models, the other member with that shape,
-it carries no layers contract (`pyproject.toml:553`).
+it carries no layers contract (`pyproject.toml:557`).
 
 - `packages/atif-duck/src/atif_duck/infrastructure/registry.py`: the raw readers
   (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:637`), most of the core views
@@ -278,7 +278,7 @@ forbids the import (`packages/atif-corpus/src/atif_corpus/domain/agents.py:25`).
 `convert_and_audit` returns a conversion result paired with a loss report: the trajectory plus an
 accounting of what upstream dropped
 (`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220`). The conversion is
-ours: `convert_claude_code_records`, a port of harbor 0.24.0's Claude Code converter built on the
+ours: `convert_claude_code_records`, a port of harbor 0.26.0's Claude Code converter built on the
 public ATIF data classes (`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:981`),
 reached through `convert_loaded_claude_code_session`, which takes the records the use case already
 read (`packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:72`), and
@@ -286,11 +286,11 @@ validated with the vendored copy of harbor's `TrajectoryValidator`
 (`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:81`). The Codex path is
 the same shape one module over: `convert_codex_and_audit`
 (`packages/atif-converter/src/atif_converter/application/convert_codex.py:162`) over
-`convert_codex_records` (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:924`),
+`convert_codex_records` (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:963`),
 one rollout in and one trajectory out by construction. harbor's own private converters are the
 parity ORACLE, reached from the tests only (`packages/atif-converter/tests/harbor_oracle.py:118`, `:135`),
 frozen to goldens and diffed against the live corpus. harbor is a dev dependency only: the ATIF
-data classes and validator the converters build on are vendored from harbor 0.24.0 in
+data classes and validator the converters build on are vendored from harbor 0.26.0 in
 `packages/atif-converter/src/atif_converter/domain/atif/` and held to upstream by `packages/atif-converter/tests/test_vendored_atif.py`. The
 known conversion gaps are types rather than prose: `FidelityGap` enumerates them
 (`packages/atif-converter/src/atif_converter/domain/fidelity.py:55`) and a pure enrichment pass repairs
@@ -349,7 +349,7 @@ table doesn't price is NULL. litellm is a dev dependency, for the identity test 
 A deliberately narrow seam: a system prompt, a user prompt, and a pydantic schema in; a validated
 instance of that schema out (`packages/atif-models/src/atif_models/domain/ports.py:131`). Its only
 in-repo consumer is atif-analytics, the single edge the `forbidden` contract leaves open
-(`pyproject.toml:611`), and the registry is the only place in the workspace where a Bedrock model id
+(`pyproject.toml:615`), and the registry is the only place in the workspace where a Bedrock model id
 is written down, so a pipeline names a family and a size alias and lets `resolve` pick the id
 (`packages/atif-models/src/atif_models/domain/registry.py:6`, `:162`). Small, medium, and large resolve
 to the GPT-6 models (`gpt-6-luna`, `gpt-6.1-sol`, `gpt-6-astra`) in the openai family, the default,

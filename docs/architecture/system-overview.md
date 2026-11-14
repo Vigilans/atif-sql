@@ -32,7 +32,7 @@ per invocation (`embed` and `search` run on this machine instead under
 The directories under `packages/` are internal module boundaries, not separate installs
 (`README.md:101`); they are uv workspace members (`pyproject.toml:110`). `atif-converter` owns the
 conversion itself: its converters ported from Harbor under Apache-2.0 and held to parity with Harbor
-0.24.0
+0.26.0
 (`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py`,
 `packages/atif-converter/src/atif_converter/domain/codex_conversion.py`), built on Harbor's ATIF
 data classes and validator, vendored in `packages/atif-converter/src/atif_converter/domain/atif/`. harbor itself is a dev dependency:
@@ -82,10 +82,10 @@ views over the lake, falling back to the per-session artifacts when the lake is 
 doesn't hold the corpus (`packages/atif-duck/src/atif_duck/infrastructure/lake.py`).
 
 The direction of those edges is enforced rather than conventional. `[tool.importlinter]`
-(`pyproject.toml:553`) declares a layers contract for every member except `atif-cli` and
+(`pyproject.toml:557`) declares a layers contract for every member except `atif-cli` and
 `atif-duck`, an independence contract forbidding converter / corpus / duck / models / embed from
-importing each other (`:606`), and a forbidden contract limiting `atif-analytics` to `atif-models`
-alone among the members (`:611`). `atif-cli` is
+importing each other (`:610`), and a forbidden contract limiting `atif-analytics` to `atif-models`
+alone among the members (`:615`). `atif-cli` is
 the sole composition root, and it imports its siblings lazily inside command bodies
 (`packages/atif-cli/src/atif_cli/app.py:727`, `:1793`, `:2003`) so that `atif-sql schema` pays for
 none of the analytics or vector stack. Failures surface as typed exceptions mapped to stable
@@ -102,15 +102,15 @@ process exit codes at the CLI edge (`packages/atif-cli/src/atif_cli/errors.py:30
 | CLI framework | `cyclopts>=5.1.1` | `packages/atif-cli/pyproject.toml:37` |
 | Query engine | `duckdb>=2.0.0,<3` | `packages/atif-duck/pyproject.toml:20` |
 | Lake | DuckLake, through DuckDB's `ducklake` extension, with a DuckDB-file catalog | `packages/atif-duck/src/atif_duck/infrastructure/lake.py` |
-| Trajectory models | vendored from harbor 0.24.0 (`pydantic>=2.13.2`) | `packages/atif-converter/src/atif_converter/domain/atif/__init__.py` |
+| Trajectory models | vendored from harbor 0.26.0 (`pydantic>=2.13.2`) | `packages/atif-converter/src/atif_converter/domain/atif/__init__.py` |
 | Vector store | Lance files written and read through DuckDB's `lance` extension (`duckdb>=2.0.0,<3`) | `packages/atif-embed/pyproject.toml:21` |
 | Model access | `boto3>=1.42.91` for Bedrock | `packages/atif-models/pyproject.toml:28` |
 | Dataframes | `polars>=1.40.0` | `packages/atif-embed/pyproject.toml:23` |
 | Validation | `pydantic>=2.13.2` | `packages/atif-converter/pyproject.toml:23` |
 | Logging | `loguru>=0.7.3` | `packages/atif-corpus/pyproject.toml:19` |
-| Lint and format | ruff, `select = ["ALL"]` | `pyproject.toml:207` |
-| Architecture gate | import-linter contracts | `pyproject.toml:553` |
-| Tests | pytest, `testpaths = ["packages/*/tests", "fuzz"]` | `pyproject.toml:480` |
+| Lint and format | ruff, `select = ["ALL"]` | `pyproject.toml:211` |
+| Architecture gate | import-linter contracts | `pyproject.toml:557` |
+| Tests | pytest, `testpaths = ["packages/*/tests", "fuzz"]` | `pyproject.toml:484` |
 | Definition of done | `mise run check` | `mise.toml:243` |
 
 ## Module map

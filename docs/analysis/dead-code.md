@@ -14,7 +14,7 @@ declaration with no consumer**: a name in an `__all__` that nothing imports.
 **Technique, and what it cannot see.** No code index covers this repo (there is no `.codegraph/`, no LSP index, no AST
 symbol graph), and no dead-code analyzer is wired into the project: `grep -n
 "vulture|dead|unused|deptry|knip"` over `pyproject.toml` and `mise.toml` returns
-only unrelated hits, ty's `unused-ignore-comment` rule at `pyproject.toml:463`
+only unrelated hits, ty's `unused-ignore-comment` rule at `pyproject.toml:467`
 and a comment about it on line 465. The
 finding set is therefore derived, in these passes:
 
@@ -62,7 +62,7 @@ The limits of this derivation, stated because no index backs it:
   source text and pins its constants by name, and a re-import that hands a
   name on to a third module.
 - **Import position is irrelevant to the method, deliberately.** Because
-  `PLC0415` is off (`pyproject.toml:225`) to satisfy the lean-import assertion at
+  `PLC0415` is off (`pyproject.toml:229`) to satisfy the lean-import assertion at
   `packages/atif-cli/tests/test_lean_import.py:40`, atif-cli's cross-package
   imports sit *inside* command bodies:
   `packages/atif-cli/src/atif_cli/app.py:727`,
@@ -87,13 +87,13 @@ The limits of this derivation, stated because no index backs it:
   and `packages/atif-cli/src/atif_cli/app.py:306` (`os`).
 
 Enforced gates are why the list is short rather than thin. ruff runs
-`select = ["ALL"]` (`pyproject.toml:207`) at zero, so `F401`, `F811`, `F841` and
+`select = ["ALL"]` (`pyproject.toml:211`) at zero, so `F401`, `F811`, `F841` and
 `ERA001` leave no unused import, no redefinition, no unused local, and no
-commented-out code, with two carve-outs: `pyproject.toml:285`
+commented-out code, with two carve-outs: `pyproject.toml:289`
 (`"**/__init__.py" = ["F401", "E402"]`), and the vendored harbor tree, which
-ruff doesn't lint at all (`pyproject.toml:189`). pyright runs
-`typeCheckingMode = "strict"` (`pyproject.toml:687`) over every `src/` and
-`tests/` tree plus `scripts` and `fuzz` (`pyproject.toml:688-705`) at zero errors, which enforces
+ruff doesn't lint at all (`pyproject.toml:193`). pyright runs
+`typeCheckingMode = "strict"` (`pyproject.toml:691`) over every `src/` and
+`tests/` tree plus `scripts` and `fuzz` (`pyproject.toml:692-709`) at zero errors, which enforces
 `reportUnusedFunction` / `reportUnusedClass` / `reportUnusedVariable` for every
 `_`-prefixed definition unused inside its own file. Neither gate can see a
 *public* symbol that no other module imports, and that gap is exactly what the
@@ -165,7 +165,7 @@ intra-module use site is named after the table.
 | `REPORTED_COST_SOURCE_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:351` | 2026-09-27 |
 | `REPORTED_UNKNOWN_MODEL_COST_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:352` | 2026-09-27 |
 | `REPORTED_COST_SOURCE_COST_STATE` | `packages/atif-converter/src/atif_converter/domain/session_events.py:354` | 2026-09-27 |
-| `read_codex_rollout` | `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:43` | 2026-09-11 |
+| `read_codex_rollout` | `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:47` | 2026-09-11 |
 | `ARCHIVE_ZSTD_LEVEL` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:49` | 2026-09-27 |
 | `ArchivedSourceFile` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:63` | 2026-09-27 |
 | `Compressed` | `packages/atif-corpus/src/atif_corpus/infrastructure/compress_artifacts.py:57` | 2026-09-28 |
@@ -274,7 +274,7 @@ numbers follow it as plain numbers.
   `REPORTED_COST_SOURCE_COST_STATE` make up the dict entry at `:379`, and
   `REPORTED_UNKNOWN_MODEL_COST_KEY` is the key written at `:383`.
 - `read_codex_rollout` is called at
-  `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:70`.
+  `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:74`.
 - `ARCHIVE_ZSTD_LEVEL` sets the compressor level at
   `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:113`;
   `ArchivedSourceFile` annotates `:87` and is constructed at `:122`.
@@ -343,7 +343,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
 
 - `packages/atif-converter/src/atif_converter/domain/atif/content.py:21`
   (`AudioMediaType`) and
-  `packages/atif-converter/src/atif_converter/domain/atif/trajectory_validator.py:236`
+  `packages/atif-converter/src/atif_converter/domain/atif/trajectory_validator.py:238`
   (`main`), both in the vendored harbor tree.
 - `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:78`
   (`SCHEMA_VERSION`),
@@ -402,7 +402,7 @@ empty:
 ## Dead imports
 
 `__init__.py` files are the only linted files where `F401` is off
-(`pyproject.toml:285`), so outside the vendored harbor tree, which ruff skips,
+(`pyproject.toml:289`), so outside the vendored harbor tree, which ruff skips,
 they're the only place an import with no consumer survives lint (an isolated ruff run of
 `F401`, `F811`, and `F841` over the vendored tree finds none). Two members'
 `__init__.py` files re-export names. atif-converter's vendored

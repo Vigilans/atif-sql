@@ -113,12 +113,19 @@ History:
   and ``extra.agent_id`` with their edges and session events marked
   ``is_sidechain``, and ``trajectory.extra.subagents`` lists each spawned
   thread.
+* 14 — harbor 0.26.0: ``meta.json`` records ``harbor_version`` 0.26.0. Each
+  Codex model request carries the model the ``turn_context`` before its first
+  output names, and is priced at that model, where every request took the
+  rollout's first model; the trajectory's model is the first request's. A zero
+  final token total is kept rather than dropped, and a rollout whose
+  ``session_meta`` names no thread id takes the rollout's stem as its
+  ``session_id``.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 13
+CONVERTER_SCHEMA_VERSION: Final = 14
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

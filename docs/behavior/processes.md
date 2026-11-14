@@ -89,7 +89,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:690`
    classifies a non-UTF-8 file as `ConversionError`.
 3. Replace every inline base64 attachment with a placeholder and collect its
    bytes, then convert the records with our ported converter (a port of harbor
-   0.24.0's, built on the ATIF models vendored from harbor,
+   0.26.0's, built on the ATIF models vendored from harbor,
    `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:2`) and dump the result to a
    JSON-mode dict; a `None` return means no convertible events and raises
    `EmptySessionError`:

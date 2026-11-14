@@ -1,13 +1,13 @@
 # atif-converter
 
 Converts Claude Code session JSONL and Codex rollouts into ATIF trajectories
-(converters ported from harbor and held to parity with harbor 0.24.0, on harbor's ATIF models vendored in
+(converters ported from harbor and held to parity with harbor 0.26.0, on harbor's ATIF models vendored in
 `atif_converter.domain.atif`), and owns the FIDELITY POLICY: the known upstream
 conversion gaps are encoded as `atif_converter.domain.fidelity.FidelityGap` (six
 for Claude Code, plus one retired number) and
 `atif_converter.domain.codex_fidelity.CodexFidelityGap` (six for Codex),
 and every conversion is audited into a `LossReport` (raw-side census vs
-converted output). harbor is a dev dependency only; the tests pin harbor 0.24.0
+converted output). harbor is a dev dependency only; the tests pin harbor 0.26.0
 behavior and hold the vendored models to it, so they are the drift alarm for a
 harbor bump.
 
