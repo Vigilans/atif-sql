@@ -77,11 +77,14 @@ REFUSED, not guessed.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from atif_converter.domain.codex_edges import build_codex_edges
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _SOURCE_UUIDS = "source_uuids"
 _TRUNCATED_AT = "enrichment_truncated_at_step"
@@ -151,7 +154,9 @@ class _RolloutIndex:
     compaction_count: int = 0
 
 
-def _index_rollout(records: list[tuple[dict[str, Any], str]]) -> _RolloutIndex:
+def _index_rollout(
+    records: list[tuple[dict[str, Any], str]], record_ids: Sequence[str] | None = None
+) -> _RolloutIndex:
     """Re-derive harbor's grouping over the raw records, ids attached.
 
     The ``api_call_id`` counter replicates harbor's exactly: it starts at
@@ -162,7 +167,11 @@ def _index_rollout(records: list[tuple[dict[str, Any], str]]) -> _RolloutIndex:
     than as a wrong attribution.
     """
     index = _RolloutIndex()
-    edges = build_codex_edges(records)
+    ids = (
+        [str(edge["uuid"]) for edge in build_codex_edges(records)]
+        if record_ids is None
+        else list(record_ids)
+    )
     api_call_number = 1
     current_api_call = "api_call_1"
     saw_model_output = False
@@ -172,8 +181,7 @@ def _index_rollout(records: list[tuple[dict[str, Any], str]]) -> _RolloutIndex:
     #: carries the call's request id, not the one live at output time.
     pending_call_api: dict[str, str] = {}
 
-    for (record, _source_file), edge in zip(records, edges, strict=True):
-        record_id = str(edge["uuid"])
+    for (record, _source_file), record_id in zip(records, ids, strict=True):
         record_type = record.get("type")
         payload = _payload(record)
 
@@ -275,6 +283,7 @@ def enrich_codex_trajectory(
     records: list[tuple[dict[str, Any], str]],
     *,
     copy_input: bool = True,
+    record_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Return ``trajectory`` with Codex source attribution and cache totals.
 
@@ -290,6 +299,10 @@ def enrich_codex_trajectory(
         Deep-copy before mutating. The production caller passes ``False``
         because the harbor trajectory has no other consumer and a rollout's
         step list is large.
+    record_ids
+        The edge id of each of ``records``, when they are one thread's share
+        of a session whose edges were built over all of its threads. Omitted,
+        the ids are built over ``records`` themselves.
     """
     if copy_input:
         import copy
@@ -300,7 +313,7 @@ def enrich_codex_trajectory(
     if not isinstance(steps, list):
         return trajectory
 
-    index = _index_rollout(records)
+    index = _index_rollout(records, record_ids)
 
     # Passes 1 and 2 — identity. Neither can misattribute: both are lookups.
     for step in steps:

@@ -209,9 +209,14 @@ proofs are out of scope for the workspace.
   rollout of the group. The converter reads them as one record stream
   (atif_converter.domain.codex_threads): records on a branch the thread left
   (past a history_base cut, or in a rollout the chain never reaches) make steps
-  with extra.reverted; a spawned thread's copied parent history is dropped and
-  its steps carry extra.is_sidechain and extra.agent_id, as Claude Code's
-  inlined subagent steps do, with trajectory.extra.subagents listing each one.
+  with extra.reverted; a spawned thread's copied parent history is dropped.
+  Each thread converts into a trajectory of its own, and a spawned thread's
+  trajectory is embedded in the subagent_trajectories of the thread that
+  spawned it, as harbor 0.26.0 does (atif_converter.domain.codex_nesting):
+  trajectory_id is the thread id, session_id the root thread's, the spawning
+  call's result names it in subagent_trajectory_ref, and the spawning thread's
+  final_metrics include its totals. trajectory.extra.subagents on the root
+  lists each spawned thread.
 - A session's archive and source_file names are relative to the deepest
   directory holding all its source files: the main transcript's parent unless
   a Codex thread spans several date directories.

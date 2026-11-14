@@ -96,17 +96,17 @@ Production code builds on harbor 0.26.0's ATIF data classes (`harbor.models.traj
 `harbor.utils.trajectory_validator`, vendored in `packages/atif-converter/src/atif_converter/domain/atif/`; harbor itself is a dev
 dependency. `packages/atif-converter/tests/test_vendored_atif.py` compares the copy to the installed harbor. The conversion is a parity port of harbor 0.26.0's
 private converters, and those private methods are reachable from the tests only, as the oracle
-(`packages/atif-converter/tests/harbor_oracle.py:118`, `packages/atif-converter/tests/harbor_oracle.py:135`), frozen to goldens under `packages/atif-converter/tests/goldens/`.
+(`packages/atif-converter/tests/harbor_oracle.py:124`, `packages/atif-converter/tests/harbor_oracle.py:141`), frozen to goldens under `packages/atif-converter/tests/goldens/`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | `test_dev_only_imports_guard.py`: `ast` guard: no `harbor` or `litellm` import in any `src/` | test | yes | `packages/atif-converter/tests/test_dev_only_imports_guard.py` |
 | `test_vendored_atif.py`: vendored files equal upstream's; both models and validators agree on the goldens | test | yes | `packages/atif-converter/tests/test_vendored_atif.py` |
-| `harbor_adapter.convert_session()` / `codex_adapter.convert_codex_session()`: the seams (converter in, validated dict out) | direct import | yes | `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:165`, `packages/atif-converter/src/atif_converter/infrastructure/codex_adapter.py:58` |
+| `harbor_adapter.convert_session()` / `codex_adapter.convert_codex_session()`: the seams (converter in, validated dict out) | direct import | yes | `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:165`, `packages/atif-converter/src/atif_converter/infrastructure/codex_adapter.py:59` |
 | `FidelityGap` / `CodexFidelityGap`: the losses the port inherited on purpose; fixing one is a decision to diverge from the oracle | indirect | yes | `packages/atif-converter/src/atif_converter/domain/fidelity.py:55`, `packages/atif-converter/src/atif_converter/domain/codex_fidelity.py:66` |
 | `test_harbor_oracle.py`: live oracle equals frozen goldens; a harbor bump that changes conversion fails here first | test | yes | `packages/atif-converter/tests/test_harbor_oracle.py:67` |
 | `test_parity_live.py`: newest N local sessions of each agent, both converters, every diverging path | test | yes | `packages/atif-converter/tests/test_parity_live.py:102` |
-| `atif_converter.domain.enrichment` / `codex_enrichment`: re-derive step identity by replicating the converter's normalization order | indirect | yes | `packages/atif-converter/src/atif_converter/domain/enrichment.py:15-19`, `packages/atif-converter/src/atif_converter/domain/codex_enrichment.py:154` |
+| `atif_converter.domain.enrichment` / `codex_enrichment`: re-derive step identity by replicating the converter's normalization order | indirect | yes | `packages/atif-converter/src/atif_converter/domain/enrichment.py:15-19`, `packages/atif-converter/src/atif_converter/domain/codex_enrichment.py:157` |
 | `EXIT_CODES["harbor_missing"] = 127`: retired, kept so the table never renumbers | config | no | `packages/atif-cli/src/atif_cli/errors.py:62` |
 | `atif_cli.app.materialize`: stamps the vendored models' `UPSTREAM_VERSION` into every `meta.json` as `harbor_version` | direct import | likely | `packages/atif-cli/src/atif_cli/app.py:947` and `packages/atif-cli/src/atif_cli/app.py:986` |
 
@@ -265,7 +265,7 @@ driving the CLI reads, so the dict is the surface, not the individual numbers, a
 | `ClassifiedError.to_payload()`: the JSON error envelope on non-TTY stderr | indirect | likely | `packages/atif-cli/src/atif_cli/errors.py:78-86` |
 | `test_app.py`: asserts against the dict, never against a literal, except where the number itself is the claim | test | yes | `packages/atif-cli/tests/test_app.py:42` and `packages/atif-cli/tests/test_app.py:1542` |
 | `test_cron.py`, `test_integration.py`, `test_vss_commands.py`: more suites keyed off the dict | test | yes | `packages/atif-cli/tests/test_cron.py:28`, `packages/atif-cli/tests/test_integration.py:147`, `packages/atif-cli/tests/test_vss_commands.py:23` |
-| `docs/CONTRACT.md:335-371` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:335-371` |
+| `docs/CONTRACT.md:340-376` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:340-376` |
 
 ### Blast-radius notes
 

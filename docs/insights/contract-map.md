@@ -127,7 +127,7 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   `VARCHAR` (`packages/atif-duck/src/atif_duck/domain/raw_readers.py:105`); the CLI supplies it (`packages/atif-cli/src/atif_cli/app.py:983`).
 
 **The hand-written contract and the manifests split the job.** Its CLI heading
-(`docs/CONTRACT.md:335`) names atif-cli the package that composes the others. The atif-cli
+(`docs/CONTRACT.md:340`) names atif-cli the package that composes the others. The atif-cli
 manifest declares five siblings (`packages/atif-cli/pyproject.toml:32-36`) and the CLI imports
 every one of them; atif-models reaches it through atif-analytics, which imports atif-models
 (`packages/atif-analytics/pyproject.toml:23`) as the import-linter contracts permit.
@@ -809,7 +809,7 @@ the same commit, which is what both docstrings instruct.
 - `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py`: `validate_trajectory`, the only call into the vendored validator.
 - `packages/atif-converter/tests/test_dev_only_imports_guard.py`: the `ast` guard that keeps `harbor` and `litellm` out of every `src/` tree.
 - `packages/atif-converter/tests/test_vendored_atif.py`: the conformance test (the vendored files equal the installed harbor's, and both agree on the goldens).
-- `packages/atif-converter/tests/harbor_oracle.py:118` and `:135`: the parity ORACLE (harbor's private converters, reached from the tests
+- `packages/atif-converter/tests/harbor_oracle.py:124` and `:141`: the parity ORACLE (harbor's private converters, reached from the tests
   only), with frozen goldens and a live-corpus diff.
 
 **Shape:**
@@ -826,7 +826,7 @@ DEV_ONLY: frozenset[str] = frozenset({"harbor", "litellm"})
   default still validates what we emit; a release that changes a field fails the drift tests.
 - **Parity is measured, not assumed.** `test_harbor_oracle.py` asserts the live oracle equals the
   frozen goldens, and `test_parity_*` asserts our output equals both. A harbor bump that changes
-  conversion behavior surfaces as a named JSON-path diff (`packages/atif-converter/tests/harbor_oracle.py:166`), which is a decision to
+  conversion behavior surfaces as a named JSON-path diff (`packages/atif-converter/tests/harbor_oracle.py:192`), which is a decision to
   record in the fidelity policy before any re-freeze.
 - **Side-file discovery is ours.** Every `*.jsonl` under a session's side directory is read,
   workflow-nested ones included, with nested path parts joined by `__`

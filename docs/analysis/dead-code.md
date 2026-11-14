@@ -114,7 +114,7 @@ entry.
 | `CODEX_CONVERTIBLE_RECORD_TYPES` | `packages/atif-converter/src/atif_converter/domain/codex_fidelity.py:47` | 2026-09-11 |
 | `is_claude_session_event` | `packages/atif-converter/src/atif_converter/domain/session_events.py:206` | 2026-09-27 |
 | `is_codex_session_event` | `packages/atif-converter/src/atif_converter/domain/session_events.py:295` | 2026-09-27 |
-| `convert_codex_session` | `packages/atif-converter/src/atif_converter/infrastructure/codex_adapter.py:58` | 2026-09-11 |
+| `convert_codex_session` | `packages/atif-converter/src/atif_converter/infrastructure/codex_adapter.py:59` | 2026-09-11 |
 | `LAKE_TABLE_NAMES` | `packages/atif-duck/src/atif_duck/domain/lake.py:255` | 2026-09-28 |
 
 ## Unreferenced exports
@@ -165,7 +165,7 @@ intra-module use site is named after the table.
 | `REPORTED_COST_SOURCE_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:351` | 2026-09-27 |
 | `REPORTED_UNKNOWN_MODEL_COST_KEY` | `packages/atif-converter/src/atif_converter/domain/session_events.py:352` | 2026-09-27 |
 | `REPORTED_COST_SOURCE_COST_STATE` | `packages/atif-converter/src/atif_converter/domain/session_events.py:354` | 2026-09-27 |
-| `read_codex_rollout` | `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:47` | 2026-09-11 |
+| `read_codex_rollout` | `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:49` | 2026-09-11 |
 | `ARCHIVE_ZSTD_LEVEL` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:49` | 2026-09-27 |
 | `ArchivedSourceFile` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:63` | 2026-09-27 |
 | `Compressed` | `packages/atif-corpus/src/atif_corpus/infrastructure/compress_artifacts.py:57` | 2026-09-28 |
@@ -274,7 +274,7 @@ numbers follow it as plain numbers.
   `REPORTED_COST_SOURCE_COST_STATE` make up the dict entry at `:379`, and
   `REPORTED_UNKNOWN_MODEL_COST_KEY` is the key written at `:383`.
 - `read_codex_rollout` is called at
-  `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:74`.
+  `packages/atif-converter/src/atif_converter/infrastructure/codex_converter.py:76`.
 - `ARCHIVE_ZSTD_LEVEL` sets the compressor level at
   `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:113`;
   `ArchivedSourceFile` annotates `:87` and is constructed at `:122`.

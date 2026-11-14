@@ -130,10 +130,10 @@ Shows up in:
 - `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:981` and
   `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:963`: the two
   conversion entry points, one per agent.
-- `packages/atif-converter/tests/harbor_oracle.py:118` and
-  `packages/atif-converter/tests/harbor_oracle.py:358`: the live oracle call and the diff the
+- `packages/atif-converter/tests/harbor_oracle.py:124` and
+  `packages/atif-converter/tests/harbor_oracle.py:384`: the live oracle call and the diff the
   port is held to.
-- `packages/atif-converter/tests/harbor_oracle.py:83`: the skip that takes over when the
+- `packages/atif-converter/tests/harbor_oracle.py:89`: the skip that takes over when the
   private method is gone.
 - `packages/atif-converter/src/atif_converter/domain/fidelity.py:55-62`: the enum docstring
   that names the gaps as kept by choice.

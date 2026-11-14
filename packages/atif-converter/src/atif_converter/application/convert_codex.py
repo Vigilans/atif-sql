@@ -19,8 +19,11 @@ with the Claude Code path.
 A session can span several rollouts: a thread's continuation segments and the
 rollouts of the sub-agent threads it spawned, passed as ``source_files``.
 :mod:`atif_converter.domain.codex_threads` orders them into one record stream,
-and every artifact is built from that stream; the trajectory's steps are then
-marked reverted or sidechain from the records behind them.
+and every artifact is built from that stream. Each thread converts into a
+trajectory of its own, and each spawned thread's trajectory is embedded in the
+``subagent_trajectories`` of the thread that spawned it; each trajectory is
+enriched from its own thread's records, and its steps are then marked
+reverted from the records behind them.
 """
 
 from __future__ import annotations
@@ -39,9 +42,11 @@ from atif_converter.domain.codex_fidelity import (
     CodexRecordType,
 )
 from atif_converter.domain.codex_threads import (
+    CodexSessionStream,
     RolloutFile,
     assemble_codex_session,
     mark_codex_session,
+    thread_records,
 )
 from atif_converter.domain.errors import SourceMutatedDuringConversion
 from atif_converter.domain.fidelity import AnyRecordType, LossReport
@@ -50,6 +55,7 @@ from atif_converter.domain.session_events import (
     codex_session_events,
     session_events_jsonl_lines,
 )
+from atif_converter.domain.trajectory_tree import iter_trajectories
 from atif_converter.infrastructure.codex_adapter import convert_codex_stream
 from atif_converter.infrastructure.codex_census import (
     CodexSessionCensus,
@@ -65,6 +71,7 @@ from atif_converter.infrastructure.source_archive import SourceArchiveWriter
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Any
 
 #: Response-item payload types whose presence in a rollout means a specific
 #: content-shaped gap was actually exercised, rather than merely being possible.
@@ -136,6 +143,28 @@ def _developer_message_count(records: list[tuple[dict[str, object], str]]) -> in
         if payload.get("type") == "message" and payload.get("role") == "developer":
             count += 1
     return count
+
+
+def _enrich_threads(
+    trajectory: dict[str, Any], stream: CodexSessionStream, record_keys: Sequence[str]
+) -> None:
+    """Enrich each thread's trajectory from that thread's records, in place.
+
+    A trajectory names its thread in ``trajectory_id``; the root names it only
+    when it has children, so a trajectory without one is the root thread's.
+    The record ids are the session's edge ids, so ``source_uuids`` join
+    ``edges.jsonl`` whichever trajectory they sit in.
+    """
+    positions = thread_records(stream)
+    for thread_trajectory in iter_trajectories(trajectory):
+        thread_id = thread_trajectory.get("trajectory_id") or stream.root_thread_id
+        thread_positions = positions.get(str(thread_id), [])
+        enrich_codex_trajectory(
+            thread_trajectory,
+            [stream.records[position] for position in thread_positions],
+            copy_input=False,
+            record_ids=[record_keys[position] for position in thread_positions],
+        )
 
 
 def _refuse_if_mutated(
@@ -215,7 +244,7 @@ def convert_codex_and_audit(
     blob_index = extract_codex_blobs(
         [record for record, _src in records], collector, record_keys=record_keys
     )
-    result = convert_codex_stream([record for record, _src in records], rollout_jsonl)
+    result = convert_codex_stream(stream, rollout_jsonl)
 
     census = codex_census_from_records(rollout_jsonl, records)
     events = codex_session_events(records, record_ids=record_keys, sidechain_files=sidechain_files)
@@ -229,7 +258,8 @@ def convert_codex_and_audit(
     events_lines = tuple(session_events_jsonl_lines(events))
     # The harbor trajectory has no other consumer, so enrich in place rather
     # than deep-copying a whole rollout's worth of steps.
-    enriched = enrich_codex_trajectory(result.trajectory, records, copy_input=False)
+    enriched = result.trajectory
+    _enrich_threads(enriched, stream, record_keys)
     annotate_codex_trajectory(enriched, [record for record, _src in records], blob_index)
     mark_codex_session(enriched, stream, record_keys)
     del records, loaded, events, stream

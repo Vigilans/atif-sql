@@ -32,6 +32,8 @@ from typing import Any
 
 from atif_converter.domain.atif import Trajectory
 from atif_converter.domain.codex_conversion import convert_codex_records
+from atif_converter.domain.codex_nesting import convert_codex_threads
+from atif_converter.domain.codex_threads import CodexSessionStream
 from atif_converter.infrastructure.raw_records import (
     LoadedSession,
     parse_jsonl_records,
@@ -89,18 +91,20 @@ def convert_loaded_codex_rollout(loaded: LoadedSession) -> Trajectory | None:
     )
 
 
-def convert_codex_record_list(records: list[Any], rollout_jsonl: Path) -> Trajectory | None:
-    """Convert a record list read from ``rollout_jsonl`` and its sibling rollouts.
+def convert_codex_thread_stream(
+    stream: CodexSessionStream, rollout_jsonl: Path
+) -> Trajectory | None:
+    """Convert a session's threads, read from ``rollout_jsonl`` and its sibling rollouts.
 
-    The same conversion as :func:`convert_loaded_codex_rollout`, over records the
-    caller assembled (a session's rollouts in conversion order).
+    Each thread converts as :func:`convert_loaded_codex_rollout` converts one
+    rollout, and each spawned thread nests in the thread that spawned it.
     """
-    return convert_codex_records(records, fallback_session_id=rollout_stem(rollout_jsonl))
+    return convert_codex_threads(stream, fallback_session_id=rollout_stem(rollout_jsonl))
 
 
 __all__ = [
-    "convert_codex_record_list",
     "convert_codex_rollout",
+    "convert_codex_thread_stream",
     "convert_loaded_codex_rollout",
     "read_codex_rollout",
     "rollout_stem",

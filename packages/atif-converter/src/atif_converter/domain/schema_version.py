@@ -120,12 +120,22 @@ History:
   final token total is kept rather than dropped, and a rollout whose
   ``session_meta`` names no thread id takes the rollout's stem as its
   ``session_id``.
+* 15 — harbor 0.26.0 (#3435): each Codex thread converts into a trajectory of
+  its own, and a spawned thread's trajectory is embedded in the
+  ``subagent_trajectories`` of the thread that spawned it, with its thread id
+  as ``trajectory_id``, the root thread's id as ``session_id``, its
+  ``agent_path`` / ``agent_nickname`` in ``agent.extra``, and a
+  ``subagent_trajectory_ref`` on the spawning call's result. A trajectory with
+  children takes its thread id as ``trajectory_id`` and its ``final_metrics``
+  include theirs. A spawned thread's steps no longer sit in the root's
+  ``steps`` and carry no ``extra.is_sidechain`` / ``extra.agent_id``; each
+  trajectory's ``source_uuids`` come from its own thread's records.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 14
+CONVERTER_SCHEMA_VERSION: Final = 15
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

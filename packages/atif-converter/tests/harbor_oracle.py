@@ -47,10 +47,16 @@ _CONVERT_METHOD = "_convert_events_to_trajectory"
 #: a parity failure. Keep each entry narrow (a path AND a direction), so a
 #: divergence the decision did not cover still fails.
 #:
-#: Empty since harbor 0.24.0: harbor #3434 reads ``agentId``, so the
-#: ``steps[i].extra.agent_id`` divergence this list named is gone and every
-#: step's subagent id must agree with harbor's.
-DELIBERATE_DIVERGENCES: tuple[re.Pattern[str], ...] = ()
+#: * A Codex spawned thread harbor's ``spawn_agent`` / ``task_name`` rule does
+#:   not link is linked from the call that reported it
+#:   (``atif_converter.domain.codex_nesting``), so the spawning result carries
+#:   a ``subagent_trajectory_ref`` only in ours.
+DELIBERATE_DIVERGENCES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"^\$(?:\.subagent_trajectories\[\d+\])*\.steps\[\d+\]\.observation\.results\[\d+\]"
+        r"\.subagent_trajectory_ref: only in ours = "
+    ),
+)
 
 #: The blob placeholder :class:`atif_converter.domain.blobs.BlobRef` writes for an
 #: image, as ``_image_content_forgiven`` reads it.
@@ -141,6 +147,26 @@ def harbor_codex_trajectory(rollout_jsonl: Path) -> dict[str, Any] | None:
         session_dir = staging / "sessions"
         session_dir.mkdir()
         (session_dir / rollout_jsonl.name).symlink_to(rollout_jsonl.resolve())
+        logs_dir = staging / "logs"
+        logs_dir.mkdir()
+        trajectory = getattr(Codex(logs_dir=logs_dir), _CONVERT_METHOD)(session_dir)
+    return None if trajectory is None else trajectory.to_json_dict()
+
+
+def harbor_codex_session_trajectory(rollouts: list[Path]) -> dict[str, Any] | None:
+    """harbor's own conversion of a Codex session's rollouts staged together, as ``to_json_dict()``.
+
+    harbor 0.26.0 reads every rollout under the session directory, converts
+    the root thread and nests each spawned thread in its spawner.
+    """
+    from harbor.agents.installed.codex import Codex  # type: ignore[import-untyped]
+
+    with tempfile.TemporaryDirectory(prefix="atif-oracle-") as scratch:
+        staging = Path(scratch)
+        session_dir = staging / "sessions"
+        session_dir.mkdir()
+        for rollout in rollouts:
+            (session_dir / rollout.name).symlink_to(rollout.resolve())
         logs_dir = staging / "logs"
         logs_dir.mkdir()
         trajectory = getattr(Codex(logs_dir=logs_dir), _CONVERT_METHOD)(session_dir)

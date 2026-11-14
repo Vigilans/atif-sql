@@ -32,6 +32,7 @@ from atif_converter.infrastructure.raw_records import LoadedSession
 
 if TYPE_CHECKING:
     from atif_converter.domain.atif import Trajectory
+    from atif_converter.domain.codex_threads import CodexSessionStream
 
 
 def codex_session_id(rollout_jsonl: Path) -> str:
@@ -109,23 +110,25 @@ def convert_loaded_codex_session(loaded: LoadedSession) -> ConversionResult:
     return _result_from(trajectory, rollout_jsonl)
 
 
-def convert_codex_stream(records: list[dict[str, Any]], rollout_jsonl: Path) -> ConversionResult:
-    """Convert a session's assembled record stream into a validated ATIF trajectory.
+def convert_codex_stream(stream: CodexSessionStream, rollout_jsonl: Path) -> ConversionResult:
+    """Convert a session's assembled threads into one validated ATIF trajectory.
 
-    ``records`` are :func:`~atif_converter.domain.codex_threads.assemble_codex_session`'s
-    stream, read from ``rollout_jsonl`` (the session's first rollout) and the
-    session's other rollouts. A session of one rollout passes that rollout's
-    records, which converts exactly as :func:`convert_loaded_codex_session` does.
+    ``stream`` is :func:`~atif_converter.domain.codex_threads.assemble_codex_session`'s,
+    read from ``rollout_jsonl`` (the session's first rollout) and the
+    session's other rollouts. Each spawned thread's trajectory is embedded in
+    the trajectory of the thread that spawned it
+    (:mod:`atif_converter.domain.codex_nesting`). A session of one rollout
+    converts exactly as :func:`convert_loaded_codex_session` does.
 
     Raises
     ------
         EmptySessionError: the converter found no convertible events.
         ConversionError: any unexpected failure inside the converter.
     """
-    from atif_converter.infrastructure.codex_converter import convert_codex_record_list
+    from atif_converter.infrastructure.codex_converter import convert_codex_thread_stream
 
     try:
-        trajectory = convert_codex_record_list(records, rollout_jsonl)
+        trajectory = convert_codex_thread_stream(stream, rollout_jsonl)
     except (
         Exception
     ) as exc:  # the converter is a port of untyped upstream code; classify at the seam

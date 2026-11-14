@@ -19,7 +19,13 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pytest
 import zstandard
+from harbor_oracle import (
+    harbor_codex_session_trajectory,
+    parity_diffs,
+    require_harbor_private_api,
+)
 
 from atif_converter.application.convert_codex import convert_codex_and_audit
 from atif_converter.domain.codex_threads import (
@@ -27,6 +33,7 @@ from atif_converter.domain.codex_threads import (
     assemble_codex_session,
     rollout_ids,
 )
+from atif_converter.infrastructure.codex_converter import convert_codex_thread_stream
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -258,25 +265,47 @@ class TestAssembly:
 
 
 class TestConvertSession:
-    def test_the_session_converts_with_reverted_and_sidechain_steps(self, tmp_path: Path) -> None:
+    def test_the_session_converts_with_reverted_steps_and_a_nested_thread(
+        self, tmp_path: Path
+    ) -> None:
         first, others = write_session(tmp_path / "sessions")
         result, report = convert_codex_and_audit(first, source_files=others)
         assert result.validation_errors == ()
         trajectory = result.trajectory
         assert trajectory["session_id"] == ROOT
+        assert trajectory["trajectory_id"] == ROOT
         steps = trajectory["steps"]
         assert [s["step_id"] for s in steps] == list(range(1, len(steps) + 1))
 
-        def texts(predicate: Callable[[dict[str, Any]], object]) -> list[str]:
-            return [s.get("message") for s in steps if predicate(s.get("extra") or {})]
+        def texts(
+            steps: list[dict[str, Any]], predicate: Callable[[dict[str, Any]], object]
+        ) -> list[str]:
+            return [s["message"] for s in steps if predicate(s.get("extra") or {})]
 
-        assert texts(lambda e: e.get("reverted")) == ["question 2x", "answer 2x"]
-        assert texts(lambda e: e.get("agent_id") == CHILD and e.get("is_sidechain")) == [
-            "task",
-            "done",
+        assert texts(steps, lambda e: e.get("reverted")) == ["question 2x", "answer 2x"]
+        assert not any((s.get("extra") or {}).get("is_sidechain") for s in steps)
+
+        (child,) = trajectory["subagent_trajectories"]
+        assert child["trajectory_id"] == CHILD
+        assert child["session_id"] == ROOT
+        child_steps = child["steps"]
+        assert [s["step_id"] for s in child_steps] == list(range(1, len(child_steps) + 1))
+        assert texts(child_steps, lambda e: True) == ["task", "done"], "copied history kept"
+        assert all((s.get("extra") or {}).get("source_uuids") for s in child_steps)
+        assert texts(steps, lambda e: True).count("question 1") == 1
+
+        refs = [
+            (step["step_id"], result["source_call_id"], result["subagent_trajectory_ref"])
+            for step in steps
+            for result in (step.get("observation") or {}).get("results", [])
+            if "subagent_trajectory_ref" in result
         ]
-        assert "question 1" in texts(lambda e: not e.get("is_sidechain"))
-        assert texts(lambda e: True).count("question 1") == 1, "copied history was converted"
+        assert [(call, ref) for _step, call, ref in refs] == [
+            ("call_spawn", [{"trajectory_id": CHILD, "session_id": ROOT}])
+        ]
+        # Each thread's last cumulative total is 10 prompt tokens; the root adds its child's.
+        assert trajectory["final_metrics"]["total_prompt_tokens"] == 20
+        assert child["final_metrics"]["total_prompt_tokens"] == 10
 
         assert trajectory["extra"]["subagents"] == [
             {
@@ -305,3 +334,124 @@ class TestConvertSession:
             f"20/{others[0].name}",
             f"20/{others[1].name}",
         }
+
+
+def _ordinal_records(meta: dict[str, Any], items: list[tuple[str, dict[str, Any]]]):
+    """A rollout whose every record carries an ``ordinal``, as Codex writes them."""
+    records: list[dict[str, Any]] = [
+        {
+            "timestamp": "2026-10-17T12:00:00.000Z",
+            "ordinal": 0,
+            "type": "session_meta",
+            "payload": meta,
+        },
+        {
+            "timestamp": "2026-10-17T12:00:00.100Z",
+            "ordinal": 1,
+            "type": "turn_context",
+            "payload": {"turn_id": "t", "model": MODEL},
+        },
+    ]
+    for offset, (record_type, payload) in enumerate(items):
+        records.append(
+            {
+                "timestamp": f"2026-10-17T12:00:{offset + 1:02d}.000Z",
+                "ordinal": offset + 2,
+                "type": record_type,
+                "payload": payload,
+            }
+        )
+    return records
+
+
+def _spawning_session(root: Path, *, agent_path: str | None) -> tuple[Path, Path]:
+    """A root thread whose ``spawn_agent`` call starts a child, and the child's rollout."""
+    spawn_output: dict[str, Any] = {"agent_id": CHILD}
+    if agent_path is not None:
+        spawn_output["task_name"] = agent_path
+    parent = _ordinal_records(
+        {"id": ROOT, "session_id": ROOT, "cwd": "/w"},
+        [
+            ("response_item", _message("user", "question 1", "msg_u1")),
+            (
+                "response_item",
+                {
+                    "type": "function_call",
+                    "call_id": "call_spawn",
+                    "name": "spawn_agent",
+                    "arguments": json.dumps({"message": "task"}),
+                },
+            ),
+            (
+                "response_item",
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_spawn",
+                    "output": json.dumps(spawn_output),
+                },
+            ),
+            ("event_msg", _token_count()),
+            ("response_item", _message("assistant", "answer 1", "msg_a1")),
+            ("event_msg", _token_count()),
+        ],
+    )
+    spawn: dict[str, Any] = {"parent_thread_id": ROOT, "depth": 1, "agent_nickname": "Ada"}
+    if agent_path is not None:
+        spawn["agent_path"] = agent_path
+    child = _ordinal_records(
+        {
+            "id": CHILD,
+            "session_id": ROOT,
+            "subagent_history_start_ordinal": 4,
+            "source": {"subagent": {"thread_spawn": spawn}},
+        },
+        [
+            # Ordinals 2-3 copy the parent's history; the child's own start at 4.
+            ("response_item", _message("user", "question 1", "msg_u1")),
+            ("response_item", _message("assistant", "copied", "msg_c1")),
+            ("response_item", _message("user", "task", "msg_task")),
+            ("response_item", _message("assistant", "done", "msg_done")),
+            ("event_msg", _token_count()),
+        ],
+    )
+    return (
+        _write(root / f"rollout-2026-10-17T12-00-00-{ROOT}.jsonl", parent),
+        _write(root / f"rollout-2026-10-17T12-00-05-{CHILD}.jsonl", child),
+    )
+
+
+def _ours(first: Path, child: Path) -> dict[str, Any]:
+    stream = assemble_codex_session(
+        [
+            RolloutFile(
+                source_file=path.name,
+                records=[json.loads(line) for line in path.read_text().splitlines()],
+            )
+            for path in (first, child)
+        ]
+    )
+    trajectory = convert_codex_thread_stream(stream, first)
+    assert trajectory is not None
+    return trajectory.to_json_dict()
+
+
+class TestNestedParity:
+    """harbor 0.26.0 (#3435) nests a spawned thread; the port's nesting is the same."""
+
+    @pytest.mark.parametrize("agent_path", ["worker", None], ids=["task-name", "link-only"])
+    def test_matches_live_harbor(self, tmp_path: Path, agent_path: str | None) -> None:
+        require_harbor_private_api("codex")
+        first, child = _spawning_session(tmp_path, agent_path=agent_path)
+        ours = _ours(first, child)
+        theirs = harbor_codex_session_trajectory([first, child])
+        assert theirs is not None
+        assert parity_diffs(theirs, ours) == []
+        (nested,) = ours["subagent_trajectories"]
+        assert [s["message"] for s in nested["steps"]] == ["task", "done"]
+        spawn_result = ours["steps"][1]["observation"]["results"][0]
+        assert spawn_result["subagent_trajectory_ref"] == [
+            {"trajectory_id": CHILD, "session_id": ROOT}
+        ]
+        if agent_path is None:
+            harbor_result = theirs["steps"][1]["observation"]["results"][0]
+            assert "subagent_trajectory_ref" not in harbor_result

@@ -88,6 +88,7 @@ from atif_converter.domain.codex_nested_calls import (
     nested_result_content,
     nested_tool_call,
 )
+from atif_converter.domain.trajectory_tree import iter_steps
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -365,10 +366,11 @@ def annotate_claude_code_trajectory(
     already rewritten by :func:`~atif_converter.domain.blobs.extract_claude_code_blobs`.
     ``sidecars`` maps agent id -> parsed ``agent-<id>.meta.json``. Run it AFTER
     :func:`~atif_converter.domain.enrichment.enrich_trajectory`: the step-level
-    fields follow ``source_uuids``.
+    fields follow ``source_uuids``. The steps of every subagent trajectory
+    embedded in ``trajectory`` are annotated too; the subagent list goes on
+    ``trajectory`` itself.
     """
-    steps = trajectory.get("steps")
-    step_list: list[Any] = steps if isinstance(steps, list) else []
+    step_list: list[Any] = list(iter_steps(trajectory))
     tool_names, results, agent_by_uuid = _index_claude_records(records)
     _annotate_claude_results(step_list, tool_names, results, blob_index)
     _annotate_steps(step_list, agent_by_uuid, blob_index)
@@ -738,10 +740,10 @@ def annotate_codex_trajectory(
 
     ``records`` are the rollout's parsed records, already rewritten by
     :func:`~atif_converter.domain.blobs.extract_codex_blobs` with the same
-    record keys the enrichment pass writes into ``source_uuids``.
+    record keys the enrichment pass writes into ``source_uuids``. The steps of
+    every subagent trajectory embedded in ``trajectory`` are annotated too.
     """
-    steps = trajectory.get("steps")
-    step_list: list[Any] = steps if isinstance(steps, list) else []
+    step_list: list[Any] = list(iter_steps(trajectory))
     index = _index_codex_records(records)
     outcomes = index.outcomes()
     for result in _results(step_list):

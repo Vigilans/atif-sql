@@ -25,13 +25,16 @@ single record stream the converter reads, with what each record is:
 * a spawned thread's copied parent history is dropped, since the parent's own
   records already carry it.
 
-:func:`mark_codex_session` then writes the result onto the converted
-trajectory: ``extra.reverted`` on a step whose records are all reverted,
-``extra.is_sidechain`` and ``extra.agent_id`` on a spawned thread's steps (the
-shape Claude Code's inlined subagent steps have, which atif-duck's subagent
-views read), and one ``trajectory.extra.subagents`` entry per spawned thread.
+:func:`thread_records` splits that stream back into each thread's own
+records, which convert into one trajectory per thread
+(:mod:`atif_converter.domain.codex_nesting` nests a spawned thread's
+trajectory under the thread that spawned it), and :func:`spawn_links` names
+the call that spawned each thread. :func:`mark_codex_session` then writes the
+rest onto the converted trajectories: ``extra.reverted`` on a step whose
+records are all reverted, and one ``trajectory.extra.subagents`` entry per
+spawned thread on the root.
 
-A session of one rollout passes through both unchanged.
+A session of one rollout passes through all of them unchanged.
 
 Pure module: no filesystem access, no env, no logging.
 """
@@ -43,6 +46,8 @@ import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
+
+from atif_converter.domain.trajectory_tree import iter_steps
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,6 +92,9 @@ class SpawnedThread:
     parent_thread_id: str | None
     agent_role: str | None
     spawn_depth: int | None
+    #: The task name the spawning thread gave it (``thread_spawn.agent_path``).
+    agent_path: str | None = None
+    agent_nickname: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +232,8 @@ def assemble_codex_session(files: Sequence[RolloutFile]) -> CodexSessionStream:
                 or _str(spawn.get("parent_thread_id")),
                 agent_role=_str(meta.get("agent_role")) or _str(spawn.get("agent_role")),
                 spawn_depth=_int(spawn.get("depth")),
+                agent_path=_str(spawn.get("agent_path")),
+                agent_nickname=_str(spawn.get("agent_nickname")),
             )
         )
     return CodexSessionStream(
@@ -254,7 +264,23 @@ def _output_text(output: object) -> str:
     return json.dumps(output)
 
 
-def _spawn_links(stream: CodexSessionStream) -> dict[str, tuple[str, str]]:
+def thread_records(stream: CodexSessionStream) -> dict[str, list[int]]:
+    """Thread id -> the positions of its records in :attr:`CodexSessionStream.records`.
+
+    The root thread first, then each spawned thread in the order it began;
+    each list keeps stream order, so a thread's records read as its own
+    rollouts in conversion order.
+    """
+    positions: dict[str, list[int]] = {stream.root_thread_id: []}
+    for thread in stream.spawned:
+        positions.setdefault(thread.thread_id, [])
+    for position, (_record, source_file) in enumerate(stream.records):
+        thread_id = stream.thread_of_file.get(source_file, stream.root_thread_id)
+        positions.setdefault(thread_id, []).append(position)
+    return positions
+
+
+def spawn_links(stream: CodexSessionStream) -> dict[str, tuple[str, str]]:
     """Spawned thread id -> ``(spawning tool call id, link source)``.
 
     ``spawn_event``: the spawning thread's ``collab_agent_spawn_end`` event
@@ -295,53 +321,30 @@ def _spawn_links(stream: CodexSessionStream) -> dict[str, tuple[str, str]]:
     return links
 
 
-def _step_extra(step: dict[str, Any]) -> dict[str, Any]:
-    extra = step.get("extra")
-    if not isinstance(extra, dict):
-        extra = {}
-        step["extra"] = extra
-    return extra
-
-
 def mark_codex_session(
     trajectory: dict[str, Any], stream: CodexSessionStream, record_ids: Sequence[str]
 ) -> dict[str, Any]:
-    """Write reverted, sidechain and subagent attribution onto ``trajectory`` in place.
+    """Write reverted marks and the subagent list onto ``trajectory`` in place.
 
     ``record_ids`` are the edge ids of :attr:`CodexSessionStream.records`, in
     the same order: the ids the enrichment pass wrote into each step's
-    ``extra.source_uuids``. A step with none takes the thread of the step
-    before it.
+    ``extra.source_uuids``, in the root trajectory and in every subagent
+    trajectory embedded in it.
     """
-    record_facts = {
-        record_id: (stream.thread_of_file.get(source_file, stream.root_thread_id), is_reverted)
-        for record_id, (_record, source_file), is_reverted in zip(
-            record_ids, stream.records, stream.reverted, strict=True
-        )
-    }
-    steps = trajectory.get("steps")
-    thread_id = stream.root_thread_id
-    for step in steps if isinstance(steps, list) else []:
-        if not isinstance(step, dict):
-            continue
+    reverted = dict(zip(record_ids, stream.reverted, strict=True))
+    for step in iter_steps(trajectory):
         extra = step.get("extra")
         uuids = extra.get("source_uuids") if isinstance(extra, dict) else None
         facts = [
-            record_facts[uuid]
+            reverted[uuid]
             for uuid in (uuids if isinstance(uuids, list) else [])
-            if isinstance(uuid, str) and uuid in record_facts
+            if isinstance(uuid, str) and uuid in reverted
         ]
-        if facts:
-            thread_id = facts[0][0]
-            if all(is_reverted for _thread, is_reverted in facts):
-                _step_extra(step)["reverted"] = True
-        if thread_id != stream.root_thread_id:
-            step_extra = _step_extra(step)
-            step_extra["is_sidechain"] = True
-            step_extra["agent_id"] = thread_id
+        if facts and all(facts) and isinstance(extra, dict):
+            extra["reverted"] = True
 
     if stream.spawned:
-        links = _spawn_links(stream)
+        links = spawn_links(stream)
         entries: list[dict[str, Any]] = []
         for thread in stream.spawned:
             entry: dict[str, Any] = {"agent_id": thread.thread_id}
@@ -370,4 +373,6 @@ __all__ = [
     "assemble_codex_session",
     "mark_codex_session",
     "rollout_ids",
+    "spawn_links",
+    "thread_records",
 ]

@@ -44,7 +44,7 @@ catalog copy.
    forbids atif-corpus from importing atif-converter; it raises rather than returning an invalid
    trajectory (`packages/atif-cli/src/atif_cli/converter_adapter.py:141-142`).
 7. Under `--agent codex` the same step runs `convert_codex_and_audit`, which reads the one rollout it
-   is given and converts it with our ported Codex converter (`packages/atif-converter/src/atif_converter/application/convert_codex.py:162`).
+   is given and converts it with our ported Codex converter (`packages/atif-converter/src/atif_converter/application/convert_codex.py:191`).
 8. `convert_and_audit` reads the source files once (fingerprinted and parsed in the same pass,
    `harbor_adapter.read_session`), converts those records with our ported converter through the
    seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py`
