@@ -65,9 +65,9 @@ The limits of this derivation, stated because no index backs it:
   `PLC0415` is off (`pyproject.toml:229`) to satisfy the lean-import assertion at
   `packages/atif-cli/tests/test_lean_import.py:40`, atif-cli's cross-package
   imports sit *inside* command bodies:
-  `packages/atif-cli/src/atif_cli/app.py:727`,
-  `packages/atif-cli/src/atif_cli/app.py:955`, and
-  `packages/atif-cli/src/atif_cli/app.py:1550` are all indented. The import graph
+  `packages/atif-cli/src/atif_cli/app.py:761`,
+  `packages/atif-cli/src/atif_cli/app.py:1044`, and
+  `packages/atif-cli/src/atif_cli/app.py:1641` are all indented. The import graph
   uses `ast.walk`, which descends into function
   bodies, and the reference regex is unanchored, so a deferred import counts as
   an inbound edge.
@@ -372,7 +372,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
 
 The rest sit in modules that do declare an `__all__` and are deliberately
 absent from it, which is the module saying they aren't exported:
-`packages/atif-cli/src/atif_cli/app.py:2338` (`search_rows`),
+`packages/atif-cli/src/atif_cli/app.py:2429` (`search_rows`),
 `packages/atif-cli/src/atif_cli/corpus.py:71` (`SessionLayout`) and `:158`
 (`CorpusSlimReport`), and
 `packages/atif-duck/src/atif_duck/infrastructure/lake.py:121`
@@ -469,12 +469,12 @@ write, over every tracked file:
 
 Every real consumer bypasses the facade for the deep module:
 
-- `packages/atif-cli/src/atif_cli/app.py:1550` and
-  `packages/atif-cli/src/atif_cli/app.py:2200-2204` import `register` from
+- `packages/atif-cli/src/atif_cli/app.py:1641` and
+  `packages/atif-cli/src/atif_cli/app.py:2291-2295` import `register` from
   `atif_duck.infrastructure.registry`.
-- `packages/atif-cli/src/atif_cli/app.py:2407`:
+- `packages/atif-cli/src/atif_cli/app.py:2498`:
   `from atif_duck.domain.examples import (...)`.
-- `packages/atif-cli/src/atif_cli/app.py:2489`:
+- `packages/atif-cli/src/atif_cli/app.py:2580`:
   `from atif_duck.domain.catalog import (...)`, which takes `MACRO_SIGNATURES`
   and `VIEW_SCHEMA` with their analytics counterparts.
 - `packages/atif-cli/src/atif_cli/duck_errors.py:27`,

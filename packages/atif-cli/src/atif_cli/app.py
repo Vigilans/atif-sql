@@ -606,6 +606,40 @@ def _harden_query_connection(
     con.execute("SET lock_configuration=true")
 
 
+def sandbox_corpus_connection(corpus_root: Path, spill_dir: Path) -> Any:
+    """A connection over ``corpus_root``'s per-session views, locked as ``query`` locks its own.
+
+    Sized to the host with ``spill_dir`` as its spill directory, registered
+    without the lake or the embeddings store, then hardened by
+    :func:`_harden_query_connection`. ``materialize --filter`` runs each
+    filter script on one of these (:mod:`atif_cli.sql_filter`). The caller
+    closes it.
+    """
+    import duckdb
+
+    from atif_duck.infrastructure.registry import register
+
+    con = duckdb.connect()
+    try:
+        _configure_query_resources(con, _query_resources(), spill_dir)
+        sources = register(con, corpus_root, skip_vss=True)
+        _harden_query_connection(
+            con,
+            corpus_root=corpus_root,
+            spill_dir=spill_dir,
+            columnar_paths=sources.lazy_read_paths,
+        )
+    except BaseException:
+        con.close()
+        raise
+    return con
+
+
+def refused_statement_kinds(con: Any, sql: str) -> list[str]:
+    """The statement kinds in ``sql`` the query sandbox refuses (:func:`_refused_statement_kinds`)."""
+    return _refused_statement_kinds(con, sql)
+
+
 def _corpus_settings(
     source_root: Path | None,
     corpus_root: Path | None,
@@ -874,6 +908,44 @@ def _materialize_worker_setup() -> None:
         logger.add(sys.stderr, level=DEFAULT_LOG_LEVEL)
 
 
+def _read_filter_scripts(paths: Sequence[str], fmt: OutputFormat) -> tuple[str, ...]:
+    """Each ``--filter`` script's text, in command-line order; exit 64 on one that can't be used.
+
+    ``-`` reads stdin, once, here in the parent, so a pool's workers share the
+    text. A script that can't be read, or holds nothing, fails the command
+    before the pass starts.
+    """
+    scripts: list[str] = []
+    stdin_read = False
+    for path in paths:
+        problem: str | None = None
+        text = ""
+        if path == "-":
+            if stdin_read:
+                problem = "--filter - is given twice, and stdin holds one script"
+            else:
+                text = sys.stdin.read()
+                stdin_read = True
+        else:
+            try:
+                text = Path(path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                problem = f"cannot read filter script {path}: {exc}"
+        if problem is None and not text.strip():
+            problem = f"filter script {path} is empty"
+        if problem is not None:
+            err = ClassifiedError(
+                kind="invalid_input",
+                exit_code=EXIT_CODES["invalid_input"],
+                message=problem,
+                hint="pass each --filter a readable UTF-8 SQL script, or - once for stdin",
+            )
+            emit_error(err, fmt)
+            raise SystemExit(err.exit_code)
+        scripts.append(text)
+    return tuple(scripts)
+
+
 @app.command
 def materialize(
     *,
@@ -886,6 +958,10 @@ def materialize(
     workers: int | None = None,
     lake: Annotated[bool, cyclopts.Parameter(negative="--no-lake")] = True,
     relocatable: bool | None = None,
+    filter_scripts: Annotated[
+        list[str] | None,
+        cyclopts.Parameter(name="--filter", consume_multiple=False, allow_leading_hyphen=True),
+    ] = None,
     fmt: Annotated[OutputFormat, cyclopts.Parameter(name="--format")] = OutputFormat.AUTO,
 ) -> None:
     """Sync the materialized corpus with the raw transcript corpus.
@@ -940,10 +1016,23 @@ def materialize(
         Write a corpus several machines can share: each session records this machine as
         ``meta.host``, and the pass marks, guards and re-converts from an archive only this
         machine's sessions. Default from ``ATIF_SQL_RELOCATABLE``.
+    filter_scripts
+        A SQL script that decides what of each converted session publishes, run before
+        any of it is written; repeatable, in order, and ``-`` reads one script from
+        stdin. Each script sees the public views over that one session under the
+        query sandbox and leaves a relation named ``directives`` (``prune_tool_result``,
+        ``drop_reasoning``, ``drop_event``, ``drop_blob``, ``replace``); a script stops
+        publication by calling ``error()``. The pass writes no raw source archive or
+        edges, re-converts nothing from an archive, and stamps ``filtered: true`` into every
+        ``meta.json`` it writes; a pass without ``--filter`` fails the filtered
+        sessions it plans instead of overwriting them. Re-run a policy over a session
+        with ``--sessions <id> --force --filter ...``. An unreadable or empty script
+        exits 64.
     fmt
         Report format; ``auto`` = human lines on TTY, JSON on a pipe.
     """
     from atif_cli.converter_adapter import RealConverter
+    from atif_cli.sql_filter import SqlArtifactFilter
     from atif_converter.domain.atif import UPSTREAM_VERSION as ATIF_MODELS_VERSION
     from atif_converter.domain.schema_version import CONVERTER_SCHEMA_VERSION
     from atif_corpus.application.materialize import (
@@ -975,6 +1064,7 @@ def materialize(
             fmt,
         )
         raise SystemExit(EXIT_CODES["invalid_input"])
+    scripts = _read_filter_scripts(filter_scripts, fmt) if filter_scripts else ()
     try:
         report = materialize_use_case(
             source_root=settings.source_root,
@@ -1018,6 +1108,7 @@ def materialize(
                 else None
             ),
             relocatable=relocatable if relocatable is not None else settings.relocatable,
+            artifact_filter=SqlArtifactFilter(scripts) if scripts else None,
         )
     except SuspiciousEmptyScanError as exc:
         # The corpus's loudest data-loss tripwire, so it gets a code an

@@ -29,7 +29,9 @@ wheel bundles every member; members under `packages/*`):
   quiescence, atomic artifact writes (the bulk JSON artifacts zstd-compressed),
   in-place compression of an old-layout session for `corpus slim`, the
   `ArtifactProducer` port that lets a composition root add per-session files
-  to the same atomic swap (atif-cli wires none now), and the `SessionSink` port that hands
+  to the same atomic swap (atif-cli wires none now), the `ArtifactFilter` port
+  that rewrites each converted session before any of it is written (atif-cli's
+  `materialize --filter`), and the `SessionSink` port that hands
   every published session to a store kept beside the corpus (atif-duck's
   DuckLake writer). Per-agent discovery lives in
   `domain.source_layout` (`transcript_depth` 1 for Claude Code, 3 for
@@ -170,15 +172,29 @@ Rules of the road:
   `source_removed_at`. The report's `removed` counts sessions newly marked that
   pass and `retained` counts every session kept without a source. A source that
   comes back is re-converted from the live file, which clears the mark.
-- Every live conversion writes a raw source archive into the same staged swap:
-  `sessions/<id>/source/<path>.zst`, one zstd file per source file (the main
-  transcript, side-file transcripts, and every other file under the session's
-  side dir), listed in `meta.source_archive` with sizes and sha256s. The
+- Every live conversion of an unfiltered pass writes a raw source archive
+  into the same staged swap: `sessions/<id>/source/<path>.zst`, one zstd file
+  per source file (the main transcript, side-file transcripts, and every other
+  file under the session's side dir), listed in `meta.source_archive` with
+  sizes and sha256s. The
   transcript bytes come from the converter's verifying re-read (a
   `SourceArchiveWriter` handed to `mutated_files`), so archiving adds no open
   and the archive is exactly what was parsed. `restore_session_sources` in
   `atif_corpus.infrastructure.source_archive` rebuilds the tree, and a
   source-removed session whose generation is stale re-converts from it.
+- `materialize --filter SCRIPT` (repeatable, `-` reads standard input once in the
+  parent) runs caller SQL over each converted session before its blobs or
+  artifacts are written (`atif_cli.sql_filter`, behind atif-corpus's
+  `ArtifactFilter`). Each script runs on a fresh connection under the query
+  sandbox, over atif-duck's public views of that one session, staged as
+  parquet in a 0700 system temp dir, and leaves a relation named
+  `directives`; `atif_cli.filter_directives` validates the rows and applies
+  them (`prune_tool_result`, `drop_reasoning`, `drop_event`, `drop_blob`,
+  `replace`) after stripping the converter's hidden copies, then reruns every
+  script over the result and fails the session if that changes a byte. A
+  filtered pass writes no source archive or edges, re-converts nothing from
+  an archive, and stamps `filtered: true`; an unfiltered pass fails the
+  filtered sessions it plans instead of overwriting them.
 - Staleness has two halves. The watermark says whether the SOURCE moved; the
   generation says whether the CODE did: a session whose `meta.converter_schema`
   differs from the running value is stale, and one from before the key existed

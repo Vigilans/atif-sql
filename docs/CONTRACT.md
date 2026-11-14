@@ -373,6 +373,7 @@ proofs are out of scope for the workspace.
 atif-sql convert <session.jsonl> [--agent claude-code|codex]
                                        # --agent defaults from ATIF_SQL_AGENT
 atif-sql materialize [--force] [--quiesce-seconds N] [--agent ...] [--workers N] [--no-lake]  # sync corpus
+                     [--filter SCRIPT ...]  # SQL filter stage; - reads standard input once
                                        # report adds rejected / rejected_session_ids,
                                        # lake_synced / lake_pending / lake_error
 atif-sql status [--agent ...]          # corpus freshness, counts, watermark age
@@ -405,6 +406,40 @@ atif-sql embed --prune-orphans [--no-dry-run]  # stored rows no lake step names;
 atif-sql search 'text' [--all-corpora] [--no-lake]  # kNN joined to the lake's steps
 atif-sql schema                        # static, <50ms, no duckdb bind
 ```
+
+## Filter stage (atif-cli and atif-corpus)
+- `materialize --filter SCRIPT` makes a filtered pass (see meta.filtered).
+  atif-cli's SqlArtifactFilter is the ArtifactFilter: per converted session,
+  each script runs in command-line order on a fresh connection under the
+  query sandbox, over atif-duck's public views and macros of that one session
+  (typed into parquet by ColumnarArtifactProducer in a 0700 directory under
+  the system temp dir, never inside the corpus). No other relation is bound
+  for it, and the session has no edges, so `messages` is empty, as it is once
+  the session publishes. Each script leaves a relation named `directives`,
+  read before its connection closes, so every script sees the same
+  unmodified session.
+- Directive rows: `action` plus that action's columns, every other known
+  column NULL. `prune_tool_result` (trajectory_id, step_id, tool_use_id):
+  content becomes "", the result's images go, and tool_result_metadata keeps
+  only is_error. `drop_reasoning` (trajectory_id, step_id): reasoning_content
+  goes. `drop_event` (event_seq): the session event with that seq goes.
+  `drop_blob` (blob_sha256): every images entry with that hash goes, and the
+  blob isn't published. `replace` (find, replacement): every non-empty find is
+  replaced in every string value of the trajectory (embedded trajectories and
+  extra included), the session events and the loss report, keys untouched,
+  in one pass with the longest find first. Addresses name the
+  session as converted; trajectory_id is the step views' (an embedded
+  trajectory's own id, for the root its trajectory_id or the session id).
+- Order: the converter's hidden copies go first on every filtered pass
+  (raw_arguments in step.extra, step.extra.tool_call_details.* and
+  tool_calls[].extra, and tool_result_metadata's raw_tool_result and
+  tool_use_result), then prune and drop, then replace; only blobs the result
+  still names (an images entry or a `sha256:<hex>` placeholder) are stored.
+  The scripts then run again over the result, and the session fails if their
+  directives change a byte of it. An unknown action or column, a missing,
+  mistyped or foreign parameter, an address naming nothing, a find with two
+  replacements, a refused statement, or a script's own error() fails the
+  session before anything of it is written.
 
 ## Parity oracle (satisfied and retired)
 The migration oracle compared this stack against a prior implementation over

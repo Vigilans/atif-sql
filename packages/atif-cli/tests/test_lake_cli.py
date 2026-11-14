@@ -34,6 +34,7 @@ from loguru import logger
 from atif_cli import app as app_mod
 from atif_cli.app import materialize, query, status
 from atif_cli.converter_adapter import RealConverter
+from atif_cli.corpus import slim
 from atif_cli.errors import EXIT_CODES
 from atif_cli.lake import compact, rebuild, status as lake_status_cmd, verify
 from atif_corpus.application.materialize import Provenance, materialize as materialize_use_case
@@ -247,6 +248,59 @@ class TestMaterializeKeepsTheLakeCurrent:
         assert _json(capsys)["lake"]["pending"] == 1
         _query("SELECT 1 AS one", lake_corpus, capsys)
         assert any("1 session(s) of this corpus are pending a lake write" in w for w in warnings)
+
+
+class TestAFilteredSessionBesideUnfilteredOnes:
+    def test_the_lake_and_the_artifacts_serve_both(
+        self,
+        source_root: Path,
+        lake_corpus: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        script = tmp_path / "filter.sql"
+        script.write_text("CREATE TEMP TABLE directives (action VARCHAR);", encoding="utf-8")
+        report = _materialize(
+            source_root,
+            lake_corpus,
+            capsys,
+            filter_scripts=[str(script)],
+            sessions=SESSION_B,
+            force=True,
+        )
+        assert (report["materialized"], report["failed"]) == (1, 0)
+        assert (report["lake_synced"], report["lake_pending"]) == (1, 0)
+        assert not (lake_corpus / "sessions" / SESSION_B / "edges.jsonl.zst").exists()
+
+        def check_views() -> None:
+            for lake in (True, False):
+                messages = _query(
+                    "SELECT DISTINCT session_id FROM messages", lake_corpus, capsys, lake=lake
+                )
+                assert messages == [{"session_id": SESSION_A}], lake
+                for view in ("steps", "tool_calls", "tool_results"):
+                    rows = _query(
+                        f"SELECT DISTINCT session_id FROM {view} ORDER BY 1",
+                        lake_corpus,
+                        capsys,
+                        lake=lake,
+                    )
+                    assert [row["session_id"] for row in rows] == [SESSION_A, SESSION_B], view
+            verify(fmt="json")  # type: ignore[arg-type]
+            assert _json(capsys)["clean"] is True
+
+        check_views()
+        # A rebuild loads the session without edges just as the sync wrote it.
+        rebuild(corpus_root=[lake_corpus], fmt="json")  # type: ignore[arg-type]
+        capsys.readouterr()
+        check_views()
+
+        status(source_root=source_root, corpus_root=lake_corpus, fmt="json")  # type: ignore[arg-type]
+        block = _json(capsys)["lake"]
+        assert (block["sessions"], block["pending"]) == (2, 0)
+        slim(corpus_root=[lake_corpus], dry_run=False, fmt="json")  # type: ignore[arg-type]
+        (row,) = _json(capsys)["corpora"]
+        assert row["plain_files"] == 0
 
 
 class TestPoolAndSingleWorkerWriteTheSameLake:
