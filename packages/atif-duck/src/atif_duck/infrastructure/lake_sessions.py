@@ -148,22 +148,26 @@ class LakeSessionReader:
         return {str(sid): _utc(ts) for sid, ts in rows}
 
     def turns(self, session_ids: Sequence[str]) -> list[tuple[Any, ...]]:
-        """``(session_id, step_id, ts, source, message, is_sidechain, is_compact_summary, source_uuids)``.
+        """``(session_id, trajectory_id, step_id, ts, source, message, is_sidechain, is_compact_summary, source_uuids)``.
 
-        In session, then step order; ``source_uuids`` is JSON text.
+        In session, then trajectory (the root first), then step order;
+        ``source_uuids`` is JSON text.
         """
         return self._batch(TURNS_SQL, session_ids)
 
-    def error_steps(self, session_ids: Sequence[str]) -> set[tuple[str, int]]:
-        """``(session_id, step_id)`` of every step with an error result."""
-        return {(str(sid), int(step)) for sid, step in self._batch(ERROR_STEPS_SQL, session_ids)}
+    def error_steps(self, session_ids: Sequence[str]) -> set[tuple[str, str, int]]:
+        """``(session_id, trajectory_id, step_id)`` of every step with an error result."""
+        return {
+            (str(sid), str(trajectory), int(step))
+            for sid, trajectory, step in self._batch(ERROR_STEPS_SQL, session_ids)
+        }
 
     def tool_calls(self, session_ids: Sequence[str]) -> list[tuple[Any, ...]]:
-        """``(session_id, step_id, tool_name, tool_input)`` in source order (input as JSON text)."""
+        """``(session_id, trajectory_id, step_id, tool_name, tool_input)`` in source order (input as JSON text)."""
         return self._batch(TOOL_CALLS_SQL, session_ids)
 
     def tool_results(self, session_ids: Sequence[str]) -> list[tuple[Any, ...]]:
-        """``(session_id, step_id, tool_use_id, content, is_error)`` in source order (content as JSON text)."""
+        """``(session_id, trajectory_id, step_id, tool_use_id, content, is_error)`` in source order (content as JSON text)."""
         return self._batch(TOOL_RESULTS_SQL, session_ids)
 
     def edge_uuids(self, session_id: str) -> set[str]:

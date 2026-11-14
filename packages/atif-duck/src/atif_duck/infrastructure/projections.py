@@ -13,6 +13,11 @@ live here and each caller supplies only how it reaches a step's members:
   (``step_id``, ``timestamp``, ``message``, ...), so the same member is
   ``json_extract(<member>, '$')``.
 
+Both readers also supply, beside each step, the two columns of the
+trajectory that holds it (:data:`TRAJECTORY_KEY`, :data:`EMBEDDED`): a step
+of an embedded ``subagent_trajectories`` entry is read like a step of the
+root, keyed by its own trajectory.
+
 Everything below the member boundary is identical text: the message
 flattener, the coalesced booleans, the token casts, and the per-call and
 per-result projections (a ``call`` or ``res`` column always holds one whole
@@ -71,6 +76,15 @@ WHOLE_STEP: StepMemberAccess = StepMemberAccess(whole_step_column="step")
 #: The producer's path: one JSON column per member, named after the member.
 MEMBER_COLUMNS: StepMemberAccess = StepMemberAccess(whole_step_column=None)
 
+#: The source column naming the trajectory that holds a step: the embedded
+#: trajectory's ``trajectory_id``, and for the root its ``trajectory_id`` when
+#: it has one, else the session id. The views return it as ``trajectory_id``.
+TRAJECTORY_KEY: str = "trajectory_key"
+
+#: The source column saying whether that trajectory is embedded in another
+#: (true) or is the root (false). Both readers may hand it in as text.
+EMBEDDED: str = "embedded"
+
 #: Top-level step members the ``steps`` view reads. ``tool_calls`` and
 #: ``observation`` are deliberately absent: they feed the other two views.
 STEP_MEMBERS: tuple[str, ...] = (
@@ -101,11 +115,16 @@ def step_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
       Code, ``cache_write_input_tokens`` for Codex), so the column coalesces
       them: one name reaches SQL, and a cost query does not branch on which
       agent wrote the session.
-    * ``is_sidechain`` / ``is_compact_summary`` / ``source_uuids`` come from
-      ``step.extra`` per the CONTRACT enrichment pass.
+    * ``is_compact_summary`` / ``source_uuids`` come from ``step.extra`` per
+      the CONTRACT enrichment pass. ``is_sidechain`` is ``step.extra``'s, and
+      true on every step of an embedded trajectory.
     * ``agent_id`` names the subagent a sidechain step belongs to (NULL on the
-      main chain); ``images`` lists the attachments pasted into a user
-      message, each already moved to the corpus blob store.
+      main chain): ``step.extra``'s, else the embedded trajectory's id;
+      ``images`` lists the attachments pasted into a user message, each
+      already moved to the corpus blob store.
+    * ``trajectory_id`` is the :data:`TRAJECTORY_KEY` of the trajectory
+      holding the step, so ``(session_id, trajectory_id, step_id)`` names one
+      step.
     """
     message_parts = access.json("message", "[*].text")
     return (
@@ -122,7 +141,13 @@ def step_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
             ),
             "message",
         ),
-        (f"coalesce({access.json('extra', '.is_sidechain')}::BOOLEAN, false)", "is_sidechain"),
+        (
+            (
+                f"(coalesce({access.json('extra', '.is_sidechain')}::BOOLEAN, false) "
+                f"OR {EMBEDDED}::BOOLEAN)"
+            ),
+            "is_sidechain",
+        ),
         (
             f"coalesce({access.json('extra', '.is_compact_summary')}::BOOLEAN, false)",
             "is_compact_summary",
@@ -139,16 +164,24 @@ def step_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
         ),
         (f"{access.json('llm_call_count')}::BIGINT", "llm_call_count"),
         (access.json("extra", ".source_uuids"), "source_uuids"),
-        (access.string("extra", ".agent_id"), "agent_id"),
+        (
+            (
+                f"coalesce({access.string('extra', '.agent_id')}, "
+                f"CASE WHEN {EMBEDDED}::BOOLEAN THEN {TRAJECTORY_KEY} END)"
+            ),
+            "agent_id",
+        ),
         (access.json("extra", ".images"), "images"),
+        (TRAJECTORY_KEY, "trajectory_id"),
     )
 
 
 def step_key_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
-    """The ``(step_id, ts)`` pair every tool call and result row carries."""
+    """The ``(step_id, ts, trajectory_id)`` every tool call and result row carries."""
     return (
         (f"{access.json('step_id')}::BIGINT", "step_id"),
         (f"{access.string('timestamp')}::TIMESTAMP", "ts"),
+        (TRAJECTORY_KEY, "trajectory_id"),
     )
 
 
@@ -166,7 +199,8 @@ CALL_COLUMNS: tuple[tuple[str, str], ...] = (
 #: Per-result columns over a ``res`` JSON column holding one ATIF
 #: ``ObservationResult``. ``source_call_id`` is ATIF's join key back to the
 #: tool_calls array, surfaced under the SAME name ``tool_use_id`` that
-#: ``tool_calls`` exposes, so the two views join with ``USING (tool_use_id)``.
+#: ``tool_calls`` exposes, so the two views join with ``USING (session_id,
+#: trajectory_id, tool_use_id)``.
 #: The four typed columns after ``content`` come from ``extra``, where the
 #: converter's result-signals pass writes them: NULL means the transcript did
 #: not say, never "false" or "0" (see ``atif_converter.domain.result_signals``).
@@ -209,10 +243,12 @@ def render(columns: tuple[tuple[str, str], ...]) -> SqlFragment:
 
 __all__ = [
     "CALL_COLUMNS",
+    "EMBEDDED",
     "EVENT_COLUMNS",
     "MEMBER_COLUMNS",
     "RESULT_COLUMNS",
     "STEP_MEMBERS",
+    "TRAJECTORY_KEY",
     "WHOLE_STEP",
     "StepMemberAccess",
     "render",

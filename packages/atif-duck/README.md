@@ -66,8 +66,9 @@ it writes.
 
 ## Core surface
 
-- **Views**: `sessions`, `steps` (one row per ATIF step — the
-  messages-parity view), `messages` (uuid-keyed COMPAT view from
+- **Views**: `sessions`, `steps` (one row per ATIF step, the steps of
+  embedded subagent trajectories included and keyed by `trajectory_id` —
+  the messages-parity view), `messages` (uuid-keyed COMPAT view from
   `edges.jsonl`), `tool_calls`, `tool_results`, `todo_events`,
   `todo_state_current`, `subagent_spawns`, `subagent_steps`, `subagents`,
   `task_creations`, `task_updates`, `tasks_state_current`,

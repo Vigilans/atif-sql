@@ -115,7 +115,7 @@ sequenceDiagram
    memory (`:1564`).
 3. Registration builds the whole catalog on that connection in a fixed order (raw TEMP tables,
    base views, VSS, macros, the authorship macro and views, analytics views, analytics macros),
-   because each later stage binds against the earlier one at `CREATE` time (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2261-2282`).
+   because each later stage binds against the earlier one at `CREATE` time (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2291-2312`).
 4. When the DuckLake at `ATIF_SQL_LAKE_ROOT` exists, its recorded schema matches the running code,
    and it holds this corpus at this root, the raw relations are views over the lake tables instead,
    filtered to this corpus (`--all-corpora` drops the filter): the command loads the ducklake
@@ -133,12 +133,12 @@ sequenceDiagram
    (DuckDB's JSON reader decompresses a `.zst` file itself) into a TEMP TABLE over an explicit
    path list; the two sets are unioned
    into one raw view per surface. The parse cost of a `query` invocation is therefore O(sessions
-   without artifacts) per connection (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:637`).
+   without artifacts) per connection (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:664`).
 6. The edges and loss readers are semi-joined against the meta table, and the trajectory path list
    is built from it, so a session directory missing its `meta.json` contributes nothing rather than
-   a partial artifact set. This is the read-side half of flow 1's meta-last write ordering (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:748`).
-7. The VSS step `ATTACH`es the Lance store through the lance extension (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1720`) and reads the
-   store's stamped `model` and `dim` back out (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1767`) before creating any view over it; a store
+   a partial artifact set. This is the read-side half of flow 1's meta-last write ordering (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:775`).
+7. The VSS step `ATTACH`es the Lance store through the lance extension (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1749`) and reads the
+   store's stamped `model` and `dim` back out (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1796`) before creating any view over it; a store
    written by a different provider or width raises instead of binding, because vectors from
    different models live in incompatible spaces and would return numerically valid but meaningless
    cosine scores (`packages/atif-duck/src/atif_duck/domain/embedding_guard.py:78`).
@@ -201,9 +201,9 @@ sequenceDiagram
    reading ahead in the newest-first walk order, and every other session from its files. Without
    a lake, rows are read with stdlib `json` over `<corpus_root>/sessions/<id>/trajectory.json.zst` (or the plain file on an old-layout session);
    atif-analytics declares no DuckDB dependency, and the `forbidden` import contract puts atif-duck
-   out of its reach (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:238`, `pyproject.toml:618`).
+   out of its reach (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:242`, `pyproject.toml:618`).
    Either way the steps sit behind the reader's bounded memos
-   (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:317`), and the
+   (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:331`), and the
    reader labels each session's kind with the same rule `session_outcomes.kind` applies, so
    classify and conflicts can skip `turn_audit` and `one_shot_job` sessions.
 4. Before the first stage starts, one `RunBudget` is constructed from the per-run dollar ceiling

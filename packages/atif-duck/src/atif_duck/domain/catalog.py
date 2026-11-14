@@ -90,6 +90,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
         ("source_uuids", "JSON"),
         ("agent_id", "VARCHAR"),
         ("images", "JSON"),
+        ("trajectory_id", "VARCHAR"),
     ),
     "messages": (
         ("uuid", "VARCHAR"),
@@ -109,6 +110,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
         ("tool_name", "VARCHAR"),
         ("tool_use_id", "VARCHAR"),
         ("tool_input", "JSON"),
+        ("trajectory_id", "VARCHAR"),
     ),
     "tool_results": (
         ("session_id", "VARCHAR"),
@@ -120,6 +122,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
         ("exit_code", "BIGINT"),
         ("interrupted", "BOOLEAN"),
         ("images", "JSON"),
+        ("trajectory_id", "VARCHAR"),
     ),
     "todo_events": (
         ("session_id", "VARCHAR"),
@@ -217,6 +220,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
         ("source_uuids", "JSON"),
         ("agent_id", "VARCHAR"),
         ("images", "JSON"),
+        ("trajectory_id", "VARCHAR"),
     ),
     "subagents": (
         ("session_id", "VARCHAR"),
@@ -244,6 +248,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
         ("width", "BIGINT"),
         ("height", "BIGINT"),
         ("blob_path", "VARCHAR"),
+        ("trajectory_id", "VARCHAR"),
     ),
     "loss_reports": (
         ("session_id", "VARCHAR"),
@@ -494,16 +499,19 @@ DESCRIPTIONS: dict[str, str] = {
         "and for sessions without one. corpus names the corpus the session belongs "
         "to; `query --all-corpora` spans every corpus in the lake."
     ),
-    "steps": "One row per ATIF step (turn): flattened message text plus token metrics.",
+    "steps": (
+        "One row per ATIF step (turn), subagent trajectories' included: flattened message "
+        "text plus token metrics. A step is (session_id, trajectory_id, step_id)."
+    ),
     "messages": "Raw-record identity from edges.jsonl: uuid, parent_uuid, type, timestamp.",
     "tool_calls": "One row per tool call: tool_name plus JSON tool_input.",
     "tool_results": (
-        "One row per tool result; join tool_calls USING (tool_use_id). is_error is "
-        "the flag the agent recorded, exit_code the process exit code where the "
-        "transcript states one (Claude Code states it only for a failed Bash call), "
-        "interrupted is Bash's interrupted flag; NULL means not stated. Inline images "
-        "are replaced in content by [image sha256:<hash> <media> <n> bytes] and "
-        "listed in images."
+        "One row per tool result; join tool_calls USING (session_id, trajectory_id, "
+        "tool_use_id). is_error is the flag the agent recorded, exit_code the process "
+        "exit code where the transcript states one (Claude Code states it only for a "
+        "failed Bash call), interrupted is Bash's interrupted flag; NULL means not "
+        "stated. Inline images are replaced in content by [image sha256:<hash> <media> "
+        "<n> bytes] and listed in images."
     ),
     "todo_events": "Every TodoWrite snapshot item with status and snapshot index.",
     "todo_state_current": "Latest todo status per (session_id, subject).",
@@ -513,17 +521,18 @@ DESCRIPTIONS: dict[str, str] = {
     "tasks_state_current": "Latest status per persistent task, recovered from tool results.",
     "skill_invocations": "Skill tool calls and /slash-command invocations, unioned.",
     "skill_usage": "skill_invocations plus derived skill_name, plugin, is_builtin.",
-    "subagent_steps": "Only the inlined subagent (sidechain) steps; agent_id says whose.",
+    "subagent_steps": "Only the subagent (sidechain) steps; agent_id says whose.",
     "subagents": (
         "One row per subagent a session spawned: its type, description, and the "
-        "Task/Agent call that spawned it (parent_tool_call_id joins tool_calls."
-        "tool_use_id; link_source says whether the agent-*.meta.json sidecar or the "
-        "call's own result supplied it), plus the span and count of its steps."
+        "Task/Agent call that spawned it (parent_tool_call_id joins tool_calls on "
+        "(session_id, tool_use_id); link_source says whether the agent-*.meta.json "
+        "sidecar or the call's own result supplied it), plus the span and count of its steps."
     ),
     "images": (
         "One row per image lifted out of a tool result or a user message into the "
         "corpus blob store: sha256, media type, size, pixel dimensions, and "
-        "blob_path relative to the corpus root."
+        "blob_path relative to the corpus root. (session_id, trajectory_id, step_id) "
+        "names the step it came from."
     ),
     "loss_reports": (
         "Per-session conversion loss accounting from atif-converter: records "

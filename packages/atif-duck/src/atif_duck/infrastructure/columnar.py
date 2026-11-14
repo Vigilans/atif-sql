@@ -31,7 +31,8 @@ typed rows as Arrow tables measured +230 MB, both roughly the size of the
 text they had processed. Fetching each batch's typed rows as Python objects
 (glibc-allocated, freed on the spot) and appending them to the parquet file
 as one row group each measured +108 MB with 1 MiB batches. Row order is the
-trajectory's array order by construction.
+root's step array order, then each embedded trajectory's, depth first, by
+construction.
 
 Why DuckDB still does the typing: the JSON columns (``tool_input``,
 ``content``, ``source_uuids``) must be byte-identical to what the JSON-path
@@ -82,10 +83,12 @@ from atif_duck.domain.session_id import session_id_rejection
 from atif_duck.domain.sql_literal import SqlFragment, sql_literal
 from atif_duck.infrastructure.projections import (
     CALL_COLUMNS,
+    EMBEDDED,
     EVENT_COLUMNS,
     MEMBER_COLUMNS,
     RESULT_COLUMNS,
     STEP_MEMBERS,
+    TRAJECTORY_KEY,
     render,
     step_columns,
     step_key_columns,
@@ -233,38 +236,68 @@ def _member(obj: Mapping[str, Any], key: str) -> str | None:
     return _dumps(obj[key]) if key in obj else None
 
 
-def _step_rows(session_id: str, steps: Iterable[Any]) -> Iterator[tuple[str | None, ...]]:
-    for step in steps:
-        if not isinstance(step, Mapping):
-            continue
-        yield (session_id, *(_member(step, key) for key in STEP_MEMBERS))
+#: One step with the trajectory that holds it: ``(trajectory key, embedded, step)``.
+_OwnedStep = tuple[str | None, str, Mapping[str, Any]]
 
 
-def _call_rows(session_id: str, steps: Iterable[Any]) -> Iterator[tuple[str | None, ...]]:
+def _owned_steps(trajectory: Mapping[str, Any], session_id: str) -> Iterator[_OwnedStep]:
+    """Every step of ``trajectory`` and of the trajectories embedded below it.
+
+    Each comes with the two context columns the projections read
+    (:data:`~atif_duck.infrastructure.projections.TRAJECTORY_KEY` and
+    :data:`~atif_duck.infrastructure.projections.EMBEDDED`): the root's key is
+    its ``trajectory_id``, else ``session_id``, and an embedded trajectory's is
+    its own ``trajectory_id``.
+    """
+    root_id = trajectory.get("trajectory_id")
+    yield from _trajectory_steps(
+        trajectory, root_id if isinstance(root_id, str) else session_id, "false"
+    )
+
+
+def _trajectory_steps(
+    node: Mapping[str, Any], key: str | None, embedded: str
+) -> Iterator[_OwnedStep]:
+    """``node``'s steps in array order, then each embedded trajectory's, depth first."""
+    steps = node.get("steps")
+    for step in steps if isinstance(steps, list) else []:
+        if isinstance(step, Mapping):
+            yield key, embedded, step
+    children = node.get("subagent_trajectories")
+    for child in children if isinstance(children, list) else []:
+        if isinstance(child, Mapping):
+            child_id = child.get("trajectory_id")
+            yield from _trajectory_steps(
+                child, child_id if isinstance(child_id, str) else None, "true"
+            )
+
+
+def _step_rows(session_id: str, steps: Iterable[_OwnedStep]) -> Iterator[tuple[str | None, ...]]:
+    for key, embedded, step in steps:
+        yield (session_id, key, embedded, *(_member(step, member) for member in STEP_MEMBERS))
+
+
+def _call_rows(session_id: str, steps: Iterable[_OwnedStep]) -> Iterator[tuple[str | None, ...]]:
     # Mirrors ``WHERE json_extract(step, '$.tool_calls') IS NOT NULL`` then
     # ``UNNEST(json_extract(step, '$.tool_calls[*]'))``: only a list yields rows.
-    for step in steps:
-        if not isinstance(step, Mapping):
-            continue
+    for key, embedded, step in steps:
         calls = step.get("tool_calls")
         if not isinstance(calls, list):
             continue
         step_id, ts = _member(step, "step_id"), _member(step, "timestamp")
         for call in calls:
-            yield (session_id, step_id, ts, _dumps(call))
+            yield (session_id, key, embedded, step_id, ts, _dumps(call))
 
 
-def _result_rows(session_id: str, steps: Iterable[Any]) -> Iterator[tuple[str | None, ...]]:
-    for step in steps:
-        if not isinstance(step, Mapping):
-            continue
+def _result_rows(session_id: str, steps: Iterable[_OwnedStep]) -> Iterator[tuple[str | None, ...]]:
+    for key, embedded, step in steps:
         observation = step.get("observation")
         results = observation.get("results") if isinstance(observation, Mapping) else None
         if not isinstance(results, list):
             continue
         step_id, ts = _member(step, "step_id"), _member(step, "timestamp")
         for result in results:
-            yield (session_id, step_id, ts, _dumps(result))
+            yield (session_id, key, embedded, step_id, ts, _dumps(result))
 
 
 def _event_rows(session_id: str, events_jsonl: Path | None) -> Iterator[tuple[str | None, ...]]:
@@ -531,8 +564,6 @@ class ColumnarArtifactProducer:
         *,
         durable: bool,
     ) -> None:
-        steps = trajectory.get("steps")
-        step_list: list[Any] = steps if isinstance(steps, list) else []
         session_literal = sql_literal(session_id)
 
         session_schema = _string_schema(name for name, _ in SESSION_COLUMNS[1:])
@@ -546,10 +577,11 @@ class ColumnarArtifactProducer:
             durable=durable,
         )
 
-        steps_schema = _string_schema(("session_id", *STEP_MEMBERS))
+        context = ("session_id", TRAJECTORY_KEY, EMBEDDED)
+        steps_schema = _string_schema((*context, *STEP_MEMBERS))
         ColumnarArtifactProducer._write(
             con,
-            _batches(_step_rows(session_id, step_list), steps_schema),
+            _batches(_step_rows(session_id, _owned_steps(trajectory, session_id)), steps_schema),
             SqlFragment(
                 f"SELECT session_id, {render(step_columns(MEMBER_COLUMNS))} FROM {_SOURCE}"  # noqa: S608  # nosec B608 - projections constants
             ),
@@ -558,10 +590,10 @@ class ColumnarArtifactProducer:
             durable=durable,
         )
 
-        calls_schema = _string_schema(("session_id", "step_id", "timestamp", "call"))
+        calls_schema = _string_schema((*context, "step_id", "timestamp", "call"))
         ColumnarArtifactProducer._write(
             con,
-            _batches(_call_rows(session_id, step_list), calls_schema),
+            _batches(_call_rows(session_id, _owned_steps(trajectory, session_id)), calls_schema),
             SqlFragment(
                 "SELECT session_id, "  # noqa: S608  # nosec B608 - projections constants only
                 f"{render(step_key_columns(MEMBER_COLUMNS))}, {render(CALL_COLUMNS)} FROM {_SOURCE}"
@@ -571,10 +603,12 @@ class ColumnarArtifactProducer:
             durable=durable,
         )
 
-        results_schema = _string_schema(("session_id", "step_id", "timestamp", "res"))
+        results_schema = _string_schema((*context, "step_id", "timestamp", "res"))
         ColumnarArtifactProducer._write(
             con,
-            _batches(_result_rows(session_id, step_list), results_schema),
+            _batches(
+                _result_rows(session_id, _owned_steps(trajectory, session_id)), results_schema
+            ),
             SqlFragment(
                 "SELECT session_id, "  # noqa: S608  # nosec B608 - projections constants only
                 f"{render(step_key_columns(MEMBER_COLUMNS))}, {render(RESULT_COLUMNS)} FROM {_SOURCE}"

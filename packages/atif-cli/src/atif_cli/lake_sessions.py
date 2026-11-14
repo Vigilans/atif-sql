@@ -200,9 +200,17 @@ class LakeSessionSource:
     def _lake_turns(self, in_lake: list[str]) -> dict[str, list[StepEvent]]:
         errors = self._reader.error_steps(in_lake)
         grouped: dict[str, list[StepEvent]] = defaultdict(list)
-        for sid, step_id, ts, source, message, sidechain, compact, uuids in self._reader.turns(
-            in_lake
-        ):
+        for (
+            sid,
+            trajectory_id,
+            step_id,
+            ts,
+            source,
+            message,
+            sidechain,
+            compact,
+            uuids,
+        ) in self._reader.turns(in_lake):
             grouped[str(sid)].append(
                 step_event(
                     ts=ts,
@@ -211,7 +219,7 @@ class LakeSessionSource:
                     source_uuids=_json(uuids),
                     is_sidechain=bool(sidechain),
                     is_compact_summary=bool(compact),
-                    has_error_result=(str(sid), int(step_id)) in errors,
+                    has_error_result=(str(sid), str(trajectory_id), int(step_id)) in errors,
                 )
             )
         return {sid: grouped.get(sid, []) for sid in in_lake}
@@ -229,17 +237,32 @@ class LakeSessionSource:
         return out
 
     def _lake_steps(self, in_lake: list[str]) -> dict[str, list[StepEvent]]:
-        calls: dict[tuple[str, int], list[tuple[str | None, object]]] = defaultdict(list)
-        for sid, step_id, name, tool_input in self._reader.tool_calls(in_lake):
-            calls[(str(sid), int(step_id))].append((name, _json(tool_input)))
-        results: dict[tuple[str, int], list[tuple[str | None, object, bool]]] = defaultdict(list)
-        for sid, step_id, call_id, content, is_error in self._reader.tool_results(in_lake):
-            results[(str(sid), int(step_id))].append((call_id, _json(content), is_error is True))
-        grouped: dict[str, list[StepEvent]] = defaultdict(list)
-        for sid, step_id, ts, source, message, sidechain, compact, uuids in self._reader.turns(
+        # A step id names one step only within its trajectory.
+        calls: dict[tuple[str, str, int], list[tuple[str | None, object]]] = defaultdict(list)
+        for sid, trajectory_id, step_id, name, tool_input in self._reader.tool_calls(in_lake):
+            calls[(str(sid), str(trajectory_id), int(step_id))].append((name, _json(tool_input)))
+        results: dict[tuple[str, str, int], list[tuple[str | None, object, bool]]] = defaultdict(
+            list
+        )
+        for sid, trajectory_id, step_id, call_id, content, is_error in self._reader.tool_results(
             in_lake
         ):
-            key = (str(sid), int(step_id))
+            results[(str(sid), str(trajectory_id), int(step_id))].append(
+                (call_id, _json(content), is_error is True)
+            )
+        grouped: dict[str, list[StepEvent]] = defaultdict(list)
+        for (
+            sid,
+            trajectory_id,
+            step_id,
+            ts,
+            source,
+            message,
+            sidechain,
+            compact,
+            uuids,
+        ) in self._reader.turns(in_lake):
+            key = (str(sid), str(trajectory_id), int(step_id))
             grouped[key[0]].append(
                 step_event(
                     ts=ts,

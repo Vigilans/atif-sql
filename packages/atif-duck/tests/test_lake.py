@@ -32,6 +32,7 @@ from test_columnar import add_columnar
 
 from atif_duck.domain import lake as lake_domain
 from atif_duck.domain.catalog import VIEW_SCHEMA
+from atif_duck.domain.columnar import COLUMNAR_SCHEMA_VERSION
 from atif_duck.domain.lake import (
     LAKE_ALIAS,
     LAKE_SCHEMA_VERSION,
@@ -64,7 +65,7 @@ from atif_duck.infrastructure.registry import register, register_raw
 #: LAKE_SCHEMA_VERSION bumped, then re-pin: a lake recording another digest is
 #: rebuilt by the next materialize, so the digest alone already forces the
 #: rebuild; the version is for a change the definitions do not show.
-PINNED_SCHEMA = (1, "a893a853bb249ce2cd488c0de2604c9bd246ea11f16009297fcfa747fbf3fb60")
+PINNED_SCHEMA = (1, "60ad221b107cd923071984c2afb7fbd13456caa090678b827c860e9cdd04456f")
 
 
 def _corpus(root: Path) -> LakeCorpus:
@@ -230,7 +231,7 @@ class TestLoad:
         assert {t: r for t, r in col_rows.items() if t != "session_meta"} == {
             t: r for t, r in json_rows.items() if t != "session_meta"
         }
-        assert all(row[-4] == 2 for row in col_rows["session_meta"])
+        assert all(row[-4] == COLUMNAR_SCHEMA_VERSION for row in col_rows["session_meta"])
         assert all(row[-4] is None for row in json_rows["session_meta"])
 
     def test_a_filtered_registration_holds_only_the_named_sessions(self, tmp_path: Path) -> None:

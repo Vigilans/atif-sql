@@ -67,7 +67,7 @@ is the one member permitted to import a sibling: atif-models and nothing else (`
 
 `register(con, corpus_root)` binds a DuckDB connection to a contract-shaped corpus tree and exposes the
 core views and macros (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`,
-`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2185`). Those names are not introspected
+`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2215`). Those names are not introspected
 at runtime: a static catalog answers `atif-sql schema` in under 50 ms with no DuckDB bind, and two
 drift tests assert it column-for-column against `DESCRIBE` and signature-for-signature against the
 DDL (`packages/atif-duck/src/atif_duck/domain/catalog.py:3`). The analytics views and
@@ -78,8 +78,8 @@ macros register separately, each only when its backing parquet is populated, bec
 it carries no layers contract (`pyproject.toml:557`).
 
 - `packages/atif-duck/src/atif_duck/infrastructure/registry.py`: the raw readers
-  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:637`), most of the core views
-  (`:1024`) and macros (`:1946`), and the Lance attach path (`:1642`).
+  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:664`), most of the core views
+  (`:1051`) and macros (`:1975`), and the Lance attach path (`:1671`).
 - `packages/atif-duck/src/atif_duck/domain/raw_readers.py`: the raw relation names and
   column shapes the registry binds and the lake stores, so neither declares them twice.
 - `packages/atif-duck/src/atif_duck/domain/lake.py`: the lake's tables, partition specs and
@@ -101,8 +101,8 @@ it carries no layers contract (`pyproject.toml:557`).
   `ATIF_SQL_`-prefixed lake root, corpus base, batch sizes, stage worker count, lock timeout and
   snapshot expiry.
 - `packages/atif-duck/src/atif_duck/domain/catalog.py`: `VIEW_NAMES`
-  (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`), `MACRO_SIGNATURES` (`:343`), the
-  analytics catalogs (`:370-462`), and one `DESCRIPTIONS` entry per object (`:487`).
+  (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`), `MACRO_SIGNATURES` (`:348`), the
+  analytics catalogs (`:375-467`), and one `DESCRIPTIONS` entry per object (`:492`).
 - `packages/atif-duck/src/atif_duck/infrastructure/analytics.py`: the v2 views and macros
   over the analytics parquet outputs, gated on file presence
   (`packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119`).
@@ -206,7 +206,7 @@ per-session reader otherwise.
   `embed_query` the search command calls (`:286`).
 - `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py`: reads the
   contract corpus layout with its own DuckDB connection, since importing atif-duck is forbidden
-  (`packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:229`).
+  (`packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:241`).
 - `packages/atif-embed/src/atif_embed/domain/ports.py`: the port Protocols:
   `EmbeddingProvider` (`packages/atif-embed/src/atif_embed/domain/ports.py:37`), `VectorStorePort`
   (`:65`), `TextRowsPort` (`:89`), and `LakeStepsPort` (`:198`).

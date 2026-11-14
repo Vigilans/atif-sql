@@ -112,8 +112,12 @@ def _flatten_message(message: Any) -> str:
     return ""
 
 
-def parse_trajectory_step(step: dict[str, Any]) -> StepEvent:
-    """Project one raw ``trajectory.json`` step dict into a :class:`StepEvent`."""
+def parse_trajectory_step(step: dict[str, Any], *, embedded: bool = False) -> StepEvent:
+    """Project one raw ``trajectory.json`` step dict into a :class:`StepEvent`.
+
+    A step of an embedded ``subagent_trajectories`` entry (``embedded``) is a
+    sidechain step, as the ``steps`` view reads it.
+    """
     extra = step.get("extra") or {}
     calls: list[tuple[str | None, object]] = [
         (call.get("function_name"), call.get("arguments"))
@@ -134,7 +138,7 @@ def parse_trajectory_step(step: dict[str, Any]) -> StepEvent:
         source=str(step.get("source") or ""),
         text=_flatten_message(step.get("message")),
         source_uuids=extra.get("source_uuids"),
-        is_sidechain=bool(extra.get("is_sidechain") or False),
+        is_sidechain=embedded or bool(extra.get("is_sidechain") or False),
         is_compact_summary=bool(extra.get("is_compact_summary") or False),
         tool_calls=calls,
         tool_results=results,
@@ -243,7 +247,17 @@ def read_trajectory_steps(session_dir: Path) -> list[StepEvent]:
     except (OSError, ValueError) as exc:
         logger.warning("corpus_reader: unreadable trajectory for {} ({})", session_dir.name, exc)
         return []
-    return [parse_trajectory_step(s) for s in (doc.get("steps") or []) if isinstance(s, dict)]
+    return list(_trajectory_steps(doc, embedded=False)) if isinstance(doc, dict) else []
+
+
+def _trajectory_steps(trajectory: dict[str, Any], *, embedded: bool) -> Iterator[StepEvent]:
+    """``trajectory``'s steps in array order, then each embedded trajectory's, depth first."""
+    for step in trajectory.get("steps") or []:
+        if isinstance(step, dict):
+            yield parse_trajectory_step(step, embedded=embedded)
+    for child in trajectory.get("subagent_trajectories") or []:
+        if isinstance(child, dict):
+            yield from _trajectory_steps(child, embedded=True)
 
 
 def read_edges_uuids(session_dir: Path) -> set[str] | None:

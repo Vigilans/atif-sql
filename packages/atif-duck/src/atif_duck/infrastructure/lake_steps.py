@@ -55,8 +55,11 @@ STEPS_TABLE: str = "steps"
 _PRIMARY_UUID: str = "json_extract_string(source_uuids, '$[0]')"
 
 #: One corpus's steps with the key computed once (param: corpus).
+#: ``trajectory_order`` sorts a session's trajectories by their first row, so
+#: the root's steps come before each embedded trajectory's.
 _KEYED_STEPS: str = (
-    f"SELECT {SESSION_KEY} AS session_id, step_id, {_PRIMARY_UUID} AS uuid, message "  # noqa: S608  # nosec B608 - module constants only
+    f"SELECT {SESSION_KEY} AS session_id, step_id, {_PRIMARY_UUID} AS uuid, message, "  # noqa: S608  # nosec B608 - module constants only
+    f"min(rowid) OVER (PARTITION BY {SESSION_KEY}, trajectory_id) AS trajectory_order "
     f"FROM {LAKE_ALIAS}.{STEPS_TABLE} WHERE {CORPUS_COLUMN} = ?"
 )
 
@@ -66,7 +69,7 @@ _QUALIFIES: str = "uuid IS NOT NULL AND message IS NOT NULL AND length(message) 
 #: Every qualifying row of one corpus, in corpus order (params: corpus, min chars).
 STEP_TEXTS_SQL: SqlFragment = SqlFragment(
     f"SELECT uuid, message FROM ({_KEYED_STEPS}) WHERE {_QUALIFIES} "  # noqa: S608  # nosec B608 - module constants only
-    "ORDER BY session_id, step_id"
+    "ORDER BY session_id, trajectory_order, step_id"
 )
 
 #: The qualifying rows of every uuid a step row inserted or deleted after a
@@ -77,7 +80,7 @@ CHANGED_STEP_TEXTS_SQL: SqlFragment = SqlFragment(
     f"FROM ducklake_table_changes({sql_literal(LAKE_ALIAS)}, 'main', {sql_literal(STEPS_TABLE)}, ?, ?) "
     f"WHERE {CORPUS_COLUMN} = ?) "
     f"SELECT uuid, message FROM ({_KEYED_STEPS}) WHERE {_QUALIFIES} "
-    "AND uuid IN (SELECT uuid FROM changed) ORDER BY session_id, step_id"
+    "AND uuid IN (SELECT uuid FROM changed) ORDER BY session_id, trajectory_order, step_id"
 )
 
 #: Every step's primary uuid in one corpus, text or none (param: corpus).

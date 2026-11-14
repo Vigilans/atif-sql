@@ -139,8 +139,8 @@ intra-module use site is named after the table.
 | `UUID_HEADER_ESCAPE` | `packages/atif-analytics/src/atif_analytics/domain/transcript.py:79` | 2026-08-28 |
 | `main_chain` | `packages/atif-analytics/src/atif_analytics/domain/transcript.py:242` | 2026-08-28 |
 | `parse_trajectory_step` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:115` | 2026-09-28 |
-| `read_trajectory_steps` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:238` | 2026-09-28 |
-| `read_edges_uuids` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:249` | 2026-09-28 |
+| `read_trajectory_steps` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:242` | 2026-09-28 |
+| `read_edges_uuids` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:263` | 2026-09-28 |
 | `is_sharded_dir` | `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:35` | 2026-08-28 |
 | `write_part` | `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:90` | 2026-08-28 |
 | `read_all` | `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:114` | 2026-08-28 |
@@ -189,12 +189,12 @@ intra-module use site is named after the table.
 | `CompactReport` | `packages/atif-duck/src/atif_duck/infrastructure/lake.py:1407` | 2026-09-28 |
 | `DEFAULT_READER_MEMORY_BYTES` | `packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:58` | 2026-09-28 |
 | `STEPS_TABLE` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:52` | 2026-09-28 |
-| `STEP_TEXTS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:67` | 2026-09-28 |
-| `CHANGED_STEP_TEXTS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:75` | 2026-09-28 |
-| `STEP_KEYS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:84` | 2026-09-28 |
-| `REGISTERED_AT_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:90` | 2026-09-28 |
-| `SNAPSHOT_RANGE_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:95` | 2026-09-28 |
-| `StepMemberAccess` | `packages/atif-duck/src/atif_duck/infrastructure/projections.py:35` | 2026-09-12 |
+| `STEP_TEXTS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:70` | 2026-09-28 |
+| `CHANGED_STEP_TEXTS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:78` | 2026-09-28 |
+| `STEP_KEYS_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:87` | 2026-09-28 |
+| `REGISTERED_AT_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:93` | 2026-09-28 |
+| `SNAPSHOT_RANGE_SQL` | `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py:98` | 2026-09-28 |
+| `StepMemberAccess` | `packages/atif-duck/src/atif_duck/infrastructure/projections.py:40` | 2026-09-12 |
 | `is_compressed` | `packages/atif-duck/src/atif_duck/infrastructure/stored_artifacts.py:41` | 2026-09-28 |
 | `SqlFragment` | `packages/atif-embed/src/atif_embed/domain/sql_literal.py:30` | 2026-09-12 |
 | `TEXT_ONLY_CONFIG` | `packages/atif-embed/src/atif_embed/infrastructure/gemma_local.py:60` | 2026-10-09 |
@@ -236,9 +236,9 @@ numbers follow it as plain numbers.
   `main_chain` in
   `packages/atif-duck/tests/test_result_views.py:86` is a local variable.
 - `parse_trajectory_step` is called at
-  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:246`,
-  inside `read_trajectory_steps`, which a reader method calls at `:303`;
-  `read_edges_uuids` is called at `:311`.
+  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:257`,
+  inside the walk `read_trajectory_steps` runs, which a reader method calls at `:317`;
+  `read_edges_uuids` is called at `:325`.
 - `is_sharded_dir` is called at
   `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:97`;
   the module functions `write_part` and `read_all` are what the `ParquetCache`
@@ -301,13 +301,13 @@ numbers follow it as plain numbers.
 - `DEFAULT_READER_MEMORY_BYTES` is the reader's fallback memory limit at
   `packages/atif-duck/src/atif_duck/infrastructure/lake_sessions.py:96`.
 - In `packages/atif-duck/src/atif_duck/infrastructure/lake_steps.py`,
-  `STEPS_TABLE` is interpolated at `:60`; `STEP_TEXTS_SQL`,
+  `STEPS_TABLE` is interpolated at `:63`; `STEP_TEXTS_SQL`,
   `CHANGED_STEP_TEXTS_SQL`, `STEP_KEYS_SQL`, `REGISTERED_AT_SQL`, and
-  `SNAPSHOT_RANGE_SQL` are executed at `:128`, `:133`, `:149`, `:200`, and
-  `:201`.
+  `SNAPSHOT_RANGE_SQL` are executed at `:131`, `:136`, `:152`, `:203`, and
+  `:204`.
 - `StepMemberAccess` is constructed at
-  `packages/atif-duck/src/atif_duck/infrastructure/projections.py:69` and
-  annotates `:88`.
+  `packages/atif-duck/src/atif_duck/infrastructure/projections.py:74` and
+  annotates `:102`.
 - `is_compressed` is called at
   `packages/atif-duck/src/atif_duck/infrastructure/stored_artifacts.py:58`.
 - `SqlFragment` is the return type of `sql_literal` at

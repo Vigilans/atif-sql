@@ -50,11 +50,11 @@ The sections below aren't ranked; "Other contracts" at the end collects the smal
 
 **Consumers:**
 
-- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:736-740`: builds the `meta.json`
+- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:763-767`: builds the `meta.json`
   glob (and, further down, each session's stored-file list) and binds it as the one parameter of
   its `read_json` readers, spelling the names from its own constants at
   `packages/atif-duck/src/atif_duck/domain/artifacts.py:28-36`.
-- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:166-184`: gates on
+- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:178-196`: gates on
   `meta.json` and opens each stored trajectory with its own DuckDB connection.
 - `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:72-74`: declares
   `TRAJECTORY_FILENAME` / `EDGES_FILENAME` / `META_FILENAME` again as its own constants.
@@ -94,7 +94,7 @@ passes no artifact producer (`packages/atif-cli/src/atif_cli/app.py:995-997`), a
 runs atif-duck's `ColumnarArtifactProducer` to stage each session it loads
 (`packages/atif-duck/src/atif_duck/infrastructure/lake.py:645`). atif-duck reads a session's own
 parquet files only when `meta.columnar_schema` matches its version and all five are present and
-non-empty (`packages/atif-duck/src/atif_duck/infrastructure/columnar.py:116`), and falls back to
+non-empty (`packages/atif-duck/src/atif_duck/infrastructure/columnar.py:119`), and falls back to
 the trajectory per session otherwise. The names and the schema version live in
 `packages/atif-duck/src/atif_duck/domain/columnar.py`; atif-corpus never learns them, and it merges
 whatever keys an `ArtifactProducer` returns into `meta.json`.
@@ -102,9 +102,9 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
 **Assumptions consumers make:**
 
 - **`meta.json` present means the session dir is complete.** Every reader implements the same
-  torn-set gate independently: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:742-748` restricts the edges and loss readers to
-  dirs where `v_raw_meta` has a row (the trajectory list is built from `v_raw_meta` too); `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:175-180` skips a dir with no `meta.json`;
-  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:178-191` does the same and logs a warning. Nothing in the file layout expresses
+  torn-set gate independently: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:769-775` restricts the edges and loss readers to
+  dirs where `v_raw_meta` has a row (the trajectory list is built from `v_raw_meta` too); `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:187-192` skips a dir with no `meta.json`;
+  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:182-195` does the same and logs a warning. Nothing in the file layout expresses
   this: it's a write-ORDER promise made at
   `packages/atif-corpus/src/atif_corpus/application/materialize.py:610-613`.
 - **No reader ever sees a partially written directory**, because the writer stages every
@@ -113,11 +113,11 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   can't reach it (`packages/atif-corpus/src/atif_corpus/domain/layout.py:86-91`). A `SIGKILL` or power loss inside the swap leaves the session missing rather than torn.
 - **`trajectory.json` is ONE JSON document, `edges.jsonl` is newline-delimited.** atif-duck encodes
   that split in its reader choice at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:25-28`, and in its read bounds: the bound for a
-  document follows the largest file (`:246`), and the bound for `edges.jsonl` follows its longest line (`:269`). atif-embed re-derives the split at
+  document follows the largest file (`:248`), and the bound for `edges.jsonl` follows its longest line (`:271`). atif-embed re-derives the split at
   `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:99`.
 - **A single trajectory document can be enormous.** Both DuckDB readers allow a 1 GiB
   `maximum_object_size`, and their measured ceilings disagree: atif-duck caps a bound it sizes from the largest file at 1 GiB, citing 436 MB
-  observed (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:217-220`), while atif-embed sizes each batch's bound from its largest document under the same 1 GiB cap, citing 85 MB (`packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:56-59`). Same ceiling, two independent
+  observed (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:219-222`), while atif-embed sizes each batch's bound from its largest document under the same 1 GiB cap, citing 85 MB (`packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:56-59`). Same ceiling, two independent
   justifications.
 - **`source_mtime_ns` and every `watermark.json` value are epoch NANOSECONDS** from
   `os.stat().st_mtime_ns` (unit stated in the identifier and again at
@@ -127,7 +127,7 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   `VARCHAR` (`packages/atif-duck/src/atif_duck/domain/raw_readers.py:105`); the CLI supplies it (`packages/atif-cli/src/atif_cli/app.py:983`).
 
 **The hand-written contract and the manifests split the job.** Its CLI heading
-(`docs/CONTRACT.md:349`) names atif-cli the package that composes the others. The atif-cli
+(`docs/CONTRACT.md:357`) names atif-cli the package that composes the others. The atif-cli
 manifest declares five siblings (`packages/atif-cli/pyproject.toml:32-36`) and the CLI imports
 every one of them; atif-models reaches it through atif-analytics, which imports atif-models
 (`packages/atif-analytics/pyproject.toml:23`) as the import-linter contracts permit.
@@ -214,13 +214,13 @@ MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
   `packages/atif-duck/tests/test_examples.py:227`.
 - **The catalog is answerable without a corpus.** `packages/atif-cli/src/atif_cli/app.py:2478-2480` states the sub-50 ms,
   no-DuckDB-bind guarantee the `schema` command rests on; a runtime `DESCRIBE` would violate it.
-- **The raw readers are deliberately NOT in `VIEW_NAMES`** (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:141-142`), so a
+- **The raw readers are deliberately NOT in `VIEW_NAMES`** (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:143-144`), so a
   consumer enumerating `VIEW_NAMES` does not see `v_raw_trajectories` and friends.
 
 **Drift risk:** adding a view or macro without a `DESCRIPTIONS` entry, an `ARG_EXEMPLARS` entry for
 each new parameter name, or `TABLE_MACRO_NAMES` membership fails CI loudly: the risk is inverted
 here, and the real exposure is a *type* that only the fixture corpus produces. Mitigation:
-`VIEW_SCHEMA["message_embeddings"]` at `packages/atif-duck/src/atif_duck/domain/catalog.py:281-287` hardcodes `FLOAT[1024]`, so run the
+`VIEW_SCHEMA["message_embeddings"]` at `packages/atif-duck/src/atif_duck/domain/catalog.py:286-292` hardcodes `FLOAT[1024]`, so run the
 drift test against a store built at a non-default `output_dimension` before changing that setting.
 
 ## The import-linter architecture contracts
@@ -427,11 +427,11 @@ a mismatched adapter fails the typecheck gate.
 
 - `packages/atif-duck/src/atif_duck/domain/raw_readers.py:62-72`: `EDGE_COLUMNS` (the registry's
   `_EDGE_COLUMNS`), the same keys in the same order with DuckDB types.
-- `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:249-268`: reads the
+- `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:263-282`: reads the
   `uuid` field for the conflicts pipeline's returned-uuid validity guard.
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:678-681`: writes the lines and
   owns line termination.
-- `packages/atif-duck/src/atif_duck/domain/catalog.py:94`: the `messages` view publishes this
+- `packages/atif-duck/src/atif_duck/domain/catalog.py:95`: the `messages` view publishes this
   surface, every key but `tool_use_ids`, plus `session_id`.
 
 **Shape:**
@@ -489,7 +489,7 @@ editing `packages/atif-duck/src/atif_duck/domain/raw_readers.py:62-72` in the sa
   picks between them.
 - `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:597`: the `VectorStorePort`
   adapter.
-- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:229`: the `TextRowsPort`
+- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:241`: the `TextRowsPort`
   adapter over the corpus files; `packages/atif-embed/src/atif_embed/infrastructure/lake_text_rows.py:89`
   wraps it with a lake-backed reader and a watermark.
 - `packages/atif-embed/tests/embed_fixtures.py:203`: the deterministic `EmbeddingProvider` double.
@@ -666,17 +666,17 @@ the contract, not as a redundant smoke test), and
 ## Token semantics and the pricing table
 
 **Producer:** `packages/atif-duck/src/atif_duck/infrastructure/registry.py:73-76` (the semantics)
-and `packages/atif-duck/src/atif_duck/domain/catalog.py:612` (`DEFAULT_PRICING`)
+and `packages/atif-duck/src/atif_duck/domain/catalog.py:621` (`DEFAULT_PRICING`)
 
 **Consumers:**
 
-- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2025-2045`: the `cost_estimate`
+- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2054-2074`: the `cost_estimate`
   macro, which consumes both.
-- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1981`: `register_macros` resolves
+- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2010`: `register_macros` resolves
   the pricing override against `DEFAULT_PRICING`.
 - `packages/atif-duck/src/atif_duck/domain/catalog.py:85-88`: the `steps` view schema publishes
   `prompt_tokens`, `completion_tokens`, `cached_tokens`, `cache_creation` to every SQL consumer.
-- `packages/atif-duck/src/atif_duck/domain/catalog.py:557-563`: the agent-facing `cost_estimate`
+- `packages/atif-duck/src/atif_duck/domain/catalog.py:566-572`: the agent-facing `cost_estimate`
   description carries the trust condition.
 
 **Shape:**
@@ -698,28 +698,28 @@ DEFAULT_PRICING: dict[str, tuple[float, float]] = {
 **Assumptions consumers make:**
 
 - **`prompt_tokens` is a CUMULATIVE TOTAL, per step: non-cached + cache_read + cache_creation.**
-  Stated at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:73-76` and read from `metrics.prompt_tokens` at `packages/atif-duck/src/atif_duck/infrastructure/projections.py:130`. The
+  Stated at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:73-76` and read from `metrics.prompt_tokens` at `packages/atif-duck/src/atif_duck/infrastructure/projections.py:155`. The
   identifier does not say so, so a consumer summing `prompt_tokens + cached_tokens` double-counts
   every cache read.
 - **`cached_tokens` is the cache-READ subset of `prompt_tokens`**, not an additional quantity
-  (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:96-97`). `cost_estimate` therefore prices `prompt_tokens - cached_tokens` and
-  documents that identity at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2004-2007`; cache reads are charged nothing.
+  (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:110-111`). `cost_estimate` therefore prices `prompt_tokens - cached_tokens` and
+  documents that identity at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2033-2036`; cache reads are charged nothing.
 - **`in_rate` / `out_rate` are USD per 1,000,000 tokens.** The unit appears in neither name: only
-  the comment at `packages/atif-duck/src/atif_duck/domain/catalog.py:602` and the `/ 1e6` at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2032` carry it.
+  the comment at `packages/atif-duck/src/atif_duck/domain/catalog.py:611` and the `/ 1e6` at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2061` carry it.
 - **`est_cost_usd` is USD and covers the PRICED steps only.** It is meaningful only when
-  `unpriced_steps = 0`, stated in each of these places: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2014-2019`, `packages/atif-duck/src/atif_duck/domain/catalog.py:557-563`, and the
-  `LEFT JOIN` shape itself at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2040`.
+  `unpriced_steps = 0`, stated in each of these places: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2043-2048`, `packages/atif-duck/src/atif_duck/domain/catalog.py:566-572`, and the
+  `LEFT JOIN` shape itself at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2069`.
 - **`unpriced_steps` counts only steps with a non-NULL `model_name`**, because user steps carry no
   model and cost nothing
-  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2021-2024`). Counting them would put every conversation
+  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2050-2053`). Counting them would put every conversation
   above zero and mask real pricing gaps.
-- **Cache write and read multipliers are NOT modelled.** `packages/atif-duck/src/atif_duck/domain/catalog.py:609-611` states that the 1.25x
+- **Cache write and read multipliers are NOT modelled.** `packages/atif-duck/src/atif_duck/domain/catalog.py:618-620` states that the 1.25x
   / 2x / 0.1x tiers are out of scope, so `est_cost_usd` under-reports a cache-heavy session.
 - **A step's `model_name` matches a pricing row by exact name once a trailing `-YYYYMMDD` is stripped**
-  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2041`), so `claude-haiku-4-5-20251001` prices as `claude-haiku-4-5`.
+  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2070`), so `claude-haiku-4-5-20251001` prices as `claude-haiku-4-5`.
 
 **Drift risk:** `cached_tokens` exists in two coordinate spaces under one name: atif-duck's
-per-step cache-read count (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:132`) and atif-models' per-call
+per-step cache-read count (`packages/atif-duck/src/atif_duck/infrastructure/projections.py:157`) and atif-models' per-call
 `CallUsage.cached_tokens` (`packages/atif-models/src/atif_models/domain/ports.py:77`). Neither
 name states its scope, so a cross-plane join or a copied formula silently mixes them. Mitigation:
 attribute the field by module path, and read the producer docstring
@@ -737,7 +737,7 @@ attribute the field by module path, and read the producer docstring
 
 - `packages/atif-embed/src/atif_embed/application/embed.py:182-190`: the WRITE path calls
   `ensure_store_matches` before appending.
-- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1762-1777`: the READ/bind path calls
+- `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1791-1806`: the READ/bind path calls
   it before binding `message_embeddings` (guard-before-bind).
 - `packages/atif-cli/src/atif_cli/duck_errors.py:27-32`: puts atif-duck's copy in
   `REGISTRATION_ERRORS` and maps it to exit 65 at `packages/atif-cli/src/atif_cli/duck_errors.py:75-82`.
@@ -922,7 +922,7 @@ rather than skipping a file that no longer contains the current version; the gua
 - **The embeddings-store row shape**: the Arrow fields written at
   `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:182-188`, of which the
   `message_embeddings` view exposes only some
-  (`packages/atif-duck/src/atif_duck/domain/catalog.py:281-287`). `text_hash` and `truncated` are
+  (`packages/atif-duck/src/atif_duck/domain/catalog.py:286-292`). `text_hash` and `truncated` are
   unreachable from SQL, so a query cannot distinguish a row embedded from its head alone from a complete one.
 - **The Lance schema version sidecar**: `SCHEMA_VERSION = 2` and `schema_version.json` at
   `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:83-89`, kept as a sidecar rather
@@ -977,7 +977,7 @@ rather than skipping a file that no longer contains the current version; the gua
   by `packages/atif-cli/tests/test_lean_import.py`; the deferred-import sites exist because of it.
 - **The other ports, satisfied the same way**: atif-corpus's `ArtifactProducer`
   (`packages/atif-corpus/src/atif_corpus/domain/ports.py:148`), which atif-duck's
-  `ColumnarArtifactProducer` fits (`packages/atif-duck/src/atif_duck/infrastructure/columnar.py:450`)
+  `ColumnarArtifactProducer` fits (`packages/atif-duck/src/atif_duck/infrastructure/columnar.py:483`)
   and which the CLI's `materialize` doesn't inject, and `SessionSink`
   (`packages/atif-corpus/src/atif_corpus/domain/ports.py:180`), which atif-duck's
   `DuckLakeSessionSink` fits (`packages/atif-duck/src/atif_duck/infrastructure/lake.py:968`) and
@@ -986,7 +986,7 @@ rather than skipping a file that no longer contains the current version; the gua
   atif-cli's `DuckLakeSteps` fits (`packages/atif-cli/src/atif_cli/embed_lake.py:70`); and
   atif-analytics' `SessionSource` (`packages/atif-analytics/src/atif_analytics/domain/ports.py:40`),
   which `TrajectoryFileSource`
-  (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:271`) and atif-cli's
+  (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:285`) and atif-cli's
   `LakeSessionSource` (`packages/atif-cli/src/atif_cli/lake_sessions.py:90`) fit.
 
 ## See also

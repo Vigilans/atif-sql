@@ -116,8 +116,10 @@ from atif_duck.domain.sql_literal import SqlFragment, sql_literal
 from atif_duck.infrastructure.columnar import ColumnarCoverage, session_has_columnar
 from atif_duck.infrastructure.projections import (
     CALL_COLUMNS,
+    EMBEDDED,
     EVENT_COLUMNS,
     RESULT_COLUMNS,
+    TRAJECTORY_KEY,
     WHOLE_STEP,
     render,
     step_columns,
@@ -306,12 +308,15 @@ def _line_size_bound(paths: Iterable[Path]) -> int:
 # ``JSON[]`` (not a deep STRUCT) because Step.message is a union
 # (str | ContentPart[]) and Step.extra / metrics.extra are free-form —
 # a STRUCT projection would force one shape and silently null the other.
+# ``subagent_trajectories`` is ``JSON[]`` for the same reason: each entry is a
+# whole embedded trajectory, walked by :data:`_JSON_OWNED_STEPS`.
 _TRAJECTORY_COLUMNS: dict[str, str] = {
     "schema_version": "VARCHAR",
     "session_id": "VARCHAR",
     "trajectory_id": "VARCHAR",
     "agent": "STRUCT(name VARCHAR, version VARCHAR, model_name VARCHAR, extra JSON)",
     "steps": "JSON[]",
+    "subagent_trajectories": "JSON[]",
     "final_metrics": (
         "STRUCT(total_prompt_tokens BIGINT, total_completion_tokens BIGINT, "
         "total_cached_tokens BIGINT, total_cost_usd DOUBLE, total_steps BIGINT, "
@@ -355,11 +360,34 @@ def _union_or_empty(
     return SqlFragment("\nUNION ALL\n".join(branches)) if branches else _typed_empty(columns)
 
 
+#: Every step of every trajectory in ``v_raw_trajectories_json``, the
+#: embedded ones included, as ``(session_id, trajectory_key, embedded, step)``
+#: rows (see :mod:`atif_duck.infrastructure.projections`): a recursive walk of
+#: ``subagent_trajectories``, the root keyed by its ``trajectory_id`` or else
+#: the session id. A FROM item: each projection below reads it as ``t``.
+_JSON_OWNED_STEPS: SqlFragment = SqlFragment(
+    "(\n"  # noqa: S608  # nosec B608 - module constants only
+    f"    WITH RECURSIVE owned(session_id, {TRAJECTORY_KEY}, {EMBEDDED}, steps, children) AS (\n"
+    "        SELECT session_id_path, coalesce(trajectory_id, session_id_path), false,\n"
+    "               steps, subagent_trajectories\n"
+    f"        FROM {_RAW_TRAJECTORIES_JSON_TABLE}\n"
+    "        UNION ALL\n"
+    "        SELECT o.session_id, json_extract_string(c.child, '$.trajectory_id'), true,\n"
+    "               json_extract(c.child, '$.steps[*]'),\n"
+    "               json_extract(c.child, '$.subagent_trajectories[*]')\n"
+    "        FROM owned o, UNNEST(o.children) AS c(child)\n"
+    "    )\n"
+    f"    SELECT o.session_id, o.{TRAJECTORY_KEY}, o.{EMBEDDED}, s.step\n"
+    "    FROM owned o, UNNEST(o.steps) AS s(step)\n"
+    ") t"
+)
+
+
 def _json_steps_select() -> SqlFragment:
     """The JSON path's ``steps`` projection over ``v_raw_trajectories_json``."""
     return SqlFragment(
-        f"SELECT t.session_id_path AS session_id,\n    {render(step_columns(WHOLE_STEP))}\n"  # nosec B608 - projection constants over a module-constant table
-        f"FROM {_RAW_TRAJECTORIES_JSON_TABLE} t, UNNEST(t.steps) AS s(step)"
+        f"SELECT t.session_id AS session_id,\n    {render(step_columns(WHOLE_STEP))}\n"  # nosec B608 - projection constants over a module-constant table
+        f"FROM {_JSON_OWNED_STEPS}"
     )
 
 
@@ -367,16 +395,15 @@ def _json_tool_calls_select() -> SqlFragment:
     """The JSON path's ``tool_calls`` projection.
 
     The inner query narrows each step to (ids, ts, calls list) BEFORE the
-    second UNNEST: a step's JSON string is megabytes on harbor trajectories
-    that inline subagent sidechains, and unnesting it directly replicates
-    that string once per tool call.
+    second UNNEST: a step's JSON string can run to megabytes, and unnesting
+    it directly replicates that string once per tool call.
     """
     return SqlFragment(
-        f"SELECT session_id, step_id, ts, {render(CALL_COLUMNS)}\n"  # noqa: S608  # nosec B608 - constants only
+        f"SELECT session_id, step_id, ts, {render(CALL_COLUMNS)}, trajectory_id\n"  # noqa: S608  # nosec B608 - constants only
         "FROM (\n"
-        f"    SELECT t.session_id_path AS session_id, {render(step_key_columns(WHOLE_STEP))},\n"
+        f"    SELECT t.session_id AS session_id, {render(step_key_columns(WHOLE_STEP))},\n"
         f"           {WHOLE_STEP.json('tool_calls', '[*]')} AS calls\n"
-        f"    FROM {_RAW_TRAJECTORIES_JSON_TABLE} t, UNNEST(t.steps) AS s(step)\n"
+        f"    FROM {_JSON_OWNED_STEPS}\n"
         f"    WHERE {WHOLE_STEP.json('tool_calls')} IS NOT NULL\n"
         ") step_calls, UNNEST(calls) AS c(call)"
     )
@@ -385,11 +412,11 @@ def _json_tool_calls_select() -> SqlFragment:
 def _json_tool_results_select() -> SqlFragment:
     """The JSON path's ``tool_results`` projection (same early narrowing)."""
     return SqlFragment(
-        f"SELECT session_id, step_id, ts, {render(RESULT_COLUMNS)}\n"  # noqa: S608  # nosec B608 - constants only
+        f"SELECT session_id, step_id, ts, {render(RESULT_COLUMNS)}, trajectory_id\n"  # noqa: S608  # nosec B608 - constants only
         "FROM (\n"
-        f"    SELECT t.session_id_path AS session_id, {render(step_key_columns(WHOLE_STEP))},\n"
+        f"    SELECT t.session_id AS session_id, {render(step_key_columns(WHOLE_STEP))},\n"
         f"           {WHOLE_STEP.json('observation', '.results[*]')} AS results\n"
-        f"    FROM {_RAW_TRAJECTORIES_JSON_TABLE} t, UNNEST(t.steps) AS s(step)\n"
+        f"    FROM {_JSON_OWNED_STEPS}\n"
         f"    WHERE {WHOLE_STEP.json('observation', '.results')} IS NOT NULL\n"
         ") step_results, UNNEST(results) AS r(res)"
     )
@@ -1150,7 +1177,8 @@ def register_views(con: duckdb.DuckDBPyConnection) -> None:
         # One row per ObservationResult. ``source_call_id`` is ATIF's join
         # key back to the tool_calls array, surfaced under the SAME name
         # ``tool_use_id`` that ``tool_calls`` exposes, so the two views join
-        # with `USING (tool_use_id)` and neither side needs a rename.
+        # with `USING (session_id, trajectory_id, tool_use_id)` and neither
+        # side needs a rename.
         # Expressions: projections.RESULT_COLUMNS.
         con.execute(
             f"CREATE OR REPLACE VIEW tool_results AS SELECT {_catalog_columns('tool_results')} "  # noqa: S608  # nosec B608 - catalog columns over a module-constant table
@@ -1161,8 +1189,9 @@ def register_views(con: duckdb.DuckDBPyConnection) -> None:
         # DuckDB's UNNEST requires a LIST, and the ``$.todos[*]`` wildcard
         # path yields JSON[] that UNNEST accepts natively — a bare
         # ``$.todos`` yields a scalar JSON value that it rejects.
-        # ``step_id`` is the snapshot tie-break: steps are unique and ordered
-        # per session, so no uuid column is needed to sequence the snapshots.
+        # ``(trajectory_id, step_id)`` is the snapshot tie-break: it names one
+        # step of the session, so no uuid column is needed to sequence the
+        # snapshots.
         con.execute(
             """
             CREATE OR REPLACE VIEW todo_events AS
@@ -1175,7 +1204,7 @@ def register_views(con: duckdb.DuckDBPyConnection) -> None:
                 json_extract_string(todo, '$.activeForm')  AS active_form,
                 row_number() OVER (
                     PARTITION BY tc.session_id
-                    ORDER BY tc.ts, tc.step_id
+                    ORDER BY tc.ts, tc.trajectory_id, tc.step_id
                 ) AS snapshot_ix
             FROM tool_calls tc,
                  UNNEST(json_extract(tc.tool_input, '$.todos[*]')) AS t(todo)
@@ -1419,12 +1448,11 @@ def register_views(con: duckdb.DuckDBPyConnection) -> None:
         )
         logger.debug("Registered view: skill_usage")
 
-        # Harbor INLINES subagent transcripts into the flat step list
-        # (fidelity gap 4), marking them only via ``extra.is_sidechain`` — so
-        # the subagent surface is a filter over ``steps`` and there is no
-        # separate subagent raw reader to read. A consequence worth knowing:
-        # a session-level aggregate over ``steps`` already includes subagent
-        # work unless it filters ``is_sidechain`` out.
+        # ``steps`` holds every embedded trajectory's steps, each with
+        # ``is_sidechain`` true, beside any sidechain step the root still
+        # holds, so the subagent surface is a filter over ``steps``. A
+        # consequence worth knowing: a session-level aggregate over ``steps``
+        # includes subagent work unless it filters ``is_sidechain`` out.
         con.execute(
             """
             CREATE OR REPLACE VIEW subagent_steps AS
@@ -1498,12 +1526,12 @@ def register_views(con: duckdb.DuckDBPyConnection) -> None:
             """
             CREATE OR REPLACE VIEW images AS
             WITH listed AS (
-                SELECT session_id, step_id, ts, 'tool_result' AS origin, tool_use_id,
-                       img
+                SELECT session_id, trajectory_id, step_id, ts, 'tool_result' AS origin,
+                       tool_use_id, img
                 FROM tool_results, UNNEST(json_extract(images, '$[*]')) AS i(img)
                 WHERE images IS NOT NULL
                 UNION ALL
-                SELECT session_id, step_id, ts, 'user_message' AS origin,
+                SELECT session_id, trajectory_id, step_id, ts, 'user_message' AS origin,
                        CAST(NULL AS VARCHAR) AS tool_use_id, img
                 FROM steps, UNNEST(json_extract(images, '$[*]')) AS i(img)
                 WHERE images IS NOT NULL
@@ -1521,7 +1549,8 @@ def register_views(con: duckdb.DuckDBPyConnection) -> None:
                 json_extract(img, '$.height')::BIGINT       AS height,
                 'blobs/sha256/' || substr(json_extract_string(img, '$.sha256'), 1, 2) || '/'
                     || json_extract_string(img, '$.sha256') || '.'
-                    || json_extract_string(img, '$.extension') AS blob_path
+                    || json_extract_string(img, '$.extension') AS blob_path,
+                trajectory_id
             FROM listed;
             """
         )
@@ -2071,9 +2100,10 @@ def register_macros(
 
         # SCOPE: fan-out counts spawn INTENT — the number of Task/Agent
         # launches the session issued — not the number of subagent transcripts
-        # that resulted. ATIF inlines sidechains, so there is no per-subagent
-        # file to census, and a launch that produced no steps still counts
-        # here. Read this as an upper bound on subagents realized.
+        # that resulted. A subagent's steps are embedded in the session's
+        # trajectory, so there is no per-subagent file to census, and a launch
+        # that produced no steps still counts here. Read this as an upper bound
+        # on subagents realized.
         con.execute(
             """
             CREATE OR REPLACE MACRO subagent_fanout(sid) AS (

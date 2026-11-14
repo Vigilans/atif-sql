@@ -19,7 +19,10 @@ order is the order the writer inserted them in, which the lake keeps as
 ``rowid`` (DuckLake numbers a data file's rows from its ``row_id_start``, and
 merges keep the numbers). The writer inserts the step-level tables
 (:data:`atif_duck.domain.lake.SOURCE_ORDERED_TABLES`) on one thread so that order is the source
-order; the statements below sort by ``step_id`` and then ``rowid``.
+order: the root's steps, then each embedded trajectory's. The statements below
+sort a session's trajectories by their first row, then by ``step_id`` and
+``rowid``, and return each row's ``trajectory_id``, since a step id names one
+step only within its trajectory.
 
 Whether the lake's rows for a session are its current ones is
 :func:`is_current`: the session's ``meta.json`` against what
@@ -41,7 +44,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 _SCOPE: str = f"{CORPUS_COLUMN} = ? AND {SESSION_KEY} IN (SELECT unnest(?::VARCHAR[]))"
-_ORDER: str = f"ORDER BY {SESSION_KEY}, step_id, rowid"
+_ORDER: str = (
+    f"ORDER BY {SESSION_KEY}, min(rowid) OVER (PARTITION BY {SESSION_KEY}, trajectory_id), "
+    "step_id, rowid"
+)
 
 #: ``(session_id, materialized_at, source_mtime_ns, source_present,
 #: source_removed_at)`` for every session of a corpus (param: corpus). What a
@@ -101,33 +107,37 @@ def is_current(meta: object, recorded: SessionFreshness | None) -> bool:
 
 
 #: Every step of a batch of sessions without its tool payloads (params:
-#: corpus, ids): ``(session_id, step_id, ts, source, message, is_sidechain,
-#: is_compact_summary, source_uuids)``.
+#: corpus, ids): ``(session_id, trajectory_id, step_id, ts, source, message,
+#: is_sidechain, is_compact_summary, source_uuids)``.
 TURNS_SQL: SqlFragment = SqlFragment(
     "SELECT "  # noqa: S608  # nosec B608 - constants only; corpus and ids are bound
-    f"{SESSION_KEY}, step_id, ts, source, message, is_sidechain, is_compact_summary, "
+    f"{SESSION_KEY}, trajectory_id, step_id, ts, source, message, is_sidechain, "
+    "is_compact_summary, "
     f"CAST(source_uuids AS VARCHAR) FROM {LAKE_ALIAS}.steps WHERE {_SCOPE} {_ORDER}"
 )
 
-#: ``(session_id, step_id)`` of every step with an error result in a batch
-#: (params: corpus, ids). The gates need the flag, not the result bodies.
+#: ``(session_id, trajectory_id, step_id)`` of every step with an error result
+#: in a batch (params: corpus, ids). The gates need the flag, not the result
+#: bodies.
 ERROR_STEPS_SQL: SqlFragment = SqlFragment(
-    f"SELECT DISTINCT {SESSION_KEY}, step_id FROM {LAKE_ALIAS}.tool_results "  # noqa: S608  # nosec B608 - constants only; corpus and ids are bound
+    f"SELECT DISTINCT {SESSION_KEY}, trajectory_id, step_id FROM {LAKE_ALIAS}.tool_results "  # noqa: S608  # nosec B608 - constants only; corpus and ids are bound
     f"WHERE {_SCOPE} AND is_error"
 )
 
 #: Every tool call of a batch, in source order (params: corpus, ids):
-#: ``(session_id, step_id, tool_name, tool_input)`` with the input as JSON text.
+#: ``(session_id, trajectory_id, step_id, tool_name, tool_input)`` with the
+#: input as JSON text.
 TOOL_CALLS_SQL: SqlFragment = SqlFragment(
-    f"SELECT {SESSION_KEY}, step_id, tool_name, CAST(tool_input AS VARCHAR) "  # noqa: S608  # nosec B608 - constants only; corpus and ids are bound
+    f"SELECT {SESSION_KEY}, trajectory_id, step_id, tool_name, CAST(tool_input AS VARCHAR) "  # noqa: S608  # nosec B608 - constants only; corpus and ids are bound
     f"FROM {LAKE_ALIAS}.tool_calls WHERE {_SCOPE} {_ORDER}"
 )
 
 #: Every tool result of a batch, in source order (params: corpus, ids):
-#: ``(session_id, step_id, tool_use_id, content, is_error)`` with the content
-#: as JSON text.
+#: ``(session_id, trajectory_id, step_id, tool_use_id, content, is_error)``
+#: with the content as JSON text.
 TOOL_RESULTS_SQL: SqlFragment = SqlFragment(
-    f"SELECT {SESSION_KEY}, step_id, tool_use_id, CAST(content AS VARCHAR), is_error "  # noqa: S608  # nosec B608 - constants only; corpus and ids are bound
+    f"SELECT {SESSION_KEY}, trajectory_id, step_id, tool_use_id, CAST(content AS VARCHAR), "  # noqa: S608  # nosec B608 - constants only; corpus and ids are bound
+    "is_error "
     f"FROM {LAKE_ALIAS}.tool_results WHERE {_SCOPE} {_ORDER}"
 )
 

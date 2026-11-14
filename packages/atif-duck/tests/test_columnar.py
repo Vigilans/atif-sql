@@ -246,8 +246,12 @@ class TestProducer:
         assert steps == [("empty", 1, None, False, None)]
 
     def test_trajectory_projection_and_session_columns_agree(self) -> None:
-        """The JSON reader's top-level projection IS session.parquet's shape plus steps."""
-        without_steps = {k: v for k, v in _TRAJECTORY_COLUMNS.items() if k != "steps"}
+        """The JSON reader's top-level projection IS session.parquet's shape plus the step containers."""
+        without_steps = {
+            k: v
+            for k, v in _TRAJECTORY_COLUMNS.items()
+            if k not in {"steps", "subagent_trajectories"}
+        }
         assert without_steps == dict(SESSION_COLUMNS[1:])
 
 

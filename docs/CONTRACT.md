@@ -323,6 +323,14 @@ proofs are out of scope for the workspace.
   (cwds[0]/cwd, git_branches[0]/git.branch). Claude Code's lists are in
   first-seen order, so cwds[0] is where the session started. The steps view coalesces
   cache_creation_input_tokens with the Codex spelling cache_write_input_tokens.
+- steps, tool_calls and tool_results (and the parquet and lake tables that
+  carry their columns) hold the steps of every embedded
+  subagent_trajectories entry too, read by a recursive walk, and images,
+  projected over steps and tool_results, holds their attachments. In all
+  four, trajectory_id names the trajectory holding the row: an embedded
+  trajectory's own id, and for the root its trajectory_id, else the session
+  id; (session_id, trajectory_id, step_id) names one step. Every embedded
+  step is is_sidechain, and its agent_id falls back to its trajectory's id.
 - messages-parity view name: `steps` (one row per ATIF step) PLUS a `messages`
   compatibility view reconstructed from edges (uuid-keyed: uuid, parent_uuid,
   session_id, ts, type, is_sidechain, is_compact_summary, message_id,

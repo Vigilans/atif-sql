@@ -830,6 +830,138 @@ def write_codex_session(root: Path) -> Path:
     return session_dir
 
 
+# ---------------------------------------------------------------------------
+# A Claude Code session whose subagents are embedded trajectories: the root
+# spawns ``child-a`` with a Task call, and ``child-a`` spawns ``grand-b``. Each
+# trajectory numbers its steps from 1, so step ids repeat across the session.
+# ---------------------------------------------------------------------------
+
+NESTED_SESSION_ID = "33333333-3333-3333-3333-333333333333"
+
+
+def _nested_step(
+    step_id: int, ts: str, source: str, message: str, **members: Any
+) -> dict[str, Any]:
+    return {
+        "step_id": step_id,
+        "timestamp": f"2026-09-20T10:00:{ts}Z",
+        "source": source,
+        "message": message,
+        **members,
+    }
+
+
+def _task_call(call_id: str, prompt: str) -> dict[str, Any]:
+    return {
+        "tool_call_id": call_id,
+        "function_name": "Task",
+        "arguments": {"description": prompt, "prompt": prompt},
+    }
+
+
+def nested_trajectory() -> dict[str, Any]:
+    """The root, one child, and one grandchild, as the converter nests them."""
+    grandchild = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": NESTED_SESSION_ID,
+        "trajectory_id": "grand-b",
+        "agent": {"name": "claude-code", "version": "2.1.300", "model_name": "claude-test-1"},
+        "steps": [
+            _nested_step(
+                1, "05", "user", "dig deeper", extra={"is_sidechain": True, "agent_id": "grand-b"}
+            ),
+        ],
+        "final_metrics": {"total_steps": 1},
+    }
+    child = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": NESTED_SESSION_ID,
+        "trajectory_id": "child-a",
+        "agent": {"name": "claude-code", "version": "2.1.300", "model_name": "claude-test-1"},
+        "steps": [
+            _nested_step(
+                1, "02", "user", "inspect", extra={"is_sidechain": True, "agent_id": "child-a"}
+            ),
+            _nested_step(
+                2,
+                "03",
+                "agent",
+                "",
+                model_name="claude-test-1",
+                tool_calls=[_task_call("toolu_inner", "dig deeper")],
+                observation={
+                    "results": [
+                        {
+                            "source_call_id": "toolu_inner",
+                            "content": "deep done",
+                            "subagent_trajectory_ref": [
+                                {"trajectory_id": "grand-b", "session_id": NESTED_SESSION_ID}
+                            ],
+                        }
+                    ]
+                },
+                metrics={"prompt_tokens": 20, "completion_tokens": 2},
+                extra={"is_sidechain": True, "agent_id": "child-a"},
+            ),
+        ],
+        "final_metrics": {"total_prompt_tokens": 20, "total_steps": 2},
+        "subagent_trajectories": [grandchild],
+    }
+    return {
+        "schema_version": "ATIF-v1.7",
+        "session_id": NESTED_SESSION_ID,
+        "agent": {"name": "claude-code", "version": "2.1.300", "model_name": "claude-test-1"},
+        "steps": [
+            _nested_step(1, "01", "user", "survey it", extra={"is_sidechain": False}),
+            _nested_step(
+                2,
+                "04",
+                "agent",
+                "surveyed",
+                model_name="claude-test-1",
+                tool_calls=[_task_call("toolu_outer", "inspect")],
+                observation={
+                    "results": [
+                        {
+                            "source_call_id": "toolu_outer",
+                            "content": "inspected",
+                            "subagent_trajectory_ref": [
+                                {"trajectory_id": "child-a", "session_id": NESTED_SESSION_ID}
+                            ],
+                        }
+                    ]
+                },
+                metrics={"prompt_tokens": 10, "completion_tokens": 1},
+                extra={"is_sidechain": False},
+            ),
+        ],
+        "final_metrics": {"total_prompt_tokens": 30, "total_steps": 2},
+        "subagent_trajectories": [child],
+    }
+
+
+def write_nested_session(root: Path) -> Path:
+    """Write the nested session under ``root/sessions/``; return its directory."""
+    session_dir = root / "sessions" / NESTED_SESSION_ID
+    session_dir.mkdir(parents=True)
+    (session_dir / "trajectory.json").write_text(
+        json.dumps(nested_trajectory(), separators=(",", ":"))
+    )
+    (session_dir / "edges.jsonl").write_text(
+        json.dumps(
+            _edge("n-u1", parent=None, type_="user", ts="2026-09-20T10:00:01Z"),
+        )
+        + "\n"
+    )
+    (session_dir / "loss_report.json").write_text(
+        json.dumps(_loss_report({"user": 1}, converted=1), separators=(",", ":"))
+    )
+    (session_dir / "meta.json").write_text(
+        json.dumps(_meta(NESTED_SESSION_ID), separators=(",", ":"))
+    )
+    return session_dir
+
+
 # ``register_vss`` no longer installs the lance extension (that download at
 # query time was finding 4 of the MicroVM review), so the suite installs it
 # once up front. A no-op where it is already present; a one-time download on a

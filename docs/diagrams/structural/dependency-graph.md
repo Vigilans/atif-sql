@@ -104,10 +104,10 @@ on import-site count, then on the member's own src line count, descending.
 | loguru | atif-converter | `packages/atif-converter/pyproject.toml:24` | `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:73` |
 | polars | atif-analytics | `packages/atif-analytics/pyproject.toml:25` | `packages/atif-analytics/src/atif_analytics/application/use_cases/classify.py:41` |
 | pydantic | atif-converter | `packages/atif-converter/pyproject.toml:23` | `packages/atif-converter/src/atif_converter/domain/atif/trajectory.py:10` |
-| duckdb | atif-duck | `packages/atif-duck/pyproject.toml:20` | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:132` |
+| duckdb | atif-duck | `packages/atif-duck/pyproject.toml:20` | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:134` |
 | pydantic-settings | atif-duck | `packages/atif-duck/pyproject.toml:25` | `packages/atif-duck/src/atif_duck/infrastructure/lake_settings.py:15` |
 | tenacity | atif-models | `packages/atif-models/pyproject.toml:32` | `packages/atif-models/src/atif_models/infrastructure/openai_bedrock.py:34` |
-| pyarrow | atif-duck | `packages/atif-duck/pyproject.toml:29` | `packages/atif-duck/src/atif_duck/infrastructure/columnar.py:287` |
+| pyarrow | atif-duck | `packages/atif-duck/pyproject.toml:29` | `packages/atif-duck/src/atif_duck/infrastructure/columnar.py:320` |
 | anyio | atif-models | `packages/atif-models/pyproject.toml:23` | `packages/atif-models/src/atif_models/infrastructure/openai_bedrock.py:30` |
 | cyclopts | atif-cli | `packages/atif-cli/pyproject.toml:37` | `packages/atif-cli/src/atif_cli/app.py:69` |
 | boto3 | atif-embed | `packages/atif-embed/pyproject.toml:20` | `packages/atif-embed/src/atif_embed/infrastructure/cohere_bedrock.py:136` |

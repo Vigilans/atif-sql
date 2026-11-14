@@ -102,16 +102,35 @@ def _step_texts_sql(max_object_size: int) -> str:
     CASE lives once in a CTE so the >=32-char floor and the projection read
     the same expression.
 
-    ``filename=true`` plus ``ORDER BY filename, step_id`` keeps row order
-    identical to reading the batch's files one at a time, so batch boundaries
-    cannot change which rows a ``--limit`` run picks. The two spellings of a
+    Every step of every trajectory embedded in ``subagent_trajectories`` is
+    read too, by a recursive walk; the root sorts before them.
+
+    ``filename=true`` plus ``ORDER BY filename, trajectory, step_id`` keeps
+    row order identical to reading the batch's files one at a time, so batch
+    boundaries cannot change which rows a ``--limit`` run picks. The two spellings of a
     session's file differ only after its directory name, so a corpus mixing
     them sorts in the same session order.
     """
     return f"""
-        WITH step_texts AS (
+        WITH RECURSIVE owned(filename, trajectory, steps, children) AS (
+            SELECT t.filename, '', t.steps, t.subagent_trajectories
+            FROM read_json(
+                     ?,
+                     format='auto',
+                     filename=true,
+                     columns={{steps: 'JSON[]', subagent_trajectories: 'JSON[]'}},
+                     maximum_object_size={int(max_object_size)}
+                 ) t
+            UNION ALL
+            SELECT o.filename, json_extract_string(c.child, '$.trajectory_id'),
+                   json_extract(c.child, '$.steps[*]'),
+                   json_extract(c.child, '$.subagent_trajectories[*]')
+            FROM owned o, UNNEST(o.children) AS c(child)
+        ),
+        step_texts AS (
             SELECT
-                t.filename                                           AS filename,
+                o.filename                                           AS filename,
+                o.trajectory                                         AS trajectory,
                 json_extract(step, '$.step_id')::BIGINT              AS step_id,
                 json_extract_string(step, '$.extra.source_uuids[0]') AS uuid,
                 CASE WHEN json_type(step, '$.message') = 'ARRAY'
@@ -124,21 +143,14 @@ def _step_texts_sql(max_object_size: int) -> str:
                           )
                      ELSE json_extract_string(step, '$.message')
                 END                                                  AS text_content
-            FROM read_json(
-                     ?,
-                     format='auto',
-                     filename=true,
-                     columns={{steps: 'JSON[]'}},
-                     maximum_object_size={int(max_object_size)}
-                 ) t,
-                 UNNEST(t.steps) AS s(step)
+            FROM owned o, UNNEST(o.steps) AS s(step)
         )
         SELECT uuid, text_content
         FROM step_texts
         WHERE uuid IS NOT NULL
           AND text_content IS NOT NULL
           AND length(text_content) >= {MIN_TEXT_CHARS}
-        ORDER BY filename, step_id
+        ORDER BY filename, trajectory, step_id
         """  # noqa: S608  # nosec B608 - paths are a bound parameter; both limits are ints
 
 
@@ -265,7 +277,8 @@ class DuckDbTextRows:
         is cheap. A uuid whose stored hash differs from the current text is
         STALE and is re-yielded with ``replaces_existing=True``.
 
-        Rows are deterministic: ordered by trajectory path then step_id, and
+        Rows are deterministic: ordered by trajectory path, then embedded
+        trajectory (the root first), then step_id, and
         de-duplicated on uuid (first occurrence wins) so the Lance store
         never receives two vectors for one key.
         """

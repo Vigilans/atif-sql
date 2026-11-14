@@ -8,8 +8,8 @@ already typed, so a query never parses ``trajectory.json``:
 
 * ``session.parquet``      one row: the trajectory's top-level members minus
   ``steps`` (what the ``sessions`` view reads), keyed by ``session_id_path``.
-* ``steps.parquet``        one row per ATIF step, exactly the ``steps`` view's
-  columns.
+* ``steps.parquet``        one row per ATIF step, embedded trajectories'
+  included, exactly the ``steps`` view's columns.
 * ``tool_calls.parquet``   one row per tool call, exactly the ``tool_calls``
   view's columns.
 * ``tool_results.parquet`` one row per observation result, exactly the
@@ -49,7 +49,10 @@ if TYPE_CHECKING:
 #: ``interrupted`` / ``images``. One bump for both changes: they ship together,
 #: and no corpus was ever stamped with only one of them, so a single version
 #: separates every schema-1 session from every schema-2 one.
-COLUMNAR_SCHEMA_VERSION: int = 2
+#:
+#: 3: ``steps`` / ``tool_calls`` / ``tool_results`` hold the steps of every
+#: embedded ``subagent_trajectories`` entry too, and gained ``trajectory_id``.
+COLUMNAR_SCHEMA_VERSION: int = 3
 
 #: The ``meta.json`` key that records which columnar schema a session's
 #: parquet files were written against. Absent on sessions materialized
