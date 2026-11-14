@@ -69,17 +69,14 @@ def discover_side_files(session_jsonl: Path, *, include_subagents: bool = True) 
     return side_files
 
 
-def convert_loaded_claude_code_session(
+def loaded_side_records(
     loaded: LoadedSession, *, include_subagents: bool = True
-) -> Trajectory | None:
-    """Convert an already-read session: the records of :func:`~atif_converter.infrastructure.raw_records.load_session`.
+) -> dict[str, list[Any]]:
+    """Staged side-file name -> records, for an already-read session.
 
-    Same result as :func:`convert_claude_code_session` on the same bytes, with
-    no second read: the main transcript is the loaded main file and the
-    side-files are the loaded side-files keyed by their staged name, first in
-    sorted order winning on a name collision exactly as
-    :func:`discover_side_files` resolves it. ``include_subagents`` off converts
-    the main transcript alone, as before.
+    The first file in sorted order wins a name collision, exactly as
+    :func:`discover_side_files` resolves it. Empty when ``include_subagents``
+    is false.
     """
     session_jsonl = loaded.snapshot.session_jsonl
     side_dir = session_jsonl.parent / session_jsonl.stem
@@ -88,9 +85,23 @@ def convert_loaded_claude_code_session(
         for path, records in loaded.records_by_file.items():
             if path != session_jsonl:
                 side_records.setdefault(staged_side_name(path, side_dir), records)
+    return side_records
+
+
+def convert_loaded_claude_code_session(
+    loaded: LoadedSession, *, include_subagents: bool = True
+) -> Trajectory | None:
+    """Convert an already-read session: the records of :func:`~atif_converter.infrastructure.raw_records.load_session`.
+
+    Same result as :func:`convert_claude_code_session` on the same bytes, with
+    no second read: the main transcript is the loaded main file and the
+    side-files are :func:`loaded_side_records`. ``include_subagents`` off
+    converts the main transcript alone.
+    """
+    session_jsonl = loaded.snapshot.session_jsonl
     return convert_claude_code_records(
         loaded.main_records,
-        side_records,
+        loaded_side_records(loaded, include_subagents=include_subagents),
         fallback_session_id=session_jsonl.parent.name or "-unknown",
     )
 

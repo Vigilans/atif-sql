@@ -90,13 +90,13 @@ The catalogs (`VIEW_NAMES`, `MACRO_NAMES`, `ANALYTICS_VIEW_NAMES`,
 
 ## The vendored ATIF models, and the parity oracle behind the ported converters
 
-Defined at: `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:981` (Claude Code) and `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:963` (Codex)
+Defined at: `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1332` (Claude Code) and `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:963` (Codex)
 
 Production code builds on harbor 0.26.0's ATIF data classes (`harbor.models.trajectories`) and
 `harbor.utils.trajectory_validator`, vendored in `packages/atif-converter/src/atif_converter/domain/atif/`; harbor itself is a dev
 dependency. `packages/atif-converter/tests/test_vendored_atif.py` compares the copy to the installed harbor. The conversion is a parity port of harbor 0.26.0's
 private converters, and those private methods are reachable from the tests only, as the oracle
-(`packages/atif-converter/tests/harbor_oracle.py:124`, `packages/atif-converter/tests/harbor_oracle.py:141`), frozen to goldens under `packages/atif-converter/tests/goldens/`.
+(`packages/atif-converter/tests/harbor_oracle.py:171`, `packages/atif-converter/tests/harbor_oracle.py:211`), frozen to goldens under `packages/atif-converter/tests/goldens/`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
@@ -146,7 +146,7 @@ places with no import edge between them.
   (`packages/atif-corpus/src/atif_corpus/domain/layout.py:82-91`).
 - **`LossReport.to_json()`'s keys are wire contract, not an internal shape.** atif-duck reads them
   back through `_LOSS_REPORT_COLUMNS`, so renaming a key breaks the `loss_reports` view with no type
-  error anywhere (`packages/atif-converter/src/atif_converter/domain/fidelity.py:147-171`,
+  error anywhere (`packages/atif-converter/src/atif_converter/domain/fidelity.py:149-173`,
   `packages/atif-duck/src/atif_duck/infrastructure/registry.py:326`).
 
 ## The domain Protocols
@@ -265,7 +265,7 @@ driving the CLI reads, so the dict is the surface, not the individual numbers, a
 | `ClassifiedError.to_payload()`: the JSON error envelope on non-TTY stderr | indirect | likely | `packages/atif-cli/src/atif_cli/errors.py:78-86` |
 | `test_app.py`: asserts against the dict, never against a literal, except where the number itself is the claim | test | yes | `packages/atif-cli/tests/test_app.py:42` and `packages/atif-cli/tests/test_app.py:1542` |
 | `test_cron.py`, `test_integration.py`, `test_vss_commands.py`: more suites keyed off the dict | test | yes | `packages/atif-cli/tests/test_cron.py:28`, `packages/atif-cli/tests/test_integration.py:147`, `packages/atif-cli/tests/test_vss_commands.py:23` |
-| `docs/CONTRACT.md:340-376` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:340-376` |
+| `docs/CONTRACT.md:349-385` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:349-385` |
 
 ### Blast-radius notes
 

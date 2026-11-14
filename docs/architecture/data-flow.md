@@ -50,7 +50,7 @@ catalog copy.
    seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py`
    (`convert_loaded_session`, validated by the `TrajectoryValidator` vendored from harbor), then builds
    the loss report and edges from the same records, enriches the trajectory, and refuses the result
-   if any source moved since the read (`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220`).
+   if any source moved since the read (`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:235`).
 9. The artifacts are written under `.staging/`: `trajectory.json.zst`, `loss_report.json`,
    `edges.jsonl.zst` and `session_events.jsonl.zst` (the three `.zst` files are zstd, each
    decompressing to the plain file an earlier version wrote). No per-session parquet is written; the CLI wires no

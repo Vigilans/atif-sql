@@ -236,7 +236,16 @@ proofs are out of scope for the workspace.
 1. Side-file discovery: every *.jsonl under <session-stem>/ (including
    workflow-nested subagents/workflows/wf_*/agent-*.jsonl, which harbor's own
    discovery cannot see) is read, and named with its nested path parts joined
-   by `__` so two files sharing a basename never collide.
+   by `__` so two files sharing a basename never collide. Each side-file
+   agent's own transcript converts into a trajectory of its own, embedded in
+   the subagent_trajectories of the trajectory whose Task / Agent call spawned
+   it, as harbor #4076 proposes (atif_converter.domain.claude_code_conversion):
+   trajectory_id is the native agent id, each spawning or resuming call's
+   result names it in subagent_trajectory_ref, a child no call names is
+   embedded under the root, and each parent's final_metrics include its
+   children's usage and cost. A side-file's copy of its parent's history is
+   dropped. A root transcript with no step of its own converts with every
+   transcript as one stream.
 2. Post-conversion enrichment pass over the Trajectory (pure function):
    - step.extra["source_uuids"]: list of raw record uuids contributing to the step
      (join on assistant message.id / tool_use_id; user steps via content match order).
@@ -265,7 +274,7 @@ proofs are out of scope for the workspace.
      carries its own is_error / exit_code. A script whose attribution is
      ambiguous emits none, and the exec result keeps the outcome folded from
      its items. The harbor port emits none, so parity is unchanged.
-   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 13) is
+   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 16) is
      bumped with any change to the converter's output for the same input.
 3. Census + edges + session events are derived from RAW jsonl (never from the
    trajectory). session_events keeps, as rows and NOT as steps: Claude Code

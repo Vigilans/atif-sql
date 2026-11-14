@@ -102,16 +102,16 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:690`
    trajectory in place with `source_uuids`, `is_compact_summary`, and
    `cache_creation_total` (the harbor trajectory has no other consumer, so no
    deep copy is taken): `packages/atif-converter/src/atif_converter/domain/edges.py:111`,
-   `packages/atif-converter/src/atif_converter/domain/enrichment.py:198`.
+   `packages/atif-converter/src/atif_converter/domain/enrichment.py:203`.
 5. Build the loss report: one `FidelityGap` member, `PARENT_CHAIN_FLATTENED`,
    is structural for every conversion, and the rest are added from what the
    census found and from what enrichment didn't repair:
    `packages/atif-converter/src/atif_converter/infrastructure/census.py:57`,
-   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:137`.
+   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:151`.
 6. Re-check the fingerprints, stat and digest both. Any movement since the
    read raises `SourceMutatedDuringConversion` rather than publishing
    artifacts that describe bytes the session no longer holds:
-   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:199`,
+   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:214`,
    `packages/atif-converter/src/atif_converter/infrastructure/raw_records.py`
    (`mutated_files`).
 7. Re-validate the enriched trajectory, and write it plus `edges.jsonl`

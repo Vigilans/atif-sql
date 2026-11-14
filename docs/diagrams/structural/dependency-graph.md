@@ -137,7 +137,7 @@ What the drawn edge deliberately compresses:
   (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:2-3`). An `ast` guard keeps
   `harbor` and `litellm` out of every `src/` tree (`packages/atif-converter/tests/test_dev_only_imports_guard.py`), and
   harbor's private converters are reachable from the parity oracle in the tests only
-  (`packages/atif-converter/tests/harbor_oracle.py:43`).
+  (`packages/atif-converter/tests/harbor_oracle.py:49`).
 
 ## Declared dependencies are not the installed closure
 

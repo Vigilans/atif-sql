@@ -566,21 +566,23 @@ class TestSidechains:
             },
         )
         assert out is not None
-        steps = out["steps"]
-        sidechain = [s for s in steps if s["extra"]["is_sidechain"]]
-        # Per subagent: its prompt, its tool turn (result attached), its answer.
-        assert [s["extra"].get("agent_id") for s in sidechain] == ["helper-1"] * 3 + [
-            "helper-2"
-        ] * 3
-        assert [s["source"] for s in sidechain] == ["user", "agent", "agent"] * 2
-        tool_turns = [s for s in sidechain if s.get("observation")]
-        assert [s["observation"]["results"][0]["content"] for s in tool_turns] == ["ok", "ok"]
-        main = [s for s in steps if not s["extra"]["is_sidechain"]]
+        main = out["steps"]
         assert len(main) == 2
-        assert not any("agent_id" in s["extra"] for s in main)
+        assert not any(s["extra"]["is_sidechain"] or "agent_id" in s["extra"] for s in main)
+        children = out["subagent_trajectories"]
+        assert [child["trajectory_id"] for child in children] == ["helper-1", "helper-2"]
+        for child in children:
+            steps = child["steps"]
+            # Its prompt, its tool turn (result attached), its answer.
+            assert [s["step_id"] for s in steps] == [1, 2, 3]
+            assert [s["source"] for s in steps] == ["user", "agent", "agent"]
+            assert all(s["extra"]["is_sidechain"] for s in steps)
+            assert {s["extra"]["agent_id"] for s in steps} == {child["trajectory_id"]}
+            tool_turns = [s for s in steps if s.get("observation")]
+            assert [s["observation"]["results"][0]["content"] for s in tool_turns] == ["ok"]
 
-    def test_main_chain_model_wins_over_an_earlier_sidechain_model(self, tmp_path: Path) -> None:
-        """agent.model_name and the model-less fallback come from the main chain even when a sidechain is first."""
+    def test_each_transcript_takes_its_own_model(self, tmp_path: Path) -> None:
+        """The root's agent.model_name and model-less fallback come from the root transcript; the subagent keeps its own."""
         side = [
             {
                 **_assistant("s1", "00.5", "sub", model="claude-small", msg_id="m_s"),
@@ -598,14 +600,13 @@ class TestSidechains:
         )
         assert out is not None
         assert out["agent"]["model_name"] == MODEL
-        assert [s["model_name"] for s in out["steps"] if s["source"] == "agent"] == [
-            "claude-small",
-            MODEL,
-            MODEL,
-        ]
-        assert out["steps"][0]["extra"]["is_sidechain"] is True
+        assert [s["model_name"] for s in out["steps"] if s["source"] == "agent"] == [MODEL, MODEL]
+        (child,) = out["subagent_trajectories"]
+        assert child["trajectory_id"] == "x"
+        assert child["agent"]["model_name"] == "claude-small"
+        assert child["steps"][0]["extra"]["is_sidechain"] is True
 
-    def test_sidechain_model_is_the_fallback_when_main_has_none(self, tmp_path: Path) -> None:
+    def test_a_subagent_model_stays_out_of_the_root(self, tmp_path: Path) -> None:
         side = [
             {
                 **_assistant("s1", "05", "sub", model="claude-small", msg_id="m_s"),
@@ -618,8 +619,9 @@ class TestSidechains:
             {"agent-x.jsonl": side},
         )
         assert out is not None
-        assert out["agent"]["model_name"] == "claude-small"
-        assert out["steps"][1]["model_name"] == "claude-small"
+        assert "model_name" not in out["agent"]
+        assert "model_name" not in out["steps"][1]
+        assert out["subagent_trajectories"][0]["agent"]["model_name"] == "claude-small"
 
     def test_agent_ids_and_branches_collect_into_agent_extra(self, tmp_path: Path) -> None:
         out = _convert(
@@ -635,6 +637,188 @@ class TestSidechains:
         # (harbor reads ``agent_id`` here and gets nothing; see
         # harbor_oracle.DELIBERATE_DIVERGENCES).
         assert out["steps"][1]["extra"]["agent_id"] == "ag-9"
+
+
+def _task(tool_id: str, prompt: str, **arguments: Any) -> dict[str, Any]:
+    return {
+        "type": "tool_use",
+        "id": tool_id,
+        "name": "Task",
+        "input": {"description": "d", "prompt": prompt, **arguments},
+    }
+
+
+def _task_result(
+    uuid: str, ts: str, tool_id: str, agent_id: str | None, **extra: Any
+) -> dict[str, Any]:
+    tool_use_result: dict[str, Any] = {"status": "completed"}
+    if agent_id is not None:
+        tool_use_result["agentId"] = agent_id
+    return _user(
+        uuid,
+        ts,
+        [{"type": "tool_result", "tool_use_id": tool_id, "content": "done"}],
+        toolUseResult=tool_use_result,
+        **extra,
+    )
+
+
+def _side(agent_id: str, *records: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{**record, "isSidechain": True, "agentId": agent_id} for record in records]
+
+
+def _usage(prompt: int) -> dict[str, int]:
+    return {"input_tokens": prompt, "output_tokens": 1}
+
+
+def _refs(trajectory: dict[str, Any], call_id: str) -> list[str]:
+    for step in trajectory["steps"]:
+        for result in (step.get("observation") or {}).get("results") or []:
+            if result["source_call_id"] == call_id:
+                return [ref["trajectory_id"] for ref in result.get("subagent_trajectory_ref") or []]
+    raise AssertionError(call_id)
+
+
+class TestSubagentNesting:
+    """harbor #4076: each side-file agent embeds under the call that spawned it."""
+
+    def test_the_spawning_task_names_the_child_and_totals_include_it(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            [
+                _user("u1", "01", "go"),
+                _assistant("a1", "02", [_task("t1", "inspect")], msg_id="m1", usage=_usage(10)),
+                _task_result("r1", "10", "t1", "c1"),
+                _assistant("a2", "11", "all done", msg_id="m2", usage=_usage(10)),
+            ],
+            {
+                "agent-c1.jsonl": _side(
+                    "c1",
+                    _user("c1-u", "03", "inspect"),
+                    _assistant("c1-a", "04", "looked", msg_id="mc1", usage=_usage(5)),
+                )
+            },
+        )
+        assert out is not None
+        (child,) = out["subagent_trajectories"]
+        assert child["trajectory_id"] == "c1"
+        assert child["session_id"] == out["session_id"] == SID
+        assert [s["step_id"] for s in child["steps"]] == [1, 2]
+        assert _refs(out, "t1") == ["c1"]
+        assert out["final_metrics"]["total_prompt_tokens"] == 25
+        # Steps stay per trajectory; usage and cost add up.
+        assert out["final_metrics"]["total_steps"] == 3
+
+    def test_a_copied_parent_prefix_stays_out_of_the_child(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            [
+                _user("u1", "01", "go"),
+                _assistant("a1", "02", [_task("t1", "inspect")], msg_id="m1"),
+            ],
+            {
+                "agent-c1.jsonl": [
+                    # A copy of the parent's turn under a new uuid, then the child's own.
+                    _user("copy-u", "01", "go"),
+                    *_side(
+                        "c1",
+                        _user("c1-u", "03", "inspect"),
+                        _assistant("c1-a", "04", "x", msg_id="mc"),
+                    ),
+                ]
+            },
+        )
+        assert out is not None
+        (child,) = out["subagent_trajectories"]
+        assert [s["message"] for s in child["steps"]] == ["inspect", "x"]
+
+    def test_a_grandchild_embeds_under_its_spawning_child(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            [
+                _user("u1", "01", "go"),
+                _assistant("a1", "02", [_task("t1", "outer")], msg_id="m1", usage=_usage(1)),
+                _task_result("r1", "20", "t1", "c1"),
+            ],
+            {
+                "agent-c1.jsonl": _side(
+                    "c1",
+                    _user("c1-u", "03", "outer"),
+                    _assistant("c1-a", "04", [_task("t2", "inner")], msg_id="mc1", usage=_usage(2)),
+                    _task_result("c1-r", "10", "t2", "c2"),
+                ),
+                "agent-c2.jsonl": _side(
+                    "c2",
+                    _user("c2-u", "05", "inner"),
+                    _assistant("c2-a", "06", "deep", msg_id="mc2", usage=_usage(4)),
+                ),
+            },
+        )
+        assert out is not None
+        (child,) = out["subagent_trajectories"]
+        (grandchild,) = child["subagent_trajectories"]
+        assert grandchild["trajectory_id"] == "c2"
+        assert _refs(child, "t2") == ["c2"]
+        assert child["final_metrics"]["total_prompt_tokens"] == 6
+        assert out["final_metrics"]["total_prompt_tokens"] == 7
+
+    def test_a_resumed_task_links_the_same_child(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            [
+                _user("u1", "01", "go"),
+                _assistant("a1", "02", [_task("t1", "start")], msg_id="m1"),
+                _task_result("r1", "05", "t1", "c1"),
+                _assistant("a2", "06", [_task("t2", "more", resume="c1")], msg_id="m2"),
+                _task_result("r2", "09", "t2", "c1"),
+            ],
+            {
+                "agent-c1.jsonl": _side(
+                    "c1",
+                    _user("c1-u", "03", "start"),
+                    _assistant("c1-a", "04", "x", msg_id="mc1"),
+                    _user("c1-u2", "07", "more"),
+                    _assistant("c1-a2", "08", "y", msg_id="mc2"),
+                )
+            },
+        )
+        assert out is not None
+        assert [c["trajectory_id"] for c in out["subagent_trajectories"]] == ["c1"]
+        assert _refs(out, "t1") == _refs(out, "t2") == ["c1"]
+
+    def test_a_unique_prompt_links_a_child_whose_result_names_no_agent(
+        self, tmp_path: Path
+    ) -> None:
+        out = _convert(
+            tmp_path,
+            [
+                _user("u1", "01", "go"),
+                _assistant("a1", "02", [_task("t1", "inspect")], msg_id="m1"),
+                _task_result("r1", "05", "t1", None),
+            ],
+            {"agent-c1.jsonl": _side("c1", _user("c1-u", "03", "inspect"))},
+        )
+        assert out is not None
+        assert _refs(out, "t1") == ["c1"]
+
+    def test_a_child_with_no_spawning_call_embeds_under_the_root(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            [_user("u1", "01", "go"), _assistant("a1", "02", "x", msg_id="m1")],
+            {"agent-c1.jsonl": _side("c1", _user("c1-u", "03", "orphan"))},
+        )
+        assert out is not None
+        assert [c["trajectory_id"] for c in out["subagent_trajectories"]] == ["c1"]
+
+    def test_a_root_with_no_step_of_its_own_converts_as_one_stream(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            [{"type": "summary", "uuid": "s", "summary": "t", "leafUuid": "x"}],
+            {"agent-c1.jsonl": _side("c1", _user("c1-u", "03", "only"))},
+        )
+        assert out is not None
+        assert [s["message"] for s in out["steps"]] == ["only"]
+        assert "subagent_trajectories" not in out
 
 
 class TestRecordFiltering:
@@ -679,7 +863,7 @@ class TestRecordFiltering:
         assert [s["message"] for s in out["steps"]] == ['{"k": 1}', "0", "x"]
 
     def test_duplicate_uuid_keeps_first_in_read_order(self, tmp_path: Path) -> None:
-        """Dedup is by uuid, first occurrence wins; side-files are read in sorted-name order after the main file."""
+        """A uuid is kept once across transcripts: the main file's first, then side-files in sorted-name order."""
         first = _user("dup", "05", "from main")
         from_b = _user("dup", "05", "from b")
         from_a = _user("dup", "05", "from a")
@@ -690,13 +874,16 @@ class TestRecordFiltering:
         )
         assert out is not None
         assert [s["message"] for s in out["steps"]] == ["go", "x", "from main"]
+        assert "subagent_trajectories" not in out
 
         without_main_copy = convert_claude_code_records(
             [_user("u1", "01", "go"), _assistant("a1", "02", "x")],
             {"b.jsonl": [from_b], "a.jsonl": [from_a]},
         )
         assert without_main_copy is not None
-        assert without_main_copy.steps[-1].message == "from a"
+        (child,) = without_main_copy.subagent_trajectories or []
+        assert child.trajectory_id == "a"
+        assert [step.message for step in child.steps] == ["from a"]
 
     def test_records_without_a_message_dict_produce_none(self, tmp_path: Path) -> None:
         assert (
@@ -931,5 +1118,7 @@ class TestFileReader:
         without = convert_claude_code_session(main, include_subagents=False)
         assert with_side is not None
         assert without is not None
-        assert len(with_side.steps) == 3
+        assert len(with_side.steps) == 2
+        assert [len(child.steps) for child in with_side.subagent_trajectories or []] == [1]
         assert len(without.steps) == 2
+        assert without.subagent_trajectories is None

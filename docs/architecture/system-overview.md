@@ -50,7 +50,7 @@ materialize use case records the failure against that session and continues, so 
 transcript never aborts a sync (`packages/atif-corpus/src/atif_corpus/domain/ports.py:104-106`).
 
 `atif-duck` reads the corpus root and never imports the packages that wrote it
-(`docs/CONTRACT.md:284`). Its `register` entry point registers raw readers, views, vector search,
+(`docs/CONTRACT.md:293`). Its `register` entry point registers raw readers, views, vector search,
 macros, the authorship views, and the analytics surface in that order, because views bind against
 the raw TEMP tables at CREATE time
 (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2185`); the per-session raw readers

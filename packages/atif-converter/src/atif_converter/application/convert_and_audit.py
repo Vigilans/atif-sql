@@ -40,8 +40,9 @@ from typing import Any
 from loguru import logger
 
 from atif_converter.domain.blobs import BlobCollector, extract_claude_code_blobs
+from atif_converter.domain.claude_code_conversion import split_claude_code_records
 from atif_converter.domain.edges import edges_jsonl_lines
-from atif_converter.domain.enrichment import enrich_trajectory
+from atif_converter.domain.enrichment import enrich_claude_code_trajectory
 from atif_converter.domain.errors import SourceMutatedDuringConversion
 from atif_converter.domain.fidelity import (
     CONVERTIBLE_RECORD_TYPES,
@@ -55,7 +56,9 @@ from atif_converter.domain.session_events import (
     claude_session_events,
     session_events_jsonl_lines,
 )
+from atif_converter.domain.trajectory_tree import iter_steps, iter_trajectories
 from atif_converter.infrastructure.census import SessionCensus, census_from_snapshot
+from atif_converter.infrastructure.claude_code_converter import loaded_side_records
 from atif_converter.infrastructure.harbor_adapter import (
     ConversionResult,
     convert_loaded_session,
@@ -86,8 +89,8 @@ _ENRICHMENT_REFUSAL_KEYS: tuple[str, ...] = (
 
 def _attributed_uuids(trajectory: dict[str, Any]) -> set[str]:
     uuids: set[str] = set()
-    for step in trajectory.get("steps") or []:
-        extra = step.get("extra") if isinstance(step, dict) else None
+    for step in iter_steps(trajectory):
+        extra = step.get("extra")
         source_uuids = extra.get("source_uuids") if isinstance(extra, dict) else None
         if isinstance(source_uuids, list):
             uuids.update(uuid for uuid in source_uuids if isinstance(uuid, str))
@@ -118,10 +121,14 @@ def _unrepaired_gaps(enriched: dict[str, Any], records: list[dict[str, Any]]) ->
       ``cache_creation_total``.
     """
     gaps: set[FidelityGap] = set()
+    for trajectory in iter_trajectories(enriched):
+        trajectory_extra = trajectory.get("extra")
+        if isinstance(trajectory_extra, dict) and any(
+            trajectory_extra.get(key) is not None for key in _ENRICHMENT_REFUSAL_KEYS
+        ):
+            gaps.add(FidelityGap.UUID_NOT_PRESERVED)
     extra = enriched.get("extra")
     extra = extra if isinstance(extra, dict) else {}
-    if any(extra.get(key) is not None for key in _ENRICHMENT_REFUSAL_KEYS):
-        gaps.add(FidelityGap.UUID_NOT_PRESERVED)
     compact_uuids = {
         record["uuid"]
         for record in records
@@ -134,11 +141,19 @@ def _unrepaired_gaps(enriched: dict[str, Any], records: list[dict[str, Any]]) ->
     return gaps
 
 
+def _has_inlined_sidechain(trajectory: dict[str, Any]) -> bool:
+    """Whether the root's own step list still holds a subagent's steps."""
+    return any(
+        (step.get("extra") or {}).get("is_sidechain") for step in trajectory.get("steps") or []
+    )
+
+
 def _loss_report(
     census: SessionCensus,
     *,
     captured: int,
     unrepaired: set[FidelityGap],
+    inlined_sidechain: bool,
 ) -> LossReport:
     converted = sum(
         count
@@ -151,7 +166,7 @@ def _loss_report(
     gaps = set(_STRUCTURAL_GAPS) | unrepaired
     if dropped:
         gaps.add(FidelityGap.NON_MESSAGE_RECORDS_DROPPED)
-    if census.subagent_files:
+    if inlined_sidechain:
         gaps.add(FidelityGap.SUBAGENTS_INLINED)
     # Named rather than inlined: LossReport is shared by both agents, so its
     # key type is the UNION of the two record taxonomies and a same-typed dict
@@ -271,7 +286,12 @@ def convert_and_audit(
     records = [record for record, _src in pairs]
     # The harbor trajectory has no other consumer, so enrich in place rather
     # than deep-copying a whole large transcript's worth of steps.
-    enriched = enrich_trajectory(result.trajectory, records, copy_input=False)
+    transcripts = split_claude_code_records(
+        loaded.main_records, loaded_side_records(loaded, include_subagents=include_subagents)
+    )
+    enriched = enrich_claude_code_trajectory(
+        result.trajectory, records, transcripts, copy_input=False
+    )
     annotate_claude_code_trajectory(
         enriched, records, blob_index, sidecars=_sidecars_by_agent_id(loaded)
     )
@@ -280,6 +300,7 @@ def convert_and_audit(
         census,
         captured=len(events),
         unrepaired=_unrepaired_gaps(enriched, records),
+        inlined_sidechain=_has_inlined_sidechain(enriched),
     )
     del pairs, loaded, records, events
     _refuse_if_mutated(snapshot, archive)

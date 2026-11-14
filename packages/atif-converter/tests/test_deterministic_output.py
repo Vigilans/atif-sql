@@ -102,35 +102,26 @@ def _record(uuid: str, second: int, record_type: str, index: int, **extra: Any) 
 
 
 def _write_multi_valued_session(project_dir: Path) -> Path:
-    """A session whose cwd, branch and subagent id each take several values."""
+    """A session whose cwd, branch and agent id each take several values."""
     main = project_dir / f"{_SESSION_ID}.jsonl"
-    side_dir = project_dir / _SESSION_ID / "subagents"
-    side_dir.mkdir(parents=True)
+    project_dir.mkdir(parents=True)
     main_records: list[dict[str, Any]] = []
-    for index, (cwd, branch) in enumerate(zip(_CWDS, _BRANCHES, strict=True)):
+    for index, (cwd, branch, agent_id) in enumerate(zip(_CWDS, _BRANCHES, _AGENT_IDS, strict=True)):
         main_records.append(
             _record(f"u{index}", 2 * index, "user", index, cwd=cwd, gitBranch=branch)
         )
         main_records.append(
-            _record(f"a{index}", 2 * index + 1, "assistant", index, cwd=cwd, gitBranch=branch)
-        )
-    main.write_text("".join(json.dumps(r) + "\n" for r in main_records), encoding="utf-8")
-    for index, agent_id in enumerate(_AGENT_IDS):
-        side = [
             _record(
-                f"s{index}",
-                20 + index,
+                f"a{index}",
+                2 * index + 1,
                 "assistant",
                 index,
-                cwd=_CWDS[index],
-                gitBranch=_BRANCHES[index],
+                cwd=cwd,
+                gitBranch=branch,
                 agentId=agent_id,
-                isSidechain=True,
             )
-        ]
-        (side_dir / f"agent-{agent_id}.jsonl").write_text(
-            "".join(json.dumps(r) + "\n" for r in side), encoding="utf-8"
         )
+    main.write_text("".join(json.dumps(r) + "\n" for r in main_records), encoding="utf-8")
     return main
 
 

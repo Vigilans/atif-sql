@@ -68,9 +68,14 @@ import copy
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+from atif_converter.domain.trajectory_tree import iter_trajectories
+
+if TYPE_CHECKING:
+    from atif_converter.domain.claude_code_conversion import ClaudeCodeTranscripts
 
 _SOURCE_UUIDS = "source_uuids"
 _TRUNCATED_AT = "enrichment_truncated_at_step"
@@ -409,4 +414,32 @@ def enrich_trajectory(
             enriched["extra"] = trajectory_extra
         trajectory_extra["cache_creation_total"] = cache_creation
 
+    return enriched
+
+
+def enrich_claude_code_trajectory(
+    trajectory: dict[str, Any],
+    raw_records: Sequence[dict[str, Any]],
+    transcripts: ClaudeCodeTranscripts,
+    *,
+    copy_input: bool = True,
+) -> dict[str, Any]:
+    """Enrich every trajectory of a converted Claude Code session from its own transcript.
+
+    ``transcripts`` is the converter's split of the same records
+    (:func:`~atif_converter.domain.claude_code_conversion.split_claude_code_records`):
+    an embedded trajectory is enriched from its agent's records, the root from
+    what the split left it. A root with no embedded trajectory was converted
+    from every record, so it is enriched from ``raw_records``.
+    """
+    enriched = copy.deepcopy(trajectory) if copy_input else trajectory
+    if not enriched.get("subagent_trajectories"):
+        return enrich_trajectory(enriched, raw_records, copy_input=False)
+    for node in iter_trajectories(enriched):
+        own = (
+            transcripts.root
+            if node is enriched
+            else transcripts.children.get(str(node.get("trajectory_id")), [])
+        )
+        enrich_trajectory(node, own, copy_input=False)
     return enriched

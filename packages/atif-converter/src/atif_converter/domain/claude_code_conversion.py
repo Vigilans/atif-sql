@@ -29,6 +29,16 @@ staged side-file NAME (``agent-abc.jsonl``,
 the old adapter staged them flat) to that file's records, and reads the
 side-files in sorted-name order.
 
+SUBAGENT TRAJECTORIES. harbor 0.26.0 converts the main transcript and every
+side-file as one stream. This module carries harbor #4076's nesting on top of
+that port (:func:`split_claude_code_records`,
+:func:`nest_claude_code_subagents`): each side-file agent's own transcript
+converts on its own and embeds under the call that spawned it. #4076 names a
+child by its side-file's path below the session directory; this module names
+it by the native agent id, the key ``toolUseResult.agentId``, the
+``agent-<id>.meta.json`` sidecar and the steps' ``extra.agent_id`` already
+share, so a trajectory's identity does not depend on where its file sits.
+
 OMITTED: ``_parse_total_cost_from_stream_json``. It reads
 ``<logs_dir>/claude-code.txt``, the stdout tee of a harbor-driven run. Our
 adapter always handed harbor an EMPTY temp ``logs_dir``, so ``read_text``
@@ -70,6 +80,7 @@ from atif_converter.domain.atif import (
     Observation,
     ObservationResult,
     Step,
+    SubagentTrajectoryRef,
     ToolCall,
     Trajectory,
 )
@@ -978,39 +989,21 @@ def _build_final_metrics(steps: list[Step]) -> FinalMetrics:
     )
 
 
-def convert_claude_code_records(
+def _convert_events(
     main_records: Sequence[dict[str, Any]],
-    side_records: Mapping[str, Sequence[dict[str, Any]]] | None = None,
+    side_records: Mapping[str, Sequence[dict[str, Any]]] | None,
     *,
-    fallback_session_id: str = "-unknown",
-    model_name: str | None = None,
+    fallback_session_id: str,
+    model_name: str | None,
 ) -> Trajectory | None:
-    """Convert one Claude Code session's parsed records into an ATIF trajectory.
+    """Harbor 0.26.0's conversion of one event stream, from the point the files were read.
 
-    This is harbor's ``_convert_events_to_trajectory`` from the point where the
-    session files have been read.
+    harbor 0.26.0 reads the main transcript and every side-file into this one
+    stream; :func:`convert_claude_code_records` hands it one transcript's own
+    events at a time instead.
 
-    Parameters
-    ----------
-    main_records
-        Every JSON record of the main ``<session-id>.jsonl``, in file order.
-    side_records
-        Staged side-file NAME -> that file's records (see the module docstring
-        for the name shape). Read after the main records, in sorted-name
-        order, exactly as harbor's ``sorted(rglob("subagents/*.jsonl"))``.
-    fallback_session_id
-        harbor falls back to the session directory's name when no record
-        carries a ``sessionId``; the old adapter staged under
-        ``<parent-dir-name or "-unknown">``, so callers pass that.
-    model_name
-        harbor's ``self.model_name``: the run-configured model, used only when
-        no record names one. Our adapter never set it.
-
-    Returns
-    -------
-    Trajectory | None
-        ``None`` exactly when harbor returns ``None``: no records at all, or no
-        record produced a step.
+    Returns ``None`` exactly when harbor returns ``None``: no records at all,
+    or no record produced a step.
     """
     # harbor builds agent.extra's lists from SETS, so their order follows the
     # process hash seed. Ours keep first-seen order (``_agent_extra``), a
@@ -1075,3 +1068,333 @@ def convert_claude_code_records(
         steps=steps,
         final_metrics=_build_final_metrics(steps),
     )
+
+
+# ---------------------------------------------------------------------------
+# Subagent transcripts as embedded trajectories (harbor #4076)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ClaudeCodeTranscripts:
+    """A session's records split into the root's own transcript and each subagent's."""
+
+    #: The root's own events: every main record, minus the events of an agent
+    #: that has a side-file.
+    root: list[dict[str, Any]]
+    #: Native agent id -> that agent's own events, in sorted side-file order.
+    children: dict[str, list[dict[str, Any]]]
+
+
+def _child_agent_id(name: str, records: Sequence[dict[str, Any]]) -> str:
+    """The agent a side-file belongs to: its ``agent-<id>`` file name when a sidechain event carries that id.
+
+    Otherwise the first sidechain ``agentId`` in the file, else the id the
+    file name gives. The name is the file's own, without the directories a
+    workflow-nested file's staged name joins in front of it. The first
+    sidechain event alone is not trusted, since a file can open with a copy of
+    its parent's sidechain context.
+    """
+    file_id = name.rsplit("__", 1)[-1].removesuffix(".jsonl").removeprefix("agent-")
+    sidechain_ids: list[str] = [
+        agent_id
+        for event in records
+        if isinstance(agent_id := event.get("agentId"), str) and event.get("isSidechain")
+    ]
+    return file_id if file_id in sidechain_ids else next(iter(sidechain_ids), file_id)
+
+
+def split_claude_code_records(
+    main_records: Sequence[dict[str, Any]],
+    side_records: Mapping[str, Sequence[dict[str, Any]]] | None,
+) -> ClaudeCodeTranscripts:
+    """Keep each native turn only in the transcript that owns it (harbor #4076).
+
+    A side-file belongs to one agent (:func:`_child_agent_id`), so that agent's
+    events leave the root, where an older Claude Code also inlined them. A
+    side-file can open with a copy of its parent's history, which may carry a
+    new uuid, timestamp or usage; the first event carrying the file's own agent
+    id starts its own transcript, an event of another agent is dropped, and a
+    uuid already kept anywhere is kept once. Two side-files of one agent join
+    into one transcript, in sorted-name order.
+    """
+    if not side_records:
+        return ClaudeCodeTranscripts(root=list(main_records), children={})
+    names = sorted(side_records)
+    child_ids = {name: _child_agent_id(name, side_records[name]) for name in names}
+    own_ids = set(child_ids.values())
+    root = [event for event in main_records if event.get("agentId") not in own_ids]
+    seen_uuids = {event["uuid"] for event in root if isinstance(event.get("uuid"), str)}
+    children: dict[str, list[dict[str, Any]]] = {}
+    for name in names:
+        own_id = child_ids[name]
+        events = side_records[name]
+        first_own = next(
+            (index for index, event in enumerate(events) if event.get("agentId") == own_id), 0
+        )
+        kept = children.setdefault(own_id, [])
+        for event in events[first_own:]:
+            event_uuid = event.get("uuid")
+            if event.get("agentId") not in (None, own_id):
+                continue
+            if isinstance(event_uuid, str) and event_uuid in seen_uuids:
+                continue
+            kept.append(event)
+            if isinstance(event_uuid, str):
+                seen_uuids.add(event_uuid)
+    return ClaudeCodeTranscripts(root=root, children=children)
+
+
+def _task_agent_id(result: ObservationResult | None) -> str | None:
+    metadata = (result.extra or {}).get("tool_result_metadata") if result else None
+    tool_result = metadata.get("tool_use_result") if isinstance(metadata, dict) else None
+    if isinstance(tool_result, dict):
+        for key in ("agentId", "agent_id"):
+            agent_id = tool_result.get(key)
+            if isinstance(agent_id, str) and agent_id:
+                return agent_id
+    return None
+
+
+_TaskCall = tuple[Trajectory, Step, ToolCall, "ObservationResult | None"]
+
+
+def _task_calls(trajectory: Trajectory) -> list[tuple[Step, ToolCall, ObservationResult | None]]:
+    """Every ``Task`` / ``Agent`` call of ``trajectory`` with its result, when it has one."""
+    calls: list[tuple[Step, ToolCall, ObservationResult | None]] = []
+    for step in trajectory.steps:
+        for call in step.tool_calls or []:
+            if call.function_name not in {"Task", "Agent"}:
+                continue
+            result = next(
+                (
+                    item
+                    for item in (step.observation.results if step.observation else [])
+                    if item.source_call_id == call.tool_call_id
+                ),
+                None,
+            )
+            calls.append((step, call, result))
+    return calls
+
+
+def _attach_subagent(
+    parent: Trajectory,
+    step: Step,
+    call: ToolCall,
+    result: ObservationResult | None,
+    child: Trajectory,
+) -> None:
+    if step.observation is None:
+        step.observation = Observation(results=[])
+    if result is None:
+        result = ObservationResult(source_call_id=call.tool_call_id)
+        step.observation.results.append(result)
+    refs = result.subagent_trajectory_ref or []
+    if not any(ref.trajectory_id == child.trajectory_id for ref in refs):
+        refs.append(
+            SubagentTrajectoryRef(trajectory_id=child.trajectory_id, session_id=child.session_id)
+        )
+    result.subagent_trajectory_ref = refs
+    if parent.subagent_trajectories is None:
+        parent.subagent_trajectories = []
+    if not any(existing is child for existing in parent.subagent_trajectories):
+        parent.subagent_trajectories.append(child)
+
+
+def _spawning_calls(
+    child_id: str,
+    child: Trajectory,
+    prompt: str | None,
+    prompts: Sequence[Any],
+    task_calls: Sequence[_TaskCall],
+) -> list[_TaskCall]:
+    """The calls that started or resumed ``child``: by its agent id, else by a unique prompt."""
+    candidates = [
+        (parent, step, call, result)
+        for parent, step, call, result in task_calls
+        if parent is not child
+        and (_task_agent_id(result) == child_id or call.arguments.get("resume") == child_id)
+        and _task_agent_id(result) in (None, child_id)
+        and call.arguments.get("resume") in (None, child_id)
+    ]
+    if candidates:
+        return candidates
+    prompt_candidates = [
+        (parent, step, call, result)
+        for parent, step, call, result in task_calls
+        if parent is not child
+        if prompt
+        and call.arguments.get("prompt") == prompt
+        and _task_agent_id(result) is None
+        and call.arguments.get("resume") is None
+    ]
+    # Prompt text identifies a child only when one eligible call and one child
+    # share it. Repeated prompts have no stable ID.
+    if len(prompt_candidates) == 1 and sum(other == prompt for other in prompts) == 1:
+        return prompt_candidates
+    return []
+
+
+def _roll_up(parent: Trajectory) -> None:
+    """Add each embedded trajectory's usage and cost to its parent's totals, deepest first."""
+    for child in parent.subagent_trajectories or []:
+        _roll_up(child)
+        if parent.final_metrics is None or child.final_metrics is None:
+            continue
+        for field_name in ("total_prompt_tokens", "total_completion_tokens", "total_cached_tokens"):
+            value = getattr(child.final_metrics, field_name)
+            if value is not None:
+                current = getattr(parent.final_metrics, field_name) or 0
+                setattr(parent.final_metrics, field_name, current + value)
+        parent_extra = parent.final_metrics.extra or {}
+        child_extra = child.final_metrics.extra or {}
+        for key in ("total_cache_creation_input_tokens", "total_cache_read_input_tokens"):
+            child_value = child_extra.get(key)
+            if isinstance(child_value, int):
+                parent_extra[key] = parent_extra.get(key, 0) + child_value
+        child_tiers = child_extra.get("service_tiers") or []
+        if child_tiers:
+            parent_extra["service_tiers"] = sorted(
+                set(parent_extra.get("service_tiers", [])) | set(child_tiers)
+            )
+        parent.final_metrics.extra = parent_extra or None
+        # harbor skips the root's cost when Claude's own stream result priced the
+        # whole run; this port never reads that result, so every cost adds up.
+        child_cost = child.final_metrics.total_cost_usd
+        current_cost = parent.final_metrics.total_cost_usd
+        parent.final_metrics.total_cost_usd = (
+            current_cost + child_cost
+            if current_cost is not None and child_cost is not None
+            else None
+        )
+
+
+def _first_prompt(child: Trajectory) -> str | None:
+    """The text of ``child``'s first user step, when that step's message is text."""
+    first = next((step for step in child.steps if step.source == "user"), None)
+    return first.message if first is not None and isinstance(first.message, str) else None
+
+
+def nest_claude_code_subagents(root: Trajectory, children: Mapping[str, Trajectory]) -> None:
+    """Embed each subagent trajectory under the trajectory whose call spawned it (harbor #4076).
+
+    ``children`` maps each native agent id to its converted trajectory, whose
+    ``trajectory_id`` is that id. A child links to the ``Task`` / ``Agent``
+    calls whose result names its agent id or that resume it, else to the one
+    call sharing its first prompt when no other child shares that prompt; it
+    is embedded under the trajectory that owns the spawning call (a resumed
+    call's result is linked too), unless that would close a cycle. A child
+    with no such call is embedded under the root. Each parent's totals then
+    include its children's.
+    """
+    task_calls: list[_TaskCall] = [
+        (parent, step, call, result)
+        for parent in (root, *children.values())
+        for step, call, result in _task_calls(parent)
+    ]
+    child_prompts = {child_id: _first_prompt(child) for child_id, child in children.items()}
+    prompts = list(child_prompts.values())
+    assigned: set[str] = set()
+    parent_of: dict[str, str | None] = {}
+    for child_id, child in children.items():
+        candidates = _spawning_calls(child_id, child, child_prompts[child_id], prompts, task_calls)
+        # A resumed Task reuses its agentId. Link each matching result to one
+        # embedded transcript under the parent that owns the spawn.
+        spawn_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate[2].arguments.get("resume") != child_id
+        ]
+        owner_candidates = spawn_candidates or candidates
+        parent = owner_candidates[0][0] if owner_candidates else None
+        if parent is None or not all(candidate[0] is parent for candidate in owner_candidates):
+            continue
+        ancestor = parent.trajectory_id
+        while ancestor is not None and ancestor != child_id:
+            ancestor = parent_of.get(ancestor)
+        if ancestor == child_id:
+            continue
+        for candidate in candidates:
+            if candidate[0] is parent:
+                _attach_subagent(*candidate, child)
+        parent_of[child_id] = parent.trajectory_id
+        assigned.add(child_id)
+
+    # Preserve transcripts whose spawning Task is missing from the log.
+    for child_id, child in children.items():
+        if child_id not in assigned:
+            root.subagent_trajectories = [*(root.subagent_trajectories or []), child]
+
+    _roll_up(root)
+
+
+def convert_claude_code_records(
+    main_records: Sequence[dict[str, Any]],
+    side_records: Mapping[str, Sequence[dict[str, Any]]] | None = None,
+    *,
+    fallback_session_id: str = "-unknown",
+    model_name: str | None = None,
+) -> Trajectory | None:
+    """Convert one Claude Code session's parsed records into an ATIF trajectory.
+
+    This is harbor's ``_convert_events_to_trajectory`` from the point where the
+    session files have been read, with harbor #4076's subagent nesting: each
+    side-file agent's own transcript (:func:`split_claude_code_records`)
+    converts into a trajectory of its own, embedded in ``subagent_trajectories``
+    (:func:`nest_claude_code_subagents`) with the native agent id as its
+    ``trajectory_id``. When the root's own transcript yields no step, every
+    transcript converts as one stream instead, as harbor 0.26.0 converts it.
+
+    Parameters
+    ----------
+    main_records
+        Every JSON record of the main ``<session-id>.jsonl``, in file order.
+    side_records
+        Staged side-file NAME -> that file's records (see the module docstring
+        for the name shape), in sorted-name order, exactly as harbor's
+        ``sorted(rglob("subagents/*.jsonl"))``.
+    fallback_session_id
+        harbor falls back to the session directory's name when no record
+        carries a ``sessionId``; the old adapter staged under
+        ``<parent-dir-name or "-unknown">``, so callers pass that.
+    model_name
+        harbor's ``self.model_name``: the run-configured model, used only when
+        no record names one. Our adapter never set it.
+
+    Returns
+    -------
+    Trajectory | None
+        ``None`` exactly when harbor returns ``None``: no records at all, or no
+        record produced a step.
+    """
+    if not side_records:
+        return _convert_events(
+            main_records, None, fallback_session_id=fallback_session_id, model_name=model_name
+        )
+    transcripts = split_claude_code_records(main_records, side_records)
+    root = (
+        _convert_events(
+            transcripts.root, None, fallback_session_id=fallback_session_id, model_name=model_name
+        )
+        if transcripts.root
+        else None
+    )
+    if root is None:
+        # Nesting needs a root step. Without one, keep the child transcripts in
+        # a single stream rather than drop the run.
+        flat = [*transcripts.root, *(e for events in transcripts.children.values() for e in events)]
+        return _convert_events(
+            flat, None, fallback_session_id=fallback_session_id, model_name=model_name
+        )
+    children: dict[str, Trajectory] = {}
+    for agent_id, events in transcripts.children.items():
+        child = _convert_events(
+            events, None, fallback_session_id=fallback_session_id, model_name=model_name
+        )
+        if child is None:
+            continue
+        child.trajectory_id = agent_id
+        children[agent_id] = child
+    nest_claude_code_subagents(root, children)
+    return root

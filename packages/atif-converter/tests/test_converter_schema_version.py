@@ -28,8 +28,8 @@ from atif_converter.domain.schema_version import CONVERTER_SCHEMA_VERSION
 
 #: The reviewed pair. Update BOTH in the commit that changes converter code:
 #: the version only when output can change, the digest always.
-PINNED_VERSION = 15
-PINNED_SOURCE_DIGEST = "28ff81163e4e732e0041174497d5d914eeec68d8bb873bfa9d6d9eb9f1e564a5"
+PINNED_VERSION = 16
+PINNED_SOURCE_DIGEST = "d17325d90a8e27520c76f64e4353e3ed11c089b8eb9b2277d4a1066a2f75ed8e"
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "atif_converter"
 

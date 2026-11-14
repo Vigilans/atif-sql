@@ -80,8 +80,10 @@ class FidelityGap(Enum):
     #: so branch/rewind structure is lost.
     PARENT_CHAIN_FLATTENED = "parent_chain_flattened"
 
-    #: (4) Subagent events are INLINED into the flat step list (marked only via
-    #: ``extra.is_sidechain``) instead of ``subagent_trajectories`` embedding.
+    #: (4) Subagent events sit in the root's own step list (marked only via
+    #: ``extra.is_sidechain``) instead of an embedded ``subagent_trajectories``
+    #: entry: a sidechain with no side-file of its own, or a session whose
+    #: root transcript yields no step.
     SUBAGENTS_INLINED = "subagents_inlined"
 
     #: (5) No ``isCompactSummary`` handling — compaction summaries are not

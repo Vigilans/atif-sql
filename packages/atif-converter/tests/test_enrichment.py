@@ -16,8 +16,15 @@ from typing import Any
 
 import pytest
 
-from atif_converter.domain.enrichment import enrich_trajectory
-from atif_converter.infrastructure.harbor_adapter import convert_session
+from atif_converter.domain.claude_code_conversion import split_claude_code_records
+from atif_converter.domain.enrichment import enrich_claude_code_trajectory, enrich_trajectory
+from atif_converter.domain.trajectory_tree import iter_steps
+from atif_converter.infrastructure.claude_code_converter import loaded_side_records
+from atif_converter.infrastructure.harbor_adapter import (
+    convert_loaded_session,
+    convert_session,
+    read_session,
+)
 from atif_converter.infrastructure.raw_records import (
     read_snapshot_records,
     take_session_snapshot,
@@ -31,11 +38,11 @@ _NO_EXTRA: Mapping[str, Any] = {}
 
 @pytest.fixture
 def enriched(synthetic_session: Path) -> dict[str, Any]:
-    result = convert_session(synthetic_session)
-    records = [
-        record for record, _src in read_snapshot_records(take_session_snapshot(synthetic_session))
-    ]
-    return enrich_trajectory(result.trajectory, records)
+    loaded = read_session(synthetic_session)
+    result = convert_loaded_session(loaded)
+    records = [record for record, _src in loaded.record_pairs()]
+    transcripts = split_claude_code_records(loaded.main_records, loaded_side_records(loaded))
+    return enrich_claude_code_trajectory(result.trajectory, records, transcripts)
 
 
 def _write_session(tmp_path: Path, events: list[dict[str, Any]]) -> Path:
@@ -166,7 +173,7 @@ def _enrich_file(session: Path) -> dict[str, Any]:
 
 def _steps_by_uuid(trajectory: dict[str, Any]) -> dict[str, dict[str, Any]]:
     index: dict[str, dict[str, Any]] = {}
-    for step in trajectory["steps"]:
+    for step in iter_steps(trajectory):
         for uuid in (step.get("extra") or _NO_EXTRA).get("source_uuids", []):
             index[uuid] = step
     return index

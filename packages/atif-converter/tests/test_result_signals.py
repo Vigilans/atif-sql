@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +34,13 @@ from atif_converter.application.convert_codex import convert_codex_and_audit
 from atif_converter.domain.blobs import BlobCollector, extract_claude_code_blobs
 from atif_converter.domain.claude_code_conversion import convert_claude_code_records
 from atif_converter.domain.errors import SourceMutatedDuringConversion
+from atif_converter.domain.trajectory_tree import iter_steps, iter_trajectories
 from atif_converter.infrastructure import raw_records
 from atif_converter.infrastructure.claude_code_converter import convert_claude_code_session
 
 
 def _steps(trajectory: dict[str, Any]) -> list[dict[str, Any]]:
-    return trajectory["steps"]
+    return list(iter_steps(trajectory))
 
 
 def _result(trajectory: dict[str, Any], call_id: str) -> dict[str, Any]:
@@ -99,12 +101,12 @@ class TestSubagentAgentId:
         assert theirs is not None
         assert ours is not None
         ours_dict = ours.to_json_dict()
-        sidechain = [s for s in theirs["steps"] if s["extra"]["is_sidechain"]]
+        sidechain = [s for s in _steps(theirs) if s["extra"]["is_sidechain"]]
         # Not vacuous: harbor names a subagent on prompts, tool turns and answers.
         assert len(sidechain) == 6
         assert all(s["extra"].get("agent_id") in {"aaa", "bbb"} for s in sidechain)
-        assert [s["extra"].get("agent_id") for s in theirs["steps"]] == [
-            s["extra"].get("agent_id") for s in ours_dict["steps"]
+        assert [s["extra"].get("agent_id") for s in _steps(theirs)] == [
+            s["extra"].get("agent_id") for s in _steps(ours_dict)
         ]
         raw = diff_paths(theirs, ours_dict)
         assert not [line for line in raw if ".extra.agent_id:" in line]
@@ -112,10 +114,15 @@ class TestSubagentAgentId:
         # divergence (NULL, not harbor's $0), per session and per step, shows up,
         # and harbor's set-ordered ``agent.extra.agent_ids`` may come out
         # reversed; nothing else may.
-        others = {line.split(":", 1)[0] for line in raw}
+        # Paths are compared per trajectory, root and embedded alike.
+        others = {
+            re.sub(r"^\$(?:\.subagent_trajectories\[\d+\])+", "$", line.split(":", 1)[0])
+            for line in raw
+        }
+        longest = max(len(t["steps"]) for t in iter_trajectories(ours_dict))
         step_paths = {
             path.format(i=index)
-            for index in range(len(ours.steps))
+            for index in range(longest)
             for path in (*STEP_PRICING_DIVERGENCE_PATHS, "$.steps[{i}].metrics.extra")
         }
         order_paths = {"$.agent.extra.agent_ids[0]", "$.agent.extra.agent_ids[1]"}

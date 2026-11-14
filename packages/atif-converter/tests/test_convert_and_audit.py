@@ -13,6 +13,8 @@ is a decision to diverge from harbor, and the policy is where that is recorded.
 
 from __future__ import annotations
 
+import json
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ import pytest
 from atif_converter.application.convert_and_audit import convert_and_audit
 from atif_converter.domain.errors import InvalidSessionInput
 from atif_converter.domain.fidelity import FidelityGap, LossReport, RecordType
+from atif_converter.domain.trajectory_tree import iter_steps
 from atif_converter.infrastructure.harbor_adapter import ConversionResult
 
 Converted = tuple[ConversionResult, LossReport]
@@ -64,27 +67,23 @@ class TestConversion:
         assert metrics["prompt_tokens"] == 10 + 100 + 50
         assert metrics["extra"]["cache_creation_input_tokens"] == 50
 
-    def test_subagent_inlined_gap4(self, converted: Converted) -> None:
-        """Subagent events land in the flat step list via extra.is_sidechain,
-        not in a subagent_trajectories embedding."""
+    def test_side_files_nest_as_subagent_trajectories(self, converted: Converted) -> None:
+        """Each side-file's agent converts into an embedded trajectory named by its agent id."""
         result, _ = converted
-        sidechain = [
-            s
-            for s in result.trajectory["steps"]
-            if (s.get("extra") or _NO_EXTRA).get("is_sidechain")
-        ]
-        # flat side-file (2) + workflow-nested file (1) via the staging fix
-        assert len(sidechain) == 3
-        assert "subagent_trajectories" not in result.trajectory
+        assert not any(
+            (s.get("extra") or _NO_EXTRA).get("is_sidechain") for s in result.trajectory["steps"]
+        )
+        children = result.trajectory["subagent_trajectories"]
+        # flat side-file (2 steps) + workflow-nested file (1 step)
+        assert [(c["trajectory_id"], len(c["steps"])) for c in children] == [("abc", 2), ("def", 1)]
+        assert {c["session_id"] for c in children} == {result.trajectory["session_id"]}
 
     def test_workflow_nested_side_files_convert(self, converted: Converted) -> None:
         """Our converter discovers workflow-nested side-files itself, so their
         records convert (harbor's own discovery cannot see them)."""
         result, _ = converted
-        texts = [
-            (s.get("message") or "") for s in result.trajectory["steps"] if s["source"] == "user"
-        ]
-        assert any("workflow subagent prompt" in t for t in texts)
+        workflow = result.trajectory["subagent_trajectories"][1]
+        assert [s["message"] for s in workflow["steps"]] == ["workflow subagent prompt"]
 
     def test_uuid_not_preserved_gap7(self, synthetic_session: Path) -> None:
         """DOCUMENTS gap 7: harbor ALONE never puts the event uuid in the step.
@@ -156,10 +155,25 @@ class TestLossReport:
 
     def test_structural_gaps_always_observed(self, converted: Converted) -> None:
         _, report = converted
-        assert {
-            FidelityGap.PARENT_CHAIN_FLATTENED,
-            FidelityGap.SUBAGENTS_INLINED,
-        } <= report.gaps_observed
+        assert FidelityGap.PARENT_CHAIN_FLATTENED in report.gaps_observed
+        # Every subagent step sits in its own embedded trajectory.
+        assert FidelityGap.SUBAGENTS_INLINED not in report.gaps_observed
+
+    def test_a_sidechain_with_no_side_file_is_reported_inlined(
+        self, synthetic_session: Path
+    ) -> None:
+        side_dir = synthetic_session.parent / synthetic_session.stem
+        records = [
+            json.loads(line)
+            for path in sorted(side_dir.rglob("*.jsonl"))
+            for line in path.read_text().splitlines()
+        ]
+        with synthetic_session.open("a") as handle:
+            handle.writelines(json.dumps(record) + "\n" for record in records)
+        shutil.rmtree(side_dir)
+        result, report = convert_and_audit(synthetic_session)
+        assert any(s["extra"].get("is_sidechain") for s in result.trajectory["steps"])
+        assert FidelityGap.SUBAGENTS_INLINED in report.gaps_observed
 
     def test_gaps_enrichment_repaired_are_not_reported(self, converted: Converted) -> None:
         """Every step attributed and cache_creation_total surfaced: the three repairable gaps stay out."""
@@ -178,11 +192,11 @@ class TestLossReport:
 
     def test_workflow_records_now_reach_the_trajectory(self, converted: Converted) -> None:
         """With our own side-file discovery the workflow file's user record becomes a
-        step: 1 main user + 1 subagent user + 1 subagent assistant +
-        1 workflow user + 2 agent turns = 6 (the tool_result user event
-        attaches to its pending call in place)."""
+        step: 1 main user + 2 agent turns in the root (the tool_result user
+        event attaches to its pending call in place), 1 subagent user + 1
+        subagent assistant, and 1 workflow user = 6."""
         result, _report = converted
-        assert len(result.trajectory["steps"]) == 6
+        assert len(list(iter_steps(result.trajectory))) == 6
 
 
 class TestEnrichedWiring:
@@ -194,8 +208,6 @@ class TestEnrichedWiring:
         assert result.trajectory["extra"]["cache_creation_total"] == 50
 
     def test_edges_lines_cover_every_raw_record(self, converted: Converted) -> None:
-        import json
-
         result, report = converted
         assert len(result.edges_lines) == report.records_total == 9
         uuids = {json.loads(line)["uuid"] for line in result.edges_lines}
@@ -212,8 +224,6 @@ class TestRecordTypeTaxonomy:
         ],
     )
     def test_new_members_map_in_census(self, tmp_path: Path, raw: str, member: RecordType) -> None:
-        import json
-
         from atif_converter.infrastructure.census import census_from_snapshot
         from atif_converter.infrastructure.raw_records import (
             read_snapshot_records,

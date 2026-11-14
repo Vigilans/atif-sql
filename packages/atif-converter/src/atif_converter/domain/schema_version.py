@@ -130,12 +130,23 @@ History:
   include theirs. A spawned thread's steps no longer sit in the root's
   ``steps`` and carry no ``extra.is_sidechain`` / ``extra.agent_id``; each
   trajectory's ``source_uuids`` come from its own thread's records.
+* 16 — harbor #4076: each Claude Code side-file agent's own transcript
+  converts into a trajectory of its own, embedded in the
+  ``subagent_trajectories`` of the trajectory whose ``Task`` / ``Agent`` call
+  spawned it (else the root's), with the native agent id as
+  ``trajectory_id`` and a ``subagent_trajectory_ref`` on each spawning or
+  resuming call's result; each parent's ``final_metrics`` include its
+  children's usage and cost. A side-file's copy of its parent's history is
+  dropped, the root's ``agent.extra`` and model come from the root's own
+  transcript, each trajectory's ``source_uuids`` come from its own
+  transcript's records, and ``subagents_inlined`` is reported only when the
+  root's own steps hold a sidechain.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 15
+CONVERTER_SCHEMA_VERSION: Final = 16
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

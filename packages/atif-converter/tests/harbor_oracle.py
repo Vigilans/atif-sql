@@ -33,10 +33,16 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+from atif_converter.domain.trajectory_tree import iter_steps
+
+if TYPE_CHECKING:
+    from atif_converter.domain.atif import Trajectory
 
 GOLDENS_DIR = Path(__file__).parent / "goldens"
 
@@ -47,6 +53,15 @@ _CONVERT_METHOD = "_convert_events_to_trajectory"
 #: a parity failure. Keep each entry narrow (a path AND a direction), so a
 #: divergence the decision did not cover still fails.
 #:
+#: * Claude Code subagent side-files nest as ``subagent_trajectories``, the
+#:   shape harbor #4076 proposes and harbor 0.26.0 does not ship: 0.26.0 reads
+#:   every side-file into the root's step list. A pattern cannot forgive that
+#:   narrowly (every step after the first subagent event moves), so the oracle
+#:   itself carries the divergence: :func:`harbor_claude_code_trajectory`
+#:   converts each transcript :func:`split_claude_code_records` keeps apart
+#:   with harbor, then nests harbor's trajectories with
+#:   :func:`nest_claude_code_subagents`. Every step, metric and field of every
+#:   trajectory is still harbor's; only the split and the nesting are ours.
 #: * A Codex spawned thread harbor's ``spawn_agent`` / ``task_name`` rule does
 #:   not link is linked from the call that reported it
 #:   (``atif_converter.domain.codex_nesting``), so the spawning result carries
@@ -121,10 +136,10 @@ def _stage_claude_code_session(
     return session_dir
 
 
-def harbor_claude_code_trajectory(
-    session_jsonl: Path, *, include_subagents: bool = True
+def _harbor_claude_code_session(
+    session_jsonl: Path, *, include_subagents: bool
 ) -> dict[str, Any] | None:
-    """harbor's own conversion of one Claude Code session, as ``to_json_dict()``."""
+    """harbor's conversion of one Claude Code session staged as it is on disk."""
     from harbor.agents.installed.claude_code import ClaudeCode  # type: ignore[import-untyped]
 
     with tempfile.TemporaryDirectory(prefix="atif-oracle-") as scratch:
@@ -136,6 +151,61 @@ def harbor_claude_code_trajectory(
         logs_dir.mkdir()
         trajectory = getattr(ClaudeCode(logs_dir=logs_dir), _CONVERT_METHOD)(session_dir)
     return None if trajectory is None else trajectory.to_json_dict()
+
+
+def _harbor_claude_code_events(session_jsonl: Path, events: list[Any]) -> Trajectory | None:
+    """harbor's conversion of one transcript's events, staged alone under the session's name."""
+    from atif_converter.domain.atif import Trajectory
+
+    with tempfile.TemporaryDirectory(prefix="atif-oracle-part-") as scratch:
+        part = Path(scratch) / (session_jsonl.parent.name or "-unknown") / session_jsonl.name
+        part.parent.mkdir(parents=True)
+        part.write_text(
+            "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events),
+            encoding="utf-8",
+        )
+        trajectory = _harbor_claude_code_session(part, include_subagents=False)
+    return None if trajectory is None else Trajectory.model_validate(trajectory)
+
+
+def harbor_claude_code_trajectory(
+    session_jsonl: Path, *, include_subagents: bool = True
+) -> dict[str, Any] | None:
+    """harbor's own conversion of one Claude Code session, as ``to_json_dict()``.
+
+    A session with side-files is split and nested the way
+    :data:`DELIBERATE_DIVERGENCES` describes: each transcript is harbor's
+    conversion of that transcript alone.
+    """
+    from atif_converter.domain.claude_code_conversion import (
+        nest_claude_code_subagents,
+        split_claude_code_records,
+    )
+    from atif_converter.infrastructure.claude_code_converter import (
+        discover_side_files,
+        read_session_records,
+    )
+
+    side_files = discover_side_files(session_jsonl, include_subagents=include_subagents)
+    if not side_files:
+        return _harbor_claude_code_session(session_jsonl, include_subagents=include_subagents)
+    transcripts = split_claude_code_records(
+        read_session_records(session_jsonl),
+        {name: read_session_records(path) for name, path in side_files.items()},
+    )
+    flat = [*transcripts.root, *(e for events in transcripts.children.values() for e in events)]
+    root = _harbor_claude_code_events(session_jsonl, transcripts.root) if transcripts.root else None
+    if root is None:
+        flat_trajectory = _harbor_claude_code_events(session_jsonl, flat)
+        return None if flat_trajectory is None else flat_trajectory.to_json_dict()
+    children: dict[str, Trajectory] = {}
+    for agent_id, events in transcripts.children.items():
+        child = _harbor_claude_code_events(session_jsonl, events)
+        if child is not None:
+            child.trajectory_id = agent_id
+            children[agent_id] = child
+    nest_claude_code_subagents(root, children)
+    return root.to_json_dict()
 
 
 def harbor_codex_trajectory(rollout_jsonl: Path) -> dict[str, Any] | None:
@@ -301,10 +371,13 @@ def _pricing_divergence_expected(ours: dict[str, Any]) -> bool:
         return True
     if final_metrics.get("total_cost_usd") is not None:
         return False
+    # A total includes its embedded trajectories' costs, so their steps count.
     models = {
-        step.get("model_name")
-        for step in ours.get("steps") or []
-        if step.get("source") == "agent" and isinstance(step.get("model_name"), str)
+        model
+        for model in (
+            step.get("model_name") for step in iter_steps(ours) if step.get("source") == "agent"
+        )
+        if isinstance(model, str)
     }
     for model in models:
         try:
@@ -381,6 +454,28 @@ def _image_content_forgiven(expected: dict[str, Any], ours: dict[str, Any]) -> f
     return frozenset(forgiven)
 
 
+def _trajectory_pairs(
+    expected: dict[str, Any], ours: dict[str, Any], prefix: str = "$"
+) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Each trajectory of the two trees with its counterpart and JSON path, parents first."""
+    yield prefix, expected, ours
+    pairs = zip(
+        expected.get("subagent_trajectories") or [],
+        ours.get("subagent_trajectories") or [],
+        strict=False,
+    )
+    for index, (harbor_child, our_child) in enumerate(pairs):
+        if isinstance(harbor_child, dict) and isinstance(our_child, dict):
+            yield from _trajectory_pairs(
+                harbor_child, our_child, f"{prefix}.subagent_trajectories[{index}]"
+            )
+
+
+def _rebase(paths: Iterable[str], prefix: str) -> set[str]:
+    """``paths``, written from a trajectory's ``$``, as paths below ``prefix``."""
+    return {prefix + path.removeprefix("$") for path in paths}
+
+
 def parity_diffs(expected: dict[str, Any], ours: dict[str, Any]) -> list[str]:
     """:func:`diff_paths` minus the documented deliberate divergences.
 
@@ -392,22 +487,35 @@ def parity_diffs(expected: dict[str, Any], ours: dict[str, Any]) -> list[str]:
     values; the :data:`PRICING_DIVERGENCE_PATHS`, only when
     :func:`_pricing_divergence_expected` says the pricing policy explains them;
     and a step's :data:`STEP_PRICING_DIVERGENCE_PATHS`, only when that step's
-    model is one the policy prices differently.
+    model is one the policy prices differently. All but the patterns are
+    judged per trajectory, for the root and each embedded trajectory alike.
     """
-    step_forgiven = _step_pricing_forgiven(expected, ours) | _image_content_forgiven(expected, ours)
-    order_forgiven = _set_order_forgiven(expected, ours)
-    diffs = [
+    step_forgiven: set[str] = set()
+    order_forgiven: list[str] = []
+    forgiven: set[str] = set()
+    for prefix, harbor_node, our_node in _trajectory_pairs(expected, ours):
+        step_forgiven |= _rebase(
+            _step_pricing_forgiven(harbor_node, our_node)
+            | _image_content_forgiven(harbor_node, our_node),
+            prefix,
+        )
+        order_forgiven.extend(_rebase(_set_order_forgiven(harbor_node, our_node), prefix))
+        if _pricing_divergence_expected(our_node):
+            # When the label was harbor's only final_metrics.extra key, ours has
+            # no extra at all, and the diff names the parent path instead.
+            harbor_extra = (harbor_node.get("final_metrics") or {}).get("extra")
+            label_only = isinstance(harbor_extra, dict) and set(harbor_extra) == {"cost_source"}
+            forgiven |= _rebase(
+                PRICING_DIVERGENCE_PATHS
+                | ({"$.final_metrics.extra"} if label_only else frozenset()),
+                prefix,
+            )
+    order_prefixes = tuple(order_forgiven)
+    return [
         line
         for line in diff_paths(expected, ours)
         if not any(pattern.match(line) for pattern in DELIBERATE_DIVERGENCES)
         and _diff_path(line) not in step_forgiven
-        and not (order_forgiven and _diff_path(line).startswith(order_forgiven))
+        and not (order_prefixes and _diff_path(line).startswith(order_prefixes))
+        and _diff_path(line) not in forgiven
     ]
-    if not _pricing_divergence_expected(ours):
-        return diffs
-    # When the label was harbor's only final_metrics.extra key, ours has no
-    # extra at all, and the diff names the parent path instead.
-    harbor_extra = (expected.get("final_metrics") or {}).get("extra")
-    label_only = isinstance(harbor_extra, dict) and set(harbor_extra) == {"cost_source"}
-    forgiven = PRICING_DIVERGENCE_PATHS | ({"$.final_metrics.extra"} if label_only else frozenset())
-    return [diff for diff in diffs if _diff_path(diff) not in forgiven]

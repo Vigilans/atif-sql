@@ -45,5 +45,6 @@ class TestParityClaudeCode:
         assert ours is not None
         assert parity_diffs(theirs, ours.to_json_dict()) == []
         # The flag has to change the answer, or the test above proves nothing.
-        assert len(ours.steps) < len(load_golden("claude_code.synthetic")["steps"])
+        assert ours.subagent_trajectories is None
+        assert load_golden("claude_code.synthetic")["subagent_trajectories"]
         assert all(step.extra is not None and not step.extra["is_sidechain"] for step in ours.steps)
