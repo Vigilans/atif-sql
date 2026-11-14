@@ -64,7 +64,7 @@ from atif_duck.infrastructure.registry import register, register_raw
 #: LAKE_SCHEMA_VERSION bumped, then re-pin: a lake recording another digest is
 #: rebuilt by the next materialize, so the digest alone already forces the
 #: rebuild; the version is for a change the definitions do not show.
-PINNED_SCHEMA = (1, "c1daacdbdda78c113e4b8c027604f155722142f9382181756cc66df563321d0b")
+PINNED_SCHEMA = (1, "a893a853bb249ce2cd488c0de2604c9bd246ea11f16009297fcfa747fbf3fb60")
 
 
 def _corpus(root: Path) -> LakeCorpus:
@@ -243,6 +243,29 @@ class TestLoad:
         register_raw(con, root, session_ids=[])
         for relation in ("v_raw_meta", "v_raw_steps", "v_raw_edges", "v_raw_loss_reports"):
             assert _rows(con, f"SELECT count(*) FROM {relation}") == [(0,)], relation
+
+    def test_v_raw_meta_projects_host_across_raw_and_lake_paths(self, tmp_path: Path) -> None:
+        root = build_corpus(tmp_path / "corpus")
+        meta_path = root / "sessions" / SESSION_IDS[0] / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta_path.write_text(json.dumps({**meta, "host": "ws.example.com"}), encoding="utf-8")
+
+        raw_con = duckdb.connect()
+        register(raw_con, root, skip_vss=True)
+        expected = sorted(
+            [
+                (SESSION_IDS[0], "ws.example.com"),
+                *((sid, None) for sid in SESSION_IDS[1:]),
+            ]
+        )
+        sql = (
+            "SELECT s.session_id, m.host FROM sessions s "
+            "JOIN v_raw_meta m ON m.session_id_path = s.session_id ORDER BY 1"
+        )
+        assert _rows(raw_con, sql) == expected
+
+        layout = _lake(tmp_path, LakeCorpus(root=root, agent="claude-code"))
+        assert _rows(_reader(layout, root), sql) == expected
 
 
 class TestSharedCorpus:

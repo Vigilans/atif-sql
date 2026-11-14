@@ -915,7 +915,7 @@ rather than skipping a file that no longer contains the current version; the gua
   list of enum values.
 - **The `meta.json` provenance record**: written at
   `packages/atif-corpus/src/atif_corpus/application/materialize.py:689-715`, projected at
-  `packages/atif-duck/src/atif_duck/domain/raw_readers.py:99-121`. `harbor_version` (the vendored
+  `packages/atif-duck/src/atif_duck/domain/raw_readers.py:99-124`. `harbor_version` (the vendored
   models' upstream release) and `converter_version` (the `atif-sql` release) are supplied by the
   CLI (`packages/atif-cli/src/atif_cli/app.py:986` and `:991`), so the corpus records which
   converter built it without atif-corpus importing either.

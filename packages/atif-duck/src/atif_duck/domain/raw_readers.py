@@ -108,6 +108,9 @@ META_COLUMNS: dict[str, str] = {
     # Queries read ``sessions.agent`` (from the trajectory) instead; this
     # column is provenance for an operator reading meta.json directly.
     "agent": "VARCHAR",
+    # Which machine converted the session under ``materialize --relocatable``;
+    # NULL on sessions materialized by an ordinary pass.
+    "host": "VARCHAR",
     # Which columnar schema the session's parquet artifacts were written
     # against. Absent (NULL) on a session materialized before the artifacts
     # existed; that session is read from trajectory.json, which is always
