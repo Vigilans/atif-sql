@@ -50,7 +50,7 @@ materialize use case records the failure against that session and continues, so 
 transcript never aborts a sync (`packages/atif-corpus/src/atif_corpus/domain/ports.py:104-106`).
 
 `atif-duck` reads the corpus root and never imports the packages that wrote it
-(`docs/CONTRACT.md:266`). Its `register` entry point registers raw readers, views, vector search,
+(`docs/CONTRACT.md:272`). Its `register` entry point registers raw readers, views, vector search,
 macros, the authorship views, and the analytics surface in that order, because views bind against
 the raw TEMP tables at CREATE time
 (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2185`); the per-session raw readers
@@ -87,7 +87,7 @@ The direction of those edges is enforced rather than conventional. `[tool.import
 importing each other (`:606`), and a forbidden contract limiting `atif-analytics` to `atif-models`
 alone among the members (`:611`). `atif-cli` is
 the sole composition root, and it imports its siblings lazily inside command bodies
-(`packages/atif-cli/src/atif_cli/app.py:727`, `:1784`, `:1994`) so that `atif-sql schema` pays for
+(`packages/atif-cli/src/atif_cli/app.py:727`, `:1789`, `:1999`) so that `atif-sql schema` pays for
 none of the analytics or vector stack. Failures surface as typed exceptions mapped to stable
 process exit codes at the CLI edge (`packages/atif-cli/src/atif_cli/errors.py:30`).
 

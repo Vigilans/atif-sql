@@ -938,7 +938,8 @@ def materialize(
         skips the lake; ``status`` counts the sessions that leaves behind.
     relocatable
         Write a corpus several machines can share: each session records this machine as
-        ``meta.host``. Default from ``ATIF_SQL_RELOCATABLE``.
+        ``meta.host``, and the pass marks, guards and re-converts from an archive only this
+        machine's sessions. Default from ``ATIF_SQL_RELOCATABLE``.
     fmt
         Report format; ``auto`` = human lines on TTY, JSON on a pipe.
     """
@@ -1205,6 +1206,7 @@ def status(
     source_root: Path | None = None,
     corpus_root: Path | None = None,
     quiesce_seconds: int | None = None,
+    relocatable: bool | None = None,
     vector_probe: Annotated[bool, cyclopts.Parameter(name="--vector-probe")] = False,
     fmt: Annotated[OutputFormat, cyclopts.Parameter(name="--format")] = OutputFormat.AUTO,
 ) -> None:
@@ -1221,7 +1223,9 @@ def status(
     gone (``meta.source_present`` false, or about to be marked so), and
     ``from_archive`` how many of them the next pass would re-convert from
     their raw source archive. ``empty`` counts transcripts recorded as having
-    nothing to convert.
+    nothing to convert. ``--relocatable`` (default from
+    ``ATIF_SQL_RELOCATABLE``) replays a relocatable pass, which retains and
+    re-converts only this machine's sessions.
 
     ``--agent`` selects which corpus is reported, resolving the same way
     ``materialize`` resolves it, so the two commands always describe the same
@@ -1288,6 +1292,7 @@ def status(
         converter_schema=CONVERTER_SCHEMA_VERSION,
         quiesce_seconds=quiesce,
         source_layout=layout_for(settings.agent),
+        relocatable=relocatable if relocatable is not None else settings.relocatable,
     )
     plan = preview.plan
     source_sessions = (*plan.to_materialize, *plan.up_to_date, *plan.skipped_live)

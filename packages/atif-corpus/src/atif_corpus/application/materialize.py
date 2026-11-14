@@ -105,7 +105,11 @@ agent's pass keeps it, and ``watermark.json`` entries outside this pass's
 
 A relocatable pass (``relocatable=True``) writes a corpus several machines can
 share. It records the machine it runs on as ``meta.host``, which with
-``agent`` and ``session_id`` names the original transcript.
+``agent`` and ``session_id`` names the original transcript. Within its agent,
+a relocatable pass owns the sessions whose ``meta.host`` names its machine,
+and an ordinary pass the ones with no host: each marks, retains and
+re-converts from an archive only its own, and only its own trip the
+empty-scan guard.
 
 A failing session is recorded in the report and skipped — one broken
 transcript must never abort a corpus sync.
@@ -1088,17 +1092,19 @@ def _session_agent(meta: Mapping[str, Any]) -> str:
 
 
 def _holds_agent_sessions(
-    layout: CorpusLayout, session_dir_names: Sequence[str], agent: str
+    layout: CorpusLayout, session_dir_names: Sequence[str], agent: str, host: str | None
 ) -> bool:
-    """Whether any of the corpus's session dirs is ``agent``'s.
+    """Whether any of the corpus's session dirs is ``agent``'s on ``host``.
 
-    A dir whose ``meta.json`` cannot be read counts: which agent it belongs to
-    is unknown, and this answers the suspicious-empty-scan guard, which must
-    fail loud rather than quiet when it cannot tell.
+    ``host`` is the ``meta.host`` a pass writes: its machine's name for a
+    relocatable pass, ``None`` (no key) for an ordinary one. A dir whose
+    ``meta.json`` cannot be read counts: whose session it is is unknown, and
+    this answers the suspicious-empty-scan guard, which must fail loud rather
+    than quiet when it cannot tell.
     """
     for name in session_dir_names:
         meta = _read_meta(layout, name)
-        if meta is None or _session_agent(meta) == agent:
+        if meta is None or (_session_agent(meta) == agent and meta.get("host") == host):
             return True
     return False
 
@@ -1151,10 +1157,13 @@ def _retain_sourceless_sessions(
     sourceless_ids: Sequence[str],
     *,
     agent: str,
+    host: str | None,
     removed_at: str,
     mark: bool,
 ) -> tuple[tuple[str, ...], dict[str, dict[str, Any]]]:
-    """Keep every sourceless session of ``agent``; mark the ones not yet marked. Nothing is deleted.
+    """Keep every sourceless session of ``agent`` on ``host``; mark the ones not yet marked.
+
+    Nothing is deleted.
 
     Returns ``(newly_marked_ids, retained)`` where ``retained`` maps every
     session now recorded ``source_present: false`` to its ``meta.json``. The
@@ -1166,14 +1175,21 @@ def _retain_sourceless_sessions(
 
     A session another agent wrote is not this pass's to judge: its sources
     live under that agent's source root, so it is neither marked nor
-    returned. A session whose ``meta.json`` cannot be read is left exactly as
+    returned. Nor is one whose ``meta.host`` differs from ``host`` (the
+    machine a relocatable pass runs on, ``None`` for an ordinary pass): its
+    sources live on another machine, or an ordinary pass keeps it. A session
+    whose ``meta.json`` cannot be read is left exactly as
     it is: no mark, and it is not reported as retained, because its
     provenance cannot be trusted enough to rewrite.
     """
     newly_marked: list[str] = []
     retained: dict[str, dict[str, Any]] = {}
     metas = {session_id: _read_meta(layout, session_id) for session_id in sourceless_ids}
-    own_ids = [sid for sid, meta in metas.items() if meta is None or _session_agent(meta) == agent]
+    own_ids = [
+        sid
+        for sid, meta in metas.items()
+        if meta is None or (_session_agent(meta) == agent and meta.get("host") == host)
+    ]
     for session_id in own_ids:
         meta = metas[session_id]
         if meta is None:
@@ -1386,13 +1402,15 @@ def preview_pass(
     quiesce_seconds: int = 300,
     source_layout: SourceLayout = CLAUDE_CODE_LAYOUT,
     now_ns: int | None = None,
+    relocatable: bool = False,
 ) -> PassPreview:
     """Replay a pass's planning decisions read-only, for ``status``.
 
     Same scan, same watermark, same empty record and same generation check as
     :func:`materialize`, with "now" read after the scan the same way. It marks
     nothing and converts nothing; a session the next pass would newly mark
-    already counts as retained here.
+    already counts as retained here. ``relocatable`` replays a relocatable
+    pass, which retains and re-converts only this machine's sessions.
     """
     layout = CorpusLayout(corpus_root=corpus_root)
     watermark = read_watermark(layout.watermark_path)
@@ -1424,12 +1442,14 @@ def preview_pass(
         scan.unreadable_session_ids,
         scan.rejected_session_ids,
     )
+    host = machine_hostname() if relocatable else None
     retained: dict[str, dict[str, Any]] = {}
     for session_id in sourceless:
         meta = _read_meta(layout, session_id)
         if (
             meta is not None
             and _session_agent(meta) == source_layout.agent.value
+            and meta.get("host") == host
             and (not scan.unlistable_dirs or meta.get("source_present") is False)
         ):
             retained[session_id] = meta
@@ -1544,7 +1564,8 @@ def materialize(
     relocatable
         Write a corpus several machines can share: every session it writes
         records :func:`~atif_corpus.infrastructure.hostname.machine_hostname`
-        as ``meta.host``.
+        as ``meta.host``, and the pass marks, retains, re-converts from an
+        archive and guards only the sessions that name this machine.
 
     Raises
     ------
@@ -1588,16 +1609,19 @@ def materialize(
         else []
     )
     agent = source_layout.agent.value
-    # Empty-scan guard: an empty scan over a corpus holding this agent's
+    # A relocatable pass owns the sessions its machine converted (meta.host),
+    # an ordinary pass the ones with no host.
+    host = machine_hostname() if relocatable else None
+    # Empty-scan guard: an empty scan over a corpus holding this pass's
     # sessions smells like a wrong source_root. Fail loud instead of flagging
     # every session, UNLESS an unlistable directory already explains the
     # emptiness: that is a diagnosed permission problem, and failing the pass
     # every ten minutes over it adds nothing the warning did not already say.
-    # Another agent's sessions say nothing about this agent's source root.
+    # Another agent's or machine's sessions say nothing about this source root.
     if (
         not sessions
         and not scan.unlistable_dirs
-        and _holds_agent_sessions(layout, existing_session_dirs, agent)
+        and _holds_agent_sessions(layout, existing_session_dirs, agent, host)
     ):
         msg = (
             f"scan of {source_root} found 0 sessions but the corpus at "
@@ -1625,6 +1649,7 @@ def materialize(
             scan.rejected_session_ids,
         ),
         agent=agent,
+        host=host,
         removed_at=materialized_at,
         mark=not scan.unlistable_dirs,
     )
@@ -1660,7 +1685,7 @@ def materialize(
         converter_version=converter_version,
         converter_schema=converter_schema,
         agent=agent,
-        host=machine_hostname() if relocatable else None,
+        host=host,
         artifact_producer=artifact_producer,
         convert_clock=convert_clock,
     )

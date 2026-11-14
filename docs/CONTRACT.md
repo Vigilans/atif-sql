@@ -132,7 +132,13 @@ proofs are out of scope for the workspace.
   short host name joined to its DNS domain, or alone when the domain is
   missing, .local or .localdomain; with meta.agent and session_id it
   identifies which machine holds the original transcript. Only a
-  relocatable pass (`materialize --relocatable`) writes it.
+  relocatable pass (`materialize --relocatable`) writes it. Within its agent,
+  a relocatable pass owns the sessions whose meta.host names its machine, and
+  an ordinary pass the ones with no host: each marks, retains and re-converts
+  from an archive its own alone, and only its own trip the empty-scan guard.
+  Machines sharing a corpus each keep their own sessions' source_present
+  current; another machine's sessions arrive through whatever syncs the
+  corpus.
 - Empty sessions: a transcript with no convertible record is recorded in
   empty_sessions.json keyed by session id with the generation it was checked
   under; its watermark advances and it's reported as `empty`, not `failed`.
