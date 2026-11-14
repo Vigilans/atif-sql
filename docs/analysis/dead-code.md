@@ -151,8 +151,8 @@ intra-module use site is named after the table.
 | `TURNS_BATCH_SIZE` | `packages/atif-cli/src/atif_cli/lake_sessions.py:68` | 2026-09-28 |
 | `STEPS_BATCH_SIZE` | `packages/atif-cli/src/atif_cli/lake_sessions.py:72` | 2026-09-28 |
 | `emit_row_batches` | `packages/atif-cli/src/atif_cli/output.py:181` | 2026-08-28 |
-| `CODEX_TOOL_IMAGE_MEDIA_TYPES` | `packages/atif-converter/src/atif_converter/domain/blobs.py:96` | 2026-10-08 |
-| `codex_tool_image_media_type` | `packages/atif-converter/src/atif_converter/domain/blobs.py:339` | 2026-10-08 |
+| `CODEX_TOOL_IMAGE_MEDIA_TYPES` | `packages/atif-converter/src/atif_converter/domain/blobs.py:122` | 2026-10-08 |
+| `codex_tool_image_media_type` | `packages/atif-converter/src/atif_converter/domain/blobs.py:375` | 2026-10-08 |
 | `codex_edge_from_record` | `packages/atif-converter/src/atif_converter/domain/codex_edges.py:119` | 2026-09-11 |
 | `COMMAND_TOOL_NAME` | `packages/atif-converter/src/atif_converter/domain/codex_nested_calls.py:48` | 2026-10-09 |
 | `VIA_EXEC` | `packages/atif-converter/src/atif_converter/domain/codex_nested_calls.py:51` | 2026-10-09 |
@@ -258,8 +258,8 @@ numbers follow it as plain numbers.
   `packages/atif-cli/src/atif_cli/output.py:155` and again on line 178 of that
   file.
 - `CODEX_TOOL_IMAGE_MEDIA_TYPES` is the membership test at
-  `packages/atif-converter/src/atif_converter/domain/blobs.py:344`, inside
-  `codex_tool_image_media_type`, which is called at `:363`.
+  `packages/atif-converter/src/atif_converter/domain/blobs.py:380`, inside
+  `codex_tool_image_media_type`, which is called at `:399`.
 - `codex_edge_from_record` is called at
   `packages/atif-converter/src/atif_converter/domain/codex_edges.py:170`.
 - `COMMAND_TOOL_NAME` names a nested command call at
@@ -341,10 +341,8 @@ Further public-by-naming symbols have no outside reference and are **not**
 listed, because their modules make no export claim about them. Most live in
 modules that declare no `__all__` at all, so they're module-internal helpers:
 
-- `packages/atif-converter/src/atif_converter/domain/atif/content.py:21`
-  (`AudioMediaType`) and
-  `packages/atif-converter/src/atif_converter/domain/atif/trajectory_validator.py:238`
-  (`main`), both in the vendored harbor tree.
+- `packages/atif-converter/src/atif_converter/domain/atif/trajectory_validator.py:238`
+  (`main`), in the vendored harbor tree.
 - `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:89`
   (`SCHEMA_VERSION`),
   `packages/atif-converter/src/atif_converter/domain/edges.py:60`

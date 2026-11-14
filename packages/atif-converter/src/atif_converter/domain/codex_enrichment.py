@@ -81,6 +81,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from atif_converter.domain.blobs import codex_audio_text
 from atif_converter.domain.codex_edges import build_codex_edges
 
 if TYPE_CHECKING:
@@ -116,11 +117,14 @@ def _payload(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def message_text(payload: dict[str, Any]) -> str:
-    """Replicate harbor's ``Codex._extract_message_text``.
+    """Replicate harbor's ``Codex._extract_message_text``, audio included.
 
     Every content block's ``text`` field, concatenated with NO separator —
     which is what harbor does, and the reason a two-block developer message
-    reproduces as one run-together string rather than two lines.
+    reproduces as one run-together string rather than two lines. An
+    ``input_audio`` item, which harbor drops, contributes
+    :func:`~atif_converter.domain.blobs.codex_audio_text` in its place: the
+    placeholder the pre-pass writes for it, or ``[audio: <file_id-or-url>]``.
     """
     content = payload.get("content")
     if not isinstance(content, list):
@@ -131,6 +135,10 @@ def message_text(payload: dict[str, Any]) -> str:
             text = block.get("text")
             if isinstance(text, str):
                 parts.append(text)
+            elif block.get("type") == "input_audio":
+                audio_text = codex_audio_text(block)
+                if audio_text is not None:
+                    parts.append(audio_text)
     return "".join(parts)
 
 

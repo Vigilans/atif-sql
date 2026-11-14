@@ -74,10 +74,15 @@ DELIBERATE_DIVERGENCES: tuple[re.Pattern[str], ...] = (
 )
 
 #: The blob placeholder :class:`atif_converter.domain.blobs.BlobRef` writes for an
-#: image, as ``_image_content_forgiven`` reads it.
+#: image, as ``_media_content_forgiven`` reads it.
 _IMAGE_PLACEHOLDER = re.compile(r"\[image sha256:(?P<sha>[0-9a-f]{64}) (?P<media>\S+) \d+ bytes\]")
 #: harbor's path for a Codex tool output image it saved (harbor #3467).
 _HARBOR_IMAGE_PATH = re.compile(r"images/codex_(?P<sha16>[0-9a-f]{16})\.(?:png|jpg|gif|webp)")
+#: What the converter writes for a Codex audio item (``blobs.codex_audio_text``): its
+#: blob placeholder, or ``[audio: <file_id-or-url>]``.
+_AUDIO_TEXT = re.compile(r"\[audio sha256:[0-9a-f]{64} audio/\S+ \d+ bytes\]|\[audio: [^\]]+\]")
+#: The audio block types harbor keeps as their JSON text in a tool output.
+_AUDIO_BLOCK_TYPES = frozenset({"audio", "input_audio"})
 
 #: ``agent.extra`` lists harbor builds from a Python ``set``, so its order
 #: follows the process hash seed; ours keep first-seen order (see
@@ -407,40 +412,99 @@ def _set_order_forgiven(expected: dict[str, Any], ours: dict[str, Any]) -> tuple
     return tuple(forgiven)
 
 
-def _image_content_matches(theirs: Any, ours: Any) -> bool:
-    """Whether ``ours`` is harbor's image-bearing tool output, with each image as its placeholder.
+def _our_audio_line(line: str) -> str:
+    """``line`` as ours renders it, when it is the JSON text of an audio block harbor kept.
 
-    harbor 0.24.0 saves a Codex tool output's inline image to a file and returns
-    the content as parts; our pure converter writes the blob placeholder text
-    instead and joins the parts with newlines, as harbor joins a text-only list
-    (see ``_tool_output_content`` in ``domain/codex_conversion.py``). Each
-    placeholder must name the same bytes harbor saved (its SHA-256 starts with
-    the 16 hex digits of harbor's file name) and the same media type, and every
-    text part must match exactly.
+    harbor 0.26.0 keeps a Codex tool output's audio block as its JSON text, one
+    line per block; the converter writes ``blobs.codex_audio_text`` of the same
+    block (its blob placeholder, or ``[audio: <file_id-or-url>]``) and keeps the
+    JSON text of a block that function cannot read.
     """
-    if not isinstance(theirs, list) or not isinstance(ours, str):
-        return False
+    from atif_converter.domain.blobs import codex_audio_text
+
+    try:
+        block = json.loads(line)
+    except json.JSONDecodeError:
+        return line
+    if not isinstance(block, dict) or block.get("type") not in _AUDIO_BLOCK_TYPES:
+        return line
+    audio_text = codex_audio_text(block)
+    return line if audio_text is None else audio_text
+
+
+def _harbor_image_parts_text(theirs: list[Any]) -> str | None:
+    """harbor's image-bearing parts joined by newlines, each image in marker form, else ``None``."""
     if not any(isinstance(part, dict) and part.get("type") == "image" for part in theirs):
-        return False
+        return None
     texts: list[str] = []
     for part in theirs:
         if not isinstance(part, dict):
-            return False
+            return None
         if part.get("type") == "text" and isinstance(part.get("text"), str):
             texts.append(part["text"])
             continue
         source = part.get("source") or {}
         path = _HARBOR_IMAGE_PATH.fullmatch(str(source.get("path", "")))
         if part.get("type") != "image" or path is None:
-            return False
+            return None
         texts.append(f"\0{path['sha16']}\0{source.get('media_type')}\0")
-    # Rebuild ours with each placeholder in the same marker form, then compare whole.
+    return "\n".join(texts)
+
+
+def _media_content_matches(theirs: Any, ours: Any) -> bool:
+    """Whether ``ours`` is harbor's tool output, each image and audio block in our text form.
+
+    harbor 0.24.0 saves a Codex tool output's inline image to a file and returns
+    the content as parts; our pure converter writes the blob placeholder text
+    instead and joins the parts with newlines, as harbor joins a text-only list
+    (see ``_tool_output_content`` in ``domain/codex_conversion.py``). Each
+    image placeholder must name the same bytes harbor saved (its SHA-256 starts
+    with the 16 hex digits of harbor's file name) and the same media type. Each
+    audio block harbor kept as JSON text must be what the converter renders for
+    that block, and every other text part must match exactly.
+    """
+    if not isinstance(ours, str):
+        return False
+    harbor_text = (
+        theirs
+        if isinstance(theirs, str)
+        else _harbor_image_parts_text(theirs)
+        if isinstance(theirs, list)
+        else None
+    )
+    if harbor_text is None:
+        return False
+    # A JSON text never holds a raw newline, so each audio block is one line.
+    expected = "\n".join(_our_audio_line(line) for line in harbor_text.split("\n"))
+    # Rebuild ours with each image placeholder in the same marker form, then compare whole.
     rebuilt = _IMAGE_PLACEHOLDER.sub(lambda m: f"\0{m['sha'][:16]}\0{m['media']}\0", ours)
-    return rebuilt == "\n".join(texts)
+    return rebuilt == expected
 
 
-def _image_content_forgiven(expected: dict[str, Any], ours: dict[str, Any]) -> frozenset[str]:
-    """The ``observation.results[j].content`` paths :func:`_image_content_matches` explains."""
+def _audio_message_forgiven(expected: dict[str, Any], ours: dict[str, Any]) -> frozenset[str]:
+    """The ``steps[i].message`` paths where ours adds only the text of ``input_audio`` items.
+
+    harbor's ``_extract_message_text`` drops a message's ``input_audio`` items;
+    ours writes each as its blob placeholder or ``[audio: <file_id-or-url>]``
+    (``codex_enrichment.message_text``). With those texts removed, ours must be
+    harbor's message exactly.
+    """
+    forgiven: set[str] = set()
+    harbor_steps = expected.get("steps") or []
+    for index, (theirs, mine) in enumerate(
+        zip(harbor_steps, ours.get("steps") or [], strict=False)
+    ):
+        harbor_message, our_message = theirs.get("message"), mine.get("message")
+        if not isinstance(harbor_message, str) or not isinstance(our_message, str):
+            continue
+        stripped, removed = _AUDIO_TEXT.subn("", our_message)
+        if removed and stripped == harbor_message:
+            forgiven.add(f"$.steps[{index}].message")
+    return frozenset(forgiven)
+
+
+def _media_content_forgiven(expected: dict[str, Any], ours: dict[str, Any]) -> frozenset[str]:
+    """The ``observation.results[j].content`` paths :func:`_media_content_matches` explains."""
     forgiven: set[str] = set()
     harbor_steps = expected.get("steps") or []
     for index, step in enumerate(ours.get("steps") or []):
@@ -449,7 +513,7 @@ def _image_content_forgiven(expected: dict[str, Any], ours: dict[str, Any]) -> f
         our_results = (step.get("observation") or {}).get("results") or []
         harbor_results = (harbor_steps[index].get("observation") or {}).get("results") or []
         for position, (theirs, mine) in enumerate(zip(harbor_results, our_results, strict=False)):
-            if _image_content_matches(theirs.get("content"), mine.get("content")):
+            if _media_content_matches(theirs.get("content"), mine.get("content")):
                 forgiven.add(f"$.steps[{index}].observation.results[{position}].content")
     return frozenset(forgiven)
 
@@ -479,10 +543,12 @@ def _rebase(paths: Iterable[str], prefix: str) -> set[str]:
 def parity_diffs(expected: dict[str, Any], ours: dict[str, Any]) -> list[str]:
     """:func:`diff_paths` minus the documented deliberate divergences.
 
-    Five kinds are forgiven. Every line a :data:`DELIBERATE_DIVERGENCES`
+    Six kinds are forgiven. Every line a :data:`DELIBERATE_DIVERGENCES`
     pattern matches, always; a Codex tool output's content where harbor saved
-    an image and ours holds its blob placeholder, only when
-    :func:`_image_content_matches` holds; the element lines of a
+    an image or kept an audio block's JSON text and ours holds the converter's
+    text for it, only when :func:`_media_content_matches` holds; a step message
+    that differs only by the text of the ``input_audio`` items harbor drops,
+    only when :func:`_audio_message_forgiven` says so; the element lines of a
     :data:`SET_ORDER_DIVERGENCE_KEYS` list, only when both sides hold the same
     values; the :data:`PRICING_DIVERGENCE_PATHS`, only when
     :func:`_pricing_divergence_expected` says the pricing policy explains them;
@@ -496,7 +562,8 @@ def parity_diffs(expected: dict[str, Any], ours: dict[str, Any]) -> list[str]:
     for prefix, harbor_node, our_node in _trajectory_pairs(expected, ours):
         step_forgiven |= _rebase(
             _step_pricing_forgiven(harbor_node, our_node)
-            | _image_content_forgiven(harbor_node, our_node),
+            | _media_content_forgiven(harbor_node, our_node)
+            | _audio_message_forgiven(harbor_node, our_node),
             prefix,
         )
         order_forgiven.extend(_rebase(_set_order_forgiven(harbor_node, our_node), prefix))

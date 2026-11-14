@@ -21,9 +21,13 @@ are applied: a ``web_search_call`` keeps its item id or gets
 list of MCP content blocks or content items) becomes text rather than Python's
 ``str()`` of the list (harbor #3467). So is harbor 0.26.0's conversion of one
 thread: each model request takes the model its own ``turn_context`` names, and
-the final token totals keep a zero. The one departure is an inline image in
+the final token totals keep a zero. The departures are an inline image in
 such an output, which harbor saves to a file and this pure function writes as
-its blob placeholder (:func:`_tool_output_content` says why):
+its blob placeholder (:func:`_tool_output_content` says why), and Codex audio:
+harbor's ``_extract_message_text`` drops a message's ``input_audio`` and its
+tool output keeps an audio block as JSON text, where here both are the audio's
+blob placeholder or ``[audio: <file_id-or-url>]``
+(:func:`~atif_converter.domain.blobs.codex_audio_text`):
 
 =================================  =========================================
 harbor 0.26.0                       here
@@ -84,7 +88,7 @@ from atif_converter.domain.atif import (
     ToolCall,
     Trajectory,
 )
-from atif_converter.domain.blobs import BlobCollector, codex_tool_image_ref
+from atif_converter.domain.blobs import BlobCollector, codex_audio_text, codex_tool_image_ref
 from atif_converter.domain.codex_enrichment import message_text
 
 #: The schema version harbor 0.22.0 stamps on a Codex trajectory.
@@ -98,10 +102,12 @@ _UNKNOWN_VERSION = "unknown"
 #: harbor 0.24.0's tool output content types (``codex.py``, harbor #3467).
 _TOOL_OUTPUT_TEXT_TYPES = frozenset({"text", "input_text"})
 _TOOL_OUTPUT_IMAGE_TYPES = frozenset({"image", "input_image"})
+_TOOL_OUTPUT_AUDIO_TYPES = frozenset({"audio", "input_audio"})
 _TOOL_OUTPUT_CONTENT_TYPES = (
     _TOOL_OUTPUT_TEXT_TYPES
     | _TOOL_OUTPUT_IMAGE_TYPES
-    | frozenset({"audio", "input_audio", "resource", "resource_link", "encrypted_content"})
+    | _TOOL_OUTPUT_AUDIO_TYPES
+    | frozenset({"resource", "resource_link", "encrypted_content"})
 )
 #: harbor's text for an image it cannot reference.
 _IMAGE_OMITTED = "[image omitted]"
@@ -172,9 +178,10 @@ def _tool_output_content(blocks: list[dict[str, Any]]) -> str:
     """Tool output content blocks -> the observation's text.
 
     harbor's ``Codex._tool_output_content``: text blocks keep their text, an
-    image becomes :func:`_tool_output_image_text`, and any other block (audio,
-    a resource, encrypted content) is kept as its JSON text; the parts are
-    joined by newlines.
+    image becomes :func:`_tool_output_image_text`, an audio block or item
+    becomes :func:`~atif_converter.domain.blobs.codex_audio_text`, and any
+    other block (a resource, encrypted content) is kept as its JSON text; the
+    parts are joined by newlines.
 
     DELIBERATE DIVERGENCE from harbor 0.24.0 for an inline image harbor can
     decode: harbor writes it to ``<logs_dir>/images/codex_<sha256[:16]>.<ext>``
@@ -182,8 +189,12 @@ def _tool_output_content(blocks: list[dict[str, Any]]) -> str:
     converter is pure and the corpus keeps attachments in its blob store, so the
     image becomes the blob placeholder text the pre-pass
     (:func:`~atif_converter.domain.blobs.extract_codex_blobs`) writes for the
-    same ``input_image``, and the content stays one string. The parity oracle
-    forgives exactly that (``tests/harbor_oracle.py::_image_content_forgiven``).
+    same ``input_image``, and the content stays one string. harbor keeps an
+    audio block as its JSON text, base64 and all; here inline audio is its blob
+    placeholder too, and an ``input_audio`` naming only a ``file_id`` or a URL
+    is ``[audio: <file_id-or-url>]``. Audio neither rule reads stays harbor's
+    JSON text. The parity oracle forgives exactly these
+    (``tests/harbor_oracle.py::_media_content_forgiven``).
     """
     return "\n".join(_tool_output_block_text(block) for block in blocks)
 
@@ -206,6 +217,10 @@ def _tool_output_block_text(block: dict[str, Any]) -> str:
         return text
     if block_type in _TOOL_OUTPUT_IMAGE_TYPES:
         return _tool_output_image_text(block)
+    if block_type in _TOOL_OUTPUT_AUDIO_TYPES:
+        audio_text = codex_audio_text(block)
+        if audio_text is not None:
+            return audio_text
     return json.dumps(block, ensure_ascii=False)
 
 
@@ -758,7 +773,7 @@ def _normalize_events(
                     "timestamp": timestamp,
                     "role": payload.get("role", "user"),
                     # harbor: ``_extract_message_text(content)`` when content
-                    # is a list, else "" — which is exactly ``message_text``.
+                    # is a list, else "" — which is ``message_text``, audio aside.
                     "text": message_text(payload),
                     "reasoning": pending_reasoning if payload.get("role") == "assistant" else None,
                 }

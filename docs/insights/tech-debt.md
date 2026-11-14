@@ -128,12 +128,12 @@ needs one skips and the frozen goldens are the only reference left.
 Shows up in:
 
 - `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1332` and
-  `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:963`: the two
+  `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:978`: the two
   conversion entry points, one per agent.
-- `packages/atif-converter/tests/harbor_oracle.py:171` and
-  `packages/atif-converter/tests/harbor_oracle.py:479`: the live oracle call and the diff the
+- `packages/atif-converter/tests/harbor_oracle.py:176` and
+  `packages/atif-converter/tests/harbor_oracle.py:543`: the live oracle call and the diff the
   port is held to.
-- `packages/atif-converter/tests/harbor_oracle.py:104`: the skip that takes over when the
+- `packages/atif-converter/tests/harbor_oracle.py:109`: the skip that takes over when the
   private method is gone.
 - `packages/atif-converter/src/atif_converter/domain/fidelity.py:55-62`: the enum docstring
   that names the gaps as kept by choice.

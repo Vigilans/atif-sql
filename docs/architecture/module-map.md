@@ -286,9 +286,9 @@ validated with the vendored copy of harbor's `TrajectoryValidator`
 (`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:81`). The Codex path is
 the same shape one module over: `convert_codex_and_audit`
 (`packages/atif-converter/src/atif_converter/application/convert_codex.py:191`) over
-`convert_codex_records` (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:963`),
+`convert_codex_records` (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:978`),
 one rollout in and one trajectory out by construction. harbor's own private converters are the
-parity ORACLE, reached from the tests only (`packages/atif-converter/tests/harbor_oracle.py:171`, `:211`),
+parity ORACLE, reached from the tests only (`packages/atif-converter/tests/harbor_oracle.py:176`, `:216`),
 frozen to goldens and diffed against the live corpus. harbor is a dev dependency only: the ATIF
 data classes and validator the converters build on are vendored from harbor 0.26.0 in
 `packages/atif-converter/src/atif_converter/domain/atif/` and held to upstream by `packages/atif-converter/tests/test_vendored_atif.py`. The

@@ -141,12 +141,23 @@ History:
   transcript, each trajectory's ``source_uuids`` come from its own
   transcript's records, and ``subagents_inlined`` is reported only when the
   root's own steps hold a sidechain.
+* 17 — Codex inline audio is lifted into the blob store like an image: an
+  ``input_audio`` with a base64 ``audio_url`` data URL or an OpenAI
+  ``input_audio`` object (``data`` and ``format``), in message content or a
+  tool output list, and an MCP ``audio`` block in a tool output list, under a
+  media type ATIF's ``AudioMediaType`` names once its aliases are normalized
+  (``audio/mp3`` is ``audio/mpeg``). The item becomes ``[audio sha256:<hash>
+  <media_type> <n> bytes]``, where a message dropped it and a tool output
+  kept its JSON text, base64 and all; an ``input_audio`` naming only a
+  ``file_id`` or a URL is ``[audio: <file_id-or-url>]``. The blob is stored
+  as ``.wav``, ``.mp3``, ``.m4a``, ``.aac``, ``.ogg``, ``.flac``, ``.webm``
+  or ``.aiff``; ``images`` lists no audio.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 16
+CONVERTER_SCHEMA_VERSION: Final = 17
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

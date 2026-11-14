@@ -9,10 +9,13 @@ blob store, and the views over the filtered corpus.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
+import os
 import pickle
+import time
 from pathlib import Path
 from typing import Any
 
@@ -561,3 +564,135 @@ class TestFilterExamples:
         assert (report["materialized"], report["failed"]) == (1, 0), report["failures"]
         Trajectory.model_validate(_trajectory(tmp_path))
         assert _effect_queries(tmp_path, capsys) == {**before, **EXAMPLE_EFFECTS[example.name]}
+
+
+CODEX_SESSION = "01a11e48-ecd5-7e10-8d09-43926dcfdcca"
+#: A spoken user turn and a tool's spoken answer; the blob store never parses audio.
+WAV = b"RIFF\x24\x00\x00\x00WAVEfmt "
+MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00\xff\xfb"
+WAV_SHA = hashlib.sha256(WAV).hexdigest()
+MP3_SHA = hashlib.sha256(MP3).hexdigest()
+
+
+def _codex_record(record_type: str, payload: dict[str, Any], n: int) -> dict[str, Any]:
+    return {"timestamp": f"2026-10-09T01:31:{n:02d}.000Z", "type": record_type, "payload": payload}
+
+
+def _write_codex_audio_rollout(sessions: Path) -> None:
+    wav_url = f"data:audio/wav;base64,{base64.b64encode(WAV).decode()}"
+    spoken = {"type": "audio", "data": base64.b64encode(MP3).decode(), "mimeType": "audio/mp3"}
+    records = [
+        _codex_record(
+            "session_meta",
+            {"id": CODEX_SESSION, "cwd": CWD, "cli_version": "0.160.1"},
+            0,
+        ),
+        _codex_record("event_msg", {"type": "task_started", "turn_id": "turn-1"}, 1),
+        _codex_record("turn_context", {"turn_id": "turn-1", "model": "gpt-6-astra"}, 2),
+        _codex_record(
+            "response_item",
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "transcribe "},
+                    {"type": "input_audio", "audio_url": wav_url},
+                ],
+            },
+            3,
+        ),
+        _codex_record(
+            "response_item",
+            {
+                "type": "function_call",
+                "call_id": "call_tts",
+                "name": "mcp__voice__speak",
+                "arguments": "{}",
+            },
+            4,
+        ),
+        _codex_record(
+            "response_item",
+            {
+                "type": "function_call_output",
+                "call_id": "call_tts",
+                "output": [{"type": "input_text", "text": "spoken:"}, spoken],
+            },
+            5,
+        ),
+        _codex_record(
+            "response_item",
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "done"}],
+            },
+            6,
+        ),
+        _codex_record("event_msg", {"type": "task_complete", "turn_id": "turn-1"}, 7),
+    ]
+    day_dir = sessions / "2026" / "10" / "09"
+    day_dir.mkdir(parents=True)
+    rollout = day_dir / f"rollout-2026-10-09T01-31-00-{CODEX_SESSION}.jsonl"
+    rollout.write_text("".join(json.dumps(record) + "\n" for record in records))
+    stale = time.time_ns() - 3_600 * 1_000_000_000
+    os.utime(rollout, ns=(stale, stale))
+
+
+def _materialize_codex(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], scripts: list[str]
+) -> dict[str, Any]:
+    _write_codex_audio_rollout(tmp_path / "sessions")
+    materialize(
+        agent="codex",
+        source_root=tmp_path / "sessions",
+        corpus_root=tmp_path / "corpus",
+        filter_scripts=scripts,
+        workers=1,
+        fmt=OutputFormat.JSON,
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert isinstance(report, dict)
+    return report
+
+
+def _stored_blob_files(tmp_path: Path) -> set[str]:
+    return {path.name for path in (tmp_path / "corpus" / "blobs").rglob("*") if path.is_file()}
+
+
+@pytest.mark.integration
+class TestCodexAudio:
+    def test_audio_blobs_publish_under_their_audio_extensions(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        report = _materialize_codex(tmp_path, capsys, _scripts(tmp_path, NO_DIRECTIVES))
+        assert (report["materialized"], report["failed"]) == (1, 0), report["failures"]
+        assert _stored_blob_files(tmp_path) == {f"{WAV_SHA}.wav", f"{MP3_SHA}.mp3"}
+        assert _query(tmp_path, capsys, "SELECT count(*) AS n FROM images") == [{"n": 0}]
+        assert _query(
+            tmp_path,
+            capsys,
+            "SELECT content::VARCHAR AS content FROM tool_results WHERE tool_use_id = 'call_tts'",
+        ) == [
+            {
+                "content": json.dumps(
+                    f"spoken:\n[audio sha256:{MP3_SHA} audio/mpeg {len(MP3)} bytes]"
+                )
+            }
+        ]
+
+    def test_drop_blob_drops_the_audio_its_placeholders_name(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The placeholder-scanning example finds the audio, drops it, and converges."""
+        example = next(e for e in FILTER_EXAMPLES if e.name == "drop_images_and_blobs")
+        report = _materialize_codex(tmp_path, capsys, _scripts(tmp_path, example.sql))
+        assert (report["materialized"], report["failed"]) == (1, 0), report["failures"]
+        assert _stored_blob_files(tmp_path) == set()
+        Trajectory.model_validate(
+            json.loads(
+                read_artifact_text(
+                    tmp_path / "corpus" / "sessions" / CODEX_SESSION / "trajectory.json.zst"
+                )
+            )
+        )

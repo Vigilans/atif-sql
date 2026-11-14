@@ -284,3 +284,279 @@ class TestEndToEnd:
             {"type": "mystery"},
         ]
         assert [blob.data for blob in result.blobs] == [PASTED_PNG]
+
+
+#: Two audio payloads; the blob store neither parses nor checks the bytes.
+_WAV = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00"
+_MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00\xff\xfb\x90\x00"
+_WAV_B64 = base64.b64encode(_WAV).decode()
+_MP3_B64 = base64.b64encode(_MP3).decode()
+
+
+def _audio_placeholder(data: bytes, media_type: str = "audio/wav") -> str:
+    return f"[audio sha256:{_sha(data)} {media_type} {len(data)} bytes]"
+
+
+def _audio_url(data: str = _WAV_B64, media_type: str = "audio/wav") -> dict[str, Any]:
+    return {"type": "input_audio", "audio_url": f"data:{media_type};base64,{data}"}
+
+
+def _openai_audio(data: str = _WAV_B64, audio_format: str = "wav") -> dict[str, Any]:
+    return {"type": "input_audio", "input_audio": {"data": data, "format": audio_format}}
+
+
+def _mcp_audio(
+    data: str = _WAV_B64, media_type: str = "audio/wav", key: str = "mimeType"
+) -> dict[str, Any]:
+    return {"type": "audio", "data": data, key: media_type}
+
+
+def _user_message(content: list[dict[str, Any]], n: int = 1) -> dict[str, Any]:
+    return _item({"type": "message", "role": "user", "content": content}, n)
+
+
+class TestAudioInMessageContent:
+    def test_is_lifted_between_its_verbatim_wrapper_and_indexed_by_record(self) -> None:
+        """A ``local_audio`` item: the ``<audio>`` wrapper text stays, the data URL goes."""
+        opening = {"type": "input_text", "text": '<audio name=[Audio #1] path="/tmp/a.wav">'}
+        closing = {"type": "input_text", "text": "</audio>"}
+        records = [_user_message([opening, _audio_url(), closing])]
+        collector = BlobCollector()
+        index = extract_codex_blobs(records, collector, record_keys=["u1"])
+        assert records[0]["payload"]["content"] == [
+            opening,
+            {"type": "input_text", "text": _audio_placeholder(_WAV)},
+            closing,
+        ]
+        (blob,) = collector.blobs
+        assert blob.data == _WAV
+        assert (blob.ref.extension, blob.ref.is_audio, blob.ref.is_image) == ("wav", True, False)
+        assert (blob.ref.width, blob.ref.height) == (None, None)
+        assert index.by_record_key == {"u1": [blob.ref]}
+        assert index.by_tool_call_id == {}
+
+    def test_the_openai_form_is_lifted_too(self) -> None:
+        records = [_user_message([_openai_audio(_MP3_B64, "mp3")])]
+        collector, _ = _extract(records)
+        assert records[0]["payload"]["content"] == [
+            {"type": "input_text", "text": _audio_placeholder(_MP3, "audio/mpeg")}
+        ]
+        assert [blob.ref.extension for blob in collector.blobs] == ["mp3"]
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            _mcp_audio(),
+            {"type": "input_audio", "file_id": "file-1"},
+            {"type": "input_audio", "audio_url": "https://example.com/a.wav"},
+            _audio_url("not base64!"),
+        ],
+        ids=["mcp-audio", "file-id", "remote-url", "bad-base64"],
+    )
+    def test_audio_with_no_liftable_bytes_stays(self, block: dict[str, Any]) -> None:
+        records = [_user_message([{"type": "input_text", "text": "q"}, block])]
+        before = copy.deepcopy(records)
+        collector, index = _extract(records)
+        assert records == before
+        assert collector.blobs == ()
+        assert index.by_record_key == {}
+
+
+class TestAudioInAToolOutput:
+    @pytest.mark.parametrize("kind", ["function_call_output", "custom_tool_call_output"])
+    @pytest.mark.parametrize(
+        "block",
+        [_audio_url(), _openai_audio(), _mcp_audio(), _mcp_audio(key="mime_type")],
+        ids=["audio_url", "openai", "mcp-mimeType", "mcp-mime_type"],
+    )
+    def test_is_lifted_stored_and_indexed_by_call_id(
+        self, kind: str, block: dict[str, Any]
+    ) -> None:
+        records = [_output(kind, "c1", [{"type": "input_text", "text": "heard:"}, block])]
+        collector, index = _extract(records)
+        assert records[0]["payload"]["output"] == [
+            {"type": "input_text", "text": "heard:"},
+            {"type": "input_text", "text": _audio_placeholder(_WAV)},
+        ]
+        assert [(blob.ref.sha256, blob.data) for blob in collector.blobs] == [(_sha(_WAV), _WAV)]
+        assert [ref.sha256 for ref in index.by_tool_call_id["c1"]] == [_sha(_WAV)]
+
+    @pytest.mark.parametrize(
+        ("block", "media_type", "extension"),
+        [
+            (_audio_url(media_type="audio/x-wav"), "audio/wav", "wav"),
+            (_audio_url(media_type="audio/wave"), "audio/wav", "wav"),
+            (_audio_url(media_type="audio/vnd.wave"), "audio/wav", "wav"),
+            (_audio_url(media_type=" Audio/MP3 "), "audio/mpeg", "mp3"),
+            (_audio_url(media_type="audio/mpga"), "audio/mpeg", "mp3"),
+            (_mcp_audio(media_type="audio/x-mpeg"), "audio/mpeg", "mp3"),
+            (_mcp_audio(media_type="audio/m4a"), "audio/mp4", "m4a"),
+            (_mcp_audio(media_type="audio/x-m4a"), "audio/mp4", "m4a"),
+            (_mcp_audio(media_type="audio/x-aac"), "audio/aac", "aac"),
+            (_mcp_audio(media_type="audio/ogg"), "audio/ogg", "ogg"),
+            (_mcp_audio(media_type="audio/x-flac"), "audio/flac", "flac"),
+            (_mcp_audio(media_type="audio/webm"), "audio/webm", "webm"),
+            (_mcp_audio(media_type="audio/x-aiff"), "audio/aiff", "aiff"),
+            (_openai_audio(audio_format="mp3"), "audio/mpeg", "mp3"),
+            (_openai_audio(audio_format="m4a"), "audio/mp4", "m4a"),
+            (_openai_audio(f"data:audio/flac;base64,{_WAV_B64}", "wav"), "audio/flac", "flac"),
+            (
+                _audio_url(f"{_WAV_B64[:8]}\n{_WAV_B64[8:]}", "audio/wav;rate=16000"),
+                "audio/wav",
+                "wav",
+            ),
+            (_mcp_audio(f"data:audio/ogg;base64,{_WAV_B64}", "audio/wav"), "audio/ogg", "ogg"),
+        ],
+        ids=[
+            "x-wav",
+            "wave",
+            "vnd.wave",
+            "mp3-alias-cased",
+            "mpga",
+            "x-mpeg",
+            "m4a",
+            "x-m4a",
+            "x-aac",
+            "ogg",
+            "x-flac",
+            "webm",
+            "x-aiff",
+            "format-mp3",
+            "format-m4a",
+            "data-url-in-openai-data-wins",
+            "data-url-params-and-wrapped-base64",
+            "data-url-in-mcp-data-wins",
+        ],
+    )
+    def test_media_types_normalize_through_atif_audio_types(
+        self, block: dict[str, Any], media_type: str, extension: str
+    ) -> None:
+        records = [_output("function_call_output", "c1", [block])]
+        collector, _ = _extract(records)
+        assert records[0]["payload"]["output"] == [
+            {"type": "input_text", "text": _audio_placeholder(_WAV, media_type)}
+        ]
+        assert [(blob.ref.media_type, blob.ref.extension) for blob in collector.blobs] == [
+            (media_type, extension)
+        ]
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            _audio_url("not base64!"),
+            _audio_url(""),
+            _mcp_audio("@@@@"),
+            _audio_url(media_type="audio/basic"),
+            _mcp_audio(media_type="text/plain"),
+            _openai_audio(audio_format="pcm16"),
+            {"type": "input_audio", "input_audio": {"data": _WAV_B64}},
+            {"type": "audio", "data": _WAV_B64},
+            {"type": "audio", "data": 7, "mimeType": "audio/wav"},
+            {"type": "input_audio", "file_id": "file-1"},
+            {"type": "input_audio", "input_audio": {"file_id": "file-2"}},
+            {"type": "input_audio", "audio_url": "https://example.com/a.wav"},
+        ],
+        ids=[
+            "bad-base64",
+            "empty",
+            "mcp-bad-base64",
+            "unsupported-type",
+            "not-audio",
+            "unsupported-format",
+            "no-format",
+            "no-media-type",
+            "data-not-a-string",
+            "file-id",
+            "nested-file-id",
+            "remote-url",
+        ],
+    )
+    def test_audio_with_no_liftable_bytes_stays(self, block: dict[str, Any]) -> None:
+        records = [_output("function_call_output", "c1", [{"type": "text", "text": "a"}, block])]
+        before = copy.deepcopy(records)
+        collector, index = _extract(records)
+        assert records == before
+        assert collector.blobs == ()
+        assert collector.references == 0
+        assert index.by_tool_call_id == {}
+
+    def test_a_nested_mcp_results_audio_is_indexed_by_the_item_id(self) -> None:
+        records: list[dict[str, Any]] = [
+            {
+                "timestamp": _TS.format(3),
+                "type": "event_msg",
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "type": "McpToolCall",
+                        "id": "exec-m1",
+                        "result": {"content": [_mcp_audio(_MP3_B64, "audio/mpeg")]},
+                    },
+                },
+            }
+        ]
+        collector, index = _extract(records)
+        content = records[0]["payload"]["item"]["result"]["content"]
+        assert content == [{"type": "input_text", "text": _audio_placeholder(_MP3, "audio/mpeg")}]
+        assert [blob.data for blob in collector.blobs] == [_MP3]
+        assert [ref.sha256 for ref in index.by_tool_call_id["exec-m1"]] == [_sha(_MP3)]
+
+
+def _audio_records() -> list[dict[str, Any]]:
+    """The fixture rollout with a spoken user turn and a tool that answers with audio."""
+    records = _tool_call_records(
+        [
+            {"type": "input_text", "text": "recorded:"},
+            _mcp_audio(_MP3_B64, "audio/mp3"),
+            {"type": "input_audio", "file_id": "file-9"},
+        ]
+    )
+    spoken = _user_message(
+        [
+            {"type": "input_text", "text": "transcribe "},
+            _audio_url(),
+            {"type": "input_audio", "audio_url": "https://example.com/b.wav"},
+        ],
+        5,
+    )
+    # Right after the fixture's own user message, so the spoken one is a step of its own.
+    return [*records[:6], spoken, *records[6:]]
+
+
+class TestAudioEndToEnd:
+    def test_every_audio_placeholder_names_a_stored_blob(self, tmp_path: Path) -> None:
+        rollout = write_codex_rollout(tmp_path / "sessions", _audio_records())
+        result, _ = convert_codex_and_audit(rollout)
+        tool_result = _result(result.trajectory, "call_mcp")
+        assert tool_result["content"] == "\n".join(
+            ["recorded:", _audio_placeholder(_MP3, "audio/mpeg"), "[audio: file-9]"]
+        )
+        assert "images" not in tool_result.get("extra", {})
+        messages = [step["message"] for step in result.trajectory["steps"]]
+        spoken = f"transcribe {_audio_placeholder(_WAV)}[audio: https://example.com/b.wav]"
+        assert spoken in messages
+        spoken_step = result.trajectory["steps"][messages.index(spoken)]
+        assert spoken_step["extra"]["source_uuids"]
+        assert "images" not in spoken_step["extra"]
+        stored = {blob.ref.sha256: blob for blob in result.blobs}
+        assert {sha: (blob.data, blob.ref.extension) for sha, blob in stored.items()} == {
+            _sha(_WAV): (_WAV, "wav"),
+            _sha(_MP3): (_MP3, "mp3"),
+        }
+        text = json.dumps(result.trajectory)
+        assert _WAV_B64 not in text
+        assert _MP3_B64 not in text
+        assert "enrichment_truncated_at_step" not in result.trajectory.get("extra", {})
+        assert result.validation_errors == ()
+
+    def test_the_pre_pass_changes_no_converted_byte(self) -> None:
+        """Raw and pre-passed records convert alike: one rule names each audio item."""
+        records = _audio_records()
+        raw = convert_codex_records(copy.deepcopy(records), fallback_session_id="s")
+        lifted = copy.deepcopy(records)
+        _, index = _extract(lifted)
+        assert list(index.by_tool_call_id) == ["call_mcp"]
+        pre_passed = convert_codex_records(lifted, fallback_session_id="s")
+        assert raw is not None
+        assert pre_passed is not None
+        assert raw.to_json_dict() == pre_passed.to_json_dict()

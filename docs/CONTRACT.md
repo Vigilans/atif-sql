@@ -45,7 +45,7 @@ proofs are out of scope for the workspace.
     trajectory.json, edges.jsonl, session_events.jsonl   # the same files, plain
     session.parquet, steps.parquet, tool_calls.parquet,  # per-session columnar
     tool_results.parquet, session_events.parquet         #  artifacts, see below
-  blobs/sha256/<ab>/<sha256>.<ext> # inline attachments (images, PDFs), content-addressed,
+  blobs/sha256/<ab>/<sha256>.<ext> # inline attachments (images, audio, PDFs), content-addressed,
                                    #  shared by every session, written 0444
   watermark.json                   # {path: mtime_ns} across source corpus, beside
                                    #  {host: {path: mtime_ns}} per relocatable host
@@ -192,15 +192,16 @@ proofs are out of scope for the workspace.
   its trajectory, is clean. Dry run unless --no-dry-run. It never rewrites
   meta.json.
 - Blob store: the converter replaces every inline base64 attachment with the
-  placeholder `[image sha256:<hash> <media_type> <n> bytes]` (`[file ...]` for
-  a non-image) and hands the bytes to the writer, which stores each under
-  blobs/sha256/<first two hex>/<hash>.<ext> BEFORE it swaps in the session
-  that references it, so a published placeholder always resolves. The store
-  is shared rather than per-session because a hash-named write is idempotent:
-  a blob two sessions share is stored once, and re-converting a session
-  rewrites nothing. Nothing collects blobs; an unreferenced blob
-  costs space only. The hash and extension are validated before either
-  becomes a path.
+  placeholder `[image sha256:<hash> <media_type> <n> bytes]` (`[audio ...]`
+  for Codex audio, its media type normalized to ATIF's AudioMediaType;
+  `[file ...]` for anything else) and hands the bytes to the writer, which
+  stores each under blobs/sha256/<first two hex>/<hash>.<ext> BEFORE it swaps
+  in the session that references it, so a published placeholder always
+  resolves. The store is shared rather than per-session because a hash-named
+  write is idempotent: a blob two sessions share is stored once, and
+  re-converting a session rewrites nothing. Nothing collects blobs; an
+  unreferenced blob costs space only. The hash and extension are validated
+  before either becomes a path.
 
 ## Agents (atif-converter converts, atif-corpus discovers)
 - AgentSource is a StrEnum in atif-converter with an AST-pinned twin in
@@ -276,7 +277,11 @@ proofs are out of scope for the workspace.
      extra carries agent_id, and trajectory.extra.subagents lists each
      subagent with its parent_tool_call_id and link_source ("meta" from the
      sidecar, "tool_result" from toolUseResult.agentId). A key absent means
-     the transcript did not say; nothing is guessed.
+     the transcript did not say; nothing is guessed. Codex audio (an
+     input_audio item, or an MCP audio block in a tool output) is its blob
+     placeholder in the message or result text, and an input_audio naming
+     only a file_id or a URL is `[audio: <file_id-or-url>]`; images lists
+     image attachments only.
    - Codex code mode (domain.codex_nested_calls): each MCP call and command a
      code-mode exec script ran (an item_completed McpToolCall or
      CommandExecution item, attributed to the script by position) becomes a
@@ -286,7 +291,7 @@ proofs are out of scope for the workspace.
      carries its own is_error / exit_code. A script whose attribution is
      ambiguous emits none, and the exec result keeps the outcome folded from
      its items. The harbor port emits none, so parity is unchanged.
-   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 16) is
+   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 17) is
      bumped with any change to the converter's output for the same input.
 3. Census + edges + session events are derived from RAW jsonl (never from the
    trajectory). session_events keeps, as rows and NOT as steps: Claude Code

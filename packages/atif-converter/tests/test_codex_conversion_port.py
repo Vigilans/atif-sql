@@ -475,6 +475,12 @@ _PNG_BASE64 = (
 )
 
 
+#: A few bytes of audio, base64, for the inline audio branches.
+_WAV = b"RIFF\x24\x00\x00\x00WAVEfmt "
+_WAV_BASE64 = base64.b64encode(_WAV).decode()
+_WAV_PLACEHOLDER = f"[audio sha256:{hashlib.sha256(_WAV).hexdigest()} audio/wav {len(_WAV)} bytes]"
+
+
 class TestStructuredToolOutput:
     """harbor #3467: MCP content-block lists become text, never Python's repr of the list."""
 
@@ -502,7 +508,7 @@ class TestStructuredToolOutput:
         assert self._content(tmp_path, output) == 'Script completed\nOutput:\n\n\n{"exit_code":0}'
 
     def test_other_blocks_are_their_json_text(self, tmp_path: Path) -> None:
-        """A resource (or audio, or encrypted) block is kept as JSON, in place."""
+        """A resource (or encrypted) block is kept as JSON, in place."""
         blocks = [
             {"type": "text", "text": "see"},
             {"type": "resource_link", "uri": "file:///r.txt", "name": "r"},
@@ -577,6 +583,59 @@ class TestStructuredToolOutput:
         assert pre_passed is not None
         assert raw.to_json_dict() == pre_passed.to_json_dict()
 
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"type": "input_audio", "audio_url": f"data:audio/x-wav;base64,{_WAV_BASE64}"},
+            {"type": "input_audio", "input_audio": {"data": _WAV_BASE64, "format": "wav"}},
+            {"type": "audio", "data": _WAV_BASE64, "mimeType": "audio/wave"},
+        ],
+        ids=["audio_url", "openai", "mcp-audio"],
+    )
+    def test_inline_tool_output_audio_is_its_blob_placeholder(
+        self, tmp_path: Path, block: dict[str, Any]
+    ) -> None:
+        content = self._content(
+            tmp_path, [{"type": "text", "text": "heard:"}, block], cross_check=False
+        )
+        assert content == f"heard:\n{_WAV_PLACEHOLDER}"
+
+    @pytest.mark.parametrize(
+        ("block", "text"),
+        [
+            ({"type": "input_audio", "file_id": "file-1"}, "[audio: file-1]"),
+            ({"type": "input_audio", "input_audio": {"file_id": "file-2"}}, "[audio: file-2]"),
+            (
+                {"type": "input_audio", "audio_url": "https://x/a.wav"},
+                "[audio: https://x/a.wav]",
+            ),
+        ],
+        ids=["file-id", "nested-file-id", "remote-url"],
+    )
+    def test_referenced_tool_output_audio_is_its_reference(
+        self, tmp_path: Path, block: dict[str, Any], text: str
+    ) -> None:
+        assert (
+            self._content(tmp_path, [{"type": "text", "text": "heard:"}, block], cross_check=False)
+            == f"heard:\n{text}"
+        )
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"type": "input_audio", "audio_url": "data:audio/wav;base64,@@@"},
+            {"type": "audio", "data": _WAV_BASE64, "mimeType": "audio/basic"},
+            {"type": "audio", "data": _WAV_BASE64},
+        ],
+        ids=["undecodable", "unsupported-type", "no-media-type"],
+    )
+    def test_audio_neither_rule_reads_is_harbors_json_text(
+        self, tmp_path: Path, block: dict[str, Any]
+    ) -> None:
+        """Exactly harbor's: the cross-check diffs it against the live oracle."""
+        content = self._content(tmp_path, [{"type": "text", "text": "heard:"}, block])
+        assert content == f"heard:\n{json.dumps(block, ensure_ascii=False)}"
+
     def test_harbor_differs_only_by_the_saved_image(self, tmp_path: Path) -> None:
         """While harbor ships the method: its image part and our placeholder are the ONLY diff."""
         if not harbor_has_private_api("codex"):
@@ -610,6 +669,84 @@ class TestStructuredToolOutput:
         result = tampered["steps"][1]["observation"]["results"][0]
         result["content"] = result["content"].replace("sha256:", "sha256:0", 1)[:-1]
         assert parity_diffs(theirs, tampered) != []
+
+
+def _audio_message(content: list[dict[str, Any]]) -> dict[str, Any]:
+    return _item({"type": "message", "role": "user", "content": content})
+
+
+class TestAudio:
+    """Codex audio: harbor drops a message's ``input_audio`` and keeps a tool output's as JSON."""
+
+    def test_message_audio_is_kept_where_harbor_drops_it(self, tmp_path: Path) -> None:
+        records = [
+            _session_meta(),
+            _turn_context(),
+            _audio_message(
+                [
+                    {"type": "input_text", "text": '<audio name=[Audio #1] path="/tmp/a.wav">'},
+                    {"type": "input_audio", "audio_url": f"data:audio/wav;base64,{_WAV_BASE64}"},
+                    {"type": "input_text", "text": "</audio>"},
+                    {"type": "input_audio", "file_id": "file-1"},
+                    {"type": "input_audio", "audio_url": "data:audio/wav;base64,@@@"},
+                ]
+            ),
+            _assistant("ok"),
+            _token_count(10, 2),
+        ]
+        (user,) = [
+            s
+            for s in _steps(_convert(tmp_path, records, cross_check=False))
+            if s["source"] == "user"
+        ]
+        assert user["message"] == (
+            f'<audio name=[Audio #1] path="/tmp/a.wav">{_WAV_PLACEHOLDER}</audio>[audio: file-1]'
+        )
+
+    def test_harbor_differs_only_by_the_audio(self, tmp_path: Path) -> None:
+        """While harbor ships the method: the audio texts are the ONLY diff, and are forgiven."""
+        if not harbor_has_private_api("codex"):
+            pytest.skip("harbor no longer ships Codex's private converter")
+        inline = {"type": "input_audio", "audio_url": f"data:audio/wav;base64,{_WAV_BASE64}"}
+        output = [
+            {"type": "input_text", "text": "heard:"},
+            {"type": "audio", "data": _WAV_BASE64, "mimeType": "audio/wav"},
+            {"type": "input_audio", "file_id": "file-1"},
+            {"type": "input_image", "image_url": f"data:image/png;base64,{_PNG_BASE64}"},
+        ]
+        records = [
+            _session_meta(),
+            _turn_context(),
+            _audio_message([{"type": "input_text", "text": "listen: "}, inline]),
+            _function_call("c1", "tool", "{}"),
+            _function_call_output("c1", output),
+            _token_count(10, 2),
+        ]
+        rollout = write_codex_rollout(tmp_path / "sessions", records)
+        theirs = harbor_codex_trajectory(rollout)
+        ours = convert_codex_rollout(rollout)
+        assert theirs is not None
+        assert ours is not None
+        ours_dict = ours.to_json_dict()
+        raw = diff_paths(theirs, ours_dict)
+        assert [line.split(":", 1)[0] for line in raw] == [
+            "$.steps[0].message",
+            "$.steps[1].observation.results[0].content",
+        ]
+        assert theirs["steps"][0]["message"] == "listen: "
+        assert ours_dict["steps"][0]["message"] == f"listen: {_WAV_PLACEHOLDER}"
+        assert parity_diffs(theirs, ours_dict) == []
+        # The forgiveness is narrow: other bytes, or text beyond the audio's, still fail.
+        for key, old, new in (
+            ("message", "listen: ", "listen! "),
+            ("content", "sha256:", "sha256:0"),
+            ("content", "file-1", "file-2"),
+        ):
+            tampered = copy.deepcopy(ours_dict)
+            step = tampered["steps"][0 if key == "message" else 1]
+            holder = step if key == "message" else step["observation"]["results"][0]
+            holder[key] = holder[key].replace(old, new, 1)
+            assert parity_diffs(theirs, tampered) != []
 
 
 class TestApiCallGrouping:

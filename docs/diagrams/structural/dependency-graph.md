@@ -66,7 +66,7 @@ grepping every `*.py` under `packages/*/src` for a `from X` or `import X` line a
 | --- | --- | --- | --- |
 | pytz | none | `packages/atif-duck/pyproject.toml:33` | no import site; DuckDB's own client imports it to materialize TIMESTAMPTZ, per the comment at `:30-32` |
 | `zstandard` | atif-corpus most often; atif-analytics, atif-converter, atif-duck, and atif-embed too | `packages/atif-corpus/pyproject.toml:22` | `packages/atif-corpus/src/atif_corpus/infrastructure/source_archive.py:38` |
-| `imagesize` | atif-converter | `packages/atif-converter/pyproject.toml:30` | `packages/atif-converter/src/atif_converter/domain/blobs.py:69` |
+| `imagesize` | atif-converter | `packages/atif-converter/pyproject.toml:30` | `packages/atif-converter/src/atif_converter/domain/blobs.py:85` |
 
 ## Internal edges
 
@@ -101,7 +101,7 @@ on import-site count, then on the member's own src line count, descending.
 
 | external node | edge drawn from | declared at | import site |
 | --- | --- | --- | --- |
-| loguru | atif-converter | `packages/atif-converter/pyproject.toml:24` | `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:73` |
+| loguru | atif-converter | `packages/atif-converter/pyproject.toml:24` | `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:77` |
 | polars | atif-analytics | `packages/atif-analytics/pyproject.toml:25` | `packages/atif-analytics/src/atif_analytics/application/use_cases/classify.py:41` |
 | pydantic | atif-converter | `packages/atif-converter/pyproject.toml:23` | `packages/atif-converter/src/atif_converter/domain/atif/trajectory.py:10` |
 | duckdb | atif-duck | `packages/atif-duck/pyproject.toml:20` | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:134` |
