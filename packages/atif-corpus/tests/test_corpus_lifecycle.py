@@ -42,6 +42,7 @@ from loguru import logger
 from atif_corpus.application import materialize as materialize_module
 from atif_corpus.application.materialize import (
     MaterializationReport,
+    Provenance,
     expected_generation,
     materialize,
     preview_pass,
@@ -80,9 +81,11 @@ def run(
         source_root=source_root,
         corpus_root=corpus_root,
         converter=converter,
-        materialized_at=materialized_at,
-        harbor_version="0.22.0",
-        converter_version=converter_version,
+        provenance=Provenance(
+            materialized_at=materialized_at,
+            harbor_version="0.22.0",
+            converter_version=converter_version,
+        ),
         now_ns=now_ns,
         force=force,
         workers=workers,

@@ -22,6 +22,7 @@ from corpus_fixtures import NOW_NS, SESSION_A, SESSION_B, STALE_NS, write_sessio
 
 from atif_corpus.application.materialize import (
     MaterializationReport,
+    Provenance,
     SuspiciousEmptyScanError,
     materialize,
     preview_pass,
@@ -45,9 +46,11 @@ def run(
         source_root=source_root,
         corpus_root=corpus_root,
         converter=converter or FakeConverter(),
-        materialized_at=materialized_at,
-        harbor_version="0.22.0",
-        converter_version=converter_version,
+        provenance=Provenance(
+            materialized_at=materialized_at,
+            harbor_version="0.22.0",
+            converter_version=converter_version,
+        ),
         now_ns=NOW_NS,
         relocatable=relocatable,
     )

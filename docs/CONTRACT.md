@@ -36,8 +36,9 @@ proofs are out of scope for the workspace.
     meta.json                      # {session_id, source_mtime_ns, source_files: [...],
                                    #  harbor_version, converter_version, converter_schema,
                                    #  materialized_at,
-                                   #  agent, host?, source_present, source_removed_at?,
-                                   #  source_archive?, columnar_schema? (old layout)}
+                                   #  agent, host?, filtered?, source_present,
+                                   #  source_removed_at?, source_archive?,
+                                   #  columnar_schema? (old layout)}
     source/<path>.zst              # raw source archive: one zstd file per source file,
                                    #  <path> relative to the main transcript's parent
     (old layout only, until `atif-sql corpus slim` converts it:)
@@ -119,16 +120,27 @@ proofs are out of scope for the workspace.
   live file. The report's `removed` / `removed_session_ids` are the sessions
   newly marked that pass; `retained` counts every session kept without a
   source.
-- Raw source archive: every live conversion writes source/<path>.zst for each
-  source file (main transcript, side-file transcripts, and every other regular
-  file under the session's side dir; symlinks are skipped), from the exact bytes
-  the converter parsed, staged and swapped with the other artifacts.
+- Raw source archive: every live conversion of an unfiltered pass writes
+  source/<path>.zst for each source file (main transcript, side-file
+  transcripts, and every other regular file under the session's side dir;
+  symlinks are skipped), from the exact bytes the converter parsed, staged and
+  swapped with the other artifacts.
   meta.source_archive = {codec: "zstd", source_dir, main, files: [{path, size,
   sha256}]}, where source_dir is the main transcript's parent relative to the
   source root. A source-removed session with a stale generation is re-converted
   from its restored archive (reported as `from_archive`), keeping its original
   source_* keys and its archive. A session retained before archives existed
   keeps its artifacts and can't be re-converted.
+- meta.filtered: true on every session a filtered pass published. A filtered
+  pass hands each converted session to an artifact filter
+  (`atif_corpus.domain.ports.ArtifactFilter`) before its blobs are stored or any
+  of its artifacts are staged, and publishes only what the filter returns. It
+  writes no raw source archive (whatever --relocatable says) or edges.jsonl.zst
+  and re-converts no session from an archive, because raw source bytes and the
+  edges' line per raw record keep what the filter removes; a session it
+  re-materializes loses both. An unfiltered pass never overwrites a filtered
+  session: each one it plans (a moved source, --force, a stale generation) is
+  reported as failed and left as it is, with its watermark where it was.
 - meta.host: the machine a relocatable pass converted the session on: the
   short host name joined to its DNS domain, or alone when the domain is
   missing, .local or .localdomain; with meta.agent and session_id it
@@ -336,7 +348,7 @@ proofs are out of scope for the workspace.
 - messages-parity view name: `steps` (one row per ATIF step) PLUS a `messages`
   compatibility view reconstructed from edges (uuid-keyed: uuid, parent_uuid,
   session_id, ts, type, is_sidechain, is_compact_summary, message_id,
-  source_file; `type` carries the record's role).
+  source_file; `type` carries the record's role; empty for a filtered session).
 - Static VIEW_SCHEMA dict + drift test, so a view rename fails a gate.
 - Macro signatures are pinned against the DDL by a drift test.
 - sessions view carries `corpus`, the corpus directory's name, on both read

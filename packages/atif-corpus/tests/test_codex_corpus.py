@@ -22,6 +22,7 @@ from corpus_fixtures import LIVE_NS, NOW_NS, STALE_NS, write_session
 
 from atif_corpus.application.materialize import (
     MaterializationReport,
+    Provenance,
     SuspiciousEmptyScanError,
     materialize,
     preview_pass,
@@ -163,9 +164,11 @@ def _materialize_codex(source_root: Path, corpus_root: Path, **kwargs: object):
         source_root=source_root,
         corpus_root=corpus_root,
         converter=FakeConverter(),
-        materialized_at="2026-09-11T00:00:00Z",
-        harbor_version="0.22.0",
-        converter_version="0.1.0",
+        provenance=Provenance(
+            materialized_at="2026-09-11T00:00:00Z",
+            harbor_version="0.22.0",
+            converter_version="0.1.0",
+        ),
         now_ns=NOW_NS,
         source_layout=CODEX_LAYOUT,
         **kwargs,  # type: ignore[arg-type]
@@ -259,9 +262,11 @@ def _materialize_claude(
         source_root=source_root,
         corpus_root=corpus_root,
         converter=converter or FakeConverter(),
-        materialized_at="2026-09-11T00:00:00Z",
-        harbor_version="0.22.0",
-        converter_version="0.1.0",
+        provenance=Provenance(
+            materialized_at="2026-09-11T00:00:00Z",
+            harbor_version="0.22.0",
+            converter_version="0.1.0",
+        ),
         now_ns=NOW_NS,
         source_layout=CLAUDE_CODE_LAYOUT,
     )

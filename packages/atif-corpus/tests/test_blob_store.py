@@ -20,7 +20,7 @@ from typing import override
 import pytest
 from corpus_fixtures import NOW_NS, SESSION_A, SESSION_B, STALE_NS, write_session
 
-from atif_corpus.application.materialize import materialize
+from atif_corpus.application.materialize import Provenance, materialize
 from atif_corpus.domain.layout import CorpusLayout, InvalidBlobNameError
 from atif_corpus.domain.ports import BlobOutput, ConversionOutput
 from atif_corpus.infrastructure.atomic import write_blob_atomic
@@ -58,9 +58,11 @@ def _run(source_root: Path, corpus_root: Path) -> None:
         corpus_root=corpus_root,
         converter=BlobConverter(),
         now_ns=NOW_NS,
-        materialized_at="2026-01-02T00:00:00+00:00",
-        harbor_version="0.22.0",
-        converter_version="0.1.0",
+        provenance=Provenance(
+            materialized_at="2026-01-02T00:00:00+00:00",
+            harbor_version="0.22.0",
+            converter_version="0.1.0",
+        ),
     )
     assert report.failed_count == 0
 

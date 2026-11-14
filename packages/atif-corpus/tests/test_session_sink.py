@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from corpus_fixtures import NOW_NS, SESSION_A, SESSION_B, STALE_NS, write_session
 
-from atif_corpus.application.materialize import MaterializationReport, materialize
+from atif_corpus.application.materialize import MaterializationReport, Provenance, materialize
 from atif_corpus.domain.layout import CorpusLayout
 from atif_corpus.infrastructure.fake_converter import FakeConverter
 
@@ -27,11 +27,11 @@ SESSION_C = "33333333-3333-3333-3333-333333333333"
 SESSION_D = "44444444-4444-4444-4444-444444444444"
 SESSIONS = (SESSION_A, SESSION_B, SESSION_C, SESSION_D)
 
-VERSIONS: dict[str, Any] = {
-    "materialized_at": "2026-01-02T00:00:00+00:00",
-    "harbor_version": "0.23.0",
-    "converter_version": "0.1.0",
-}
+VERSIONS = Provenance(
+    materialized_at="2026-01-02T00:00:00+00:00",
+    harbor_version="0.23.0",
+    converter_version="0.1.0",
+)
 
 
 class RecordingSink:
@@ -70,7 +70,7 @@ def run(
         now_ns=NOW_NS,
         session_sink=sink,
         workers=workers,
-        **VERSIONS,
+        provenance=VERSIONS,
     )
 
 

@@ -36,7 +36,7 @@ from atif_cli.app import materialize, query, status
 from atif_cli.converter_adapter import RealConverter
 from atif_cli.errors import EXIT_CODES
 from atif_cli.lake import compact, rebuild, status as lake_status_cmd, verify
-from atif_corpus.application.materialize import materialize as materialize_use_case
+from atif_corpus.application.materialize import Provenance, materialize as materialize_use_case
 from atif_corpus.domain.source_layout import CLAUDE_CODE_LAYOUT
 from atif_duck.domain.columnar import COLUMNAR_SCHEMA_VERSION, META_COLUMNAR_KEY
 from atif_duck.domain.lake import LAKE_ALIAS, LAKE_TABLES
@@ -268,9 +268,11 @@ class TestPoolAndSingleWorkerWriteTheSameLake:
                 corpus_root=corpus,
                 converter=RealConverter(agent=CLAUDE_CODE_LAYOUT.agent),
                 source_layout=CLAUDE_CODE_LAYOUT,
-                materialized_at="2026-09-01T00:00:00+00:00",
-                harbor_version="0.23.0",
-                converter_version="test",
+                provenance=Provenance(
+                    materialized_at="2026-09-01T00:00:00+00:00",
+                    harbor_version="0.23.0",
+                    converter_version="test",
+                ),
                 converter_schema=1,
                 expected_meta={META_COLUMNAR_KEY: COLUMNAR_SCHEMA_VERSION},
                 workers=workers,

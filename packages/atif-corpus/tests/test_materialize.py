@@ -26,6 +26,7 @@ from corpus_fixtures import (
 
 from atif_corpus.application.materialize import (
     MaterializationReport,
+    Provenance,
     SuspiciousEmptyScanError,
     _unmaterialized_session_ids,
     materialize,
@@ -36,24 +37,11 @@ from atif_corpus.domain.ports import ConversionOutput
 from atif_corpus.infrastructure.fake_converter import FakeConverter
 from atif_corpus.infrastructure.scanner import scan_source_root
 
-
-class _Provenance(TypedDict):
-    """The three provenance keys every pass stamps, keyed as `materialize` names them.
-
-    Typed rather than a bare `dict[str, str]` so `**VERSIONS` binds to exactly
-    these three parameters instead of to every remaining `str`-typed keyword.
-    """
-
-    materialized_at: str
-    harbor_version: str
-    converter_version: str
-
-
-VERSIONS: _Provenance = {
-    "materialized_at": "2026-01-02T00:00:00+00:00",
-    "harbor_version": "0.22.0",
-    "converter_version": "0.1.0",
-}
+VERSIONS = Provenance(
+    materialized_at="2026-01-02T00:00:00+00:00",
+    harbor_version="0.22.0",
+    converter_version="0.1.0",
+)
 
 
 class _RunOverrides(TypedDict, total=False):
@@ -74,7 +62,7 @@ def run(
         corpus_root=corpus_root,
         converter=converter,
         now_ns=NOW_NS,
-        **VERSIONS,
+        provenance=VERSIONS,
         **kwargs,
     )
 
@@ -109,9 +97,9 @@ class TestFirstPass:
 
         meta = json.loads(CorpusLayout(corpus_root=corpus_root).meta_path(SESSION_A).read_text())
         assert meta["session_id"] == SESSION_A
-        assert meta["materialized_at"] == VERSIONS["materialized_at"]
-        assert meta["harbor_version"] == VERSIONS["harbor_version"]
-        assert meta["converter_version"] == VERSIONS["converter_version"]
+        assert meta["materialized_at"] == VERSIONS.materialized_at
+        assert meta["harbor_version"] == VERSIONS.harbor_version
+        assert meta["converter_version"] == VERSIONS.converter_version
         assert meta["source_mtime_ns"] == STALE_NS
         # main + flat subagent + workflow-nested subagent + the subagent's sidecar
         assert len(meta["source_files"]) == 4
@@ -307,7 +295,7 @@ class TestSourceRemovalRetention:
         assert read_artifact_bytes(layout.trajectory_path(SESSION_A)) == trajectory_before
         meta = _meta(corpus_root, SESSION_A)
         assert meta["source_present"] is False
-        assert meta["source_removed_at"] == VERSIONS["materialized_at"]
+        assert meta["source_removed_at"] == VERSIONS.materialized_at
         assert _meta(corpus_root, SESSION_B)["source_present"] is True
 
     def test_a_marked_session_is_not_marked_again(
@@ -326,9 +314,11 @@ class TestSourceRemovalRetention:
             corpus_root=corpus_root,
             converter=FakeConverter(),
             now_ns=NOW_NS,
-            materialized_at="2026-01-03T00:00:00+00:00",
-            harbor_version=VERSIONS["harbor_version"],
-            converter_version=VERSIONS["converter_version"],
+            provenance=Provenance(
+                materialized_at="2026-01-03T00:00:00+00:00",
+                harbor_version=VERSIONS.harbor_version,
+                converter_version=VERSIONS.converter_version,
+            ),
         )
 
         assert later.removed_session_ids == ()
@@ -1060,7 +1050,7 @@ class TestSessionEventsArtifact:
             converter=_EventsConverter(),
             now_ns=NOW_NS,
             artifact_producer=producer,
-            **VERSIONS,
+            provenance=VERSIONS,
         )
         assert report.materialized_count == 1
         written = read_artifact_text(

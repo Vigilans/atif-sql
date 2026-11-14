@@ -947,6 +947,7 @@ def materialize(
     from atif_converter.domain.atif import UPSTREAM_VERSION as ATIF_MODELS_VERSION
     from atif_converter.domain.schema_version import CONVERTER_SCHEMA_VERSION
     from atif_corpus.application.materialize import (
+        Provenance,
         SuspiciousEmptyScanError,
         materialize as materialize_use_case,
     )
@@ -980,15 +981,17 @@ def materialize(
             corpus_root=settings.corpus_root,
             converter=RealConverter(agent=settings.agent),
             source_layout=source_layout,
-            materialized_at=_now_iso(),
-            # The harbor release the vendored ATIF models match; harbor itself
-            # isn't installed with atif-sql, so this is provenance, not a lookup.
-            harbor_version=ATIF_MODELS_VERSION,
-            # The release that did the converting, looked up under the ONE
-            # published distribution. `atif-converter` isn't a distribution in the
-            # bundled wheel, so looking it up answered "unknown" for every
-            # installed run. Provenance only: staleness keys on the schema below.
-            converter_version=_version_of("atif-sql"),
+            provenance=Provenance(
+                materialized_at=_now_iso(),
+                # The harbor release the vendored ATIF models match; harbor itself
+                # isn't installed with atif-sql, so this is provenance, not a lookup.
+                harbor_version=ATIF_MODELS_VERSION,
+                # The release that did the converting, looked up under the ONE
+                # published distribution. `atif-converter` isn't a distribution in
+                # the bundled wheel, so looking it up answered "unknown" for every
+                # installed run. Provenance only: staleness keys on the schema below.
+                converter_version=_version_of("atif-sql"),
+            ),
             # The converter's own output version. A session recording another
             # one re-converts, from its source archive if the source is gone.
             converter_schema=CONVERTER_SCHEMA_VERSION,

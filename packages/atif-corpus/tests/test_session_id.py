@@ -20,7 +20,7 @@ import pytest
 from corpus_fixtures import SESSION_A, STALE_NS, write_session
 from loguru import logger
 
-from atif_corpus.application.materialize import MaterializationReport, materialize
+from atif_corpus.application.materialize import MaterializationReport, Provenance, materialize
 from atif_corpus.domain.layout import CorpusLayout
 from atif_corpus.domain.session_id import (
     SESSION_ID_MAX_CHARS,
@@ -127,9 +127,11 @@ def _materialize(source_root: Path, corpus_root: Path) -> MaterializationReport:
         converter=FakeConverter(),
         quiesce_seconds=300,
         now_ns=STALE_NS + 3_600 * 1_000_000_000,
-        materialized_at="2026-01-02T00:00:00+00:00",
-        harbor_version="0.22.0",
-        converter_version="0.1.0",
+        provenance=Provenance(
+            materialized_at="2026-01-02T00:00:00+00:00",
+            harbor_version="0.22.0",
+            converter_version="0.1.0",
+        ),
     )
 
 

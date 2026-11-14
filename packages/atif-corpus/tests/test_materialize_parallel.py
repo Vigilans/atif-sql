@@ -24,7 +24,7 @@ from typing import TypedDict, Unpack
 import pytest
 from corpus_fixtures import NOW_NS, STALE_NS, read_artifact_text, write_session
 
-from atif_corpus.application.materialize import MaterializationReport, materialize
+from atif_corpus.application.materialize import MaterializationReport, Provenance, materialize
 from atif_corpus.domain.layout import CorpusLayout
 from atif_corpus.infrastructure.fake_converter import FakeConverter, simulated_clock
 
@@ -38,17 +38,11 @@ ARTIFACTS = (
 )
 
 
-class _Provenance(TypedDict):
-    materialized_at: str
-    harbor_version: str
-    converter_version: str
-
-
-_PROVENANCE: _Provenance = {
-    "materialized_at": "2026-01-02T00:00:00+00:00",
-    "harbor_version": "0.22.0",
-    "converter_version": "0.1.0",
-}
+_PROVENANCE = Provenance(
+    materialized_at="2026-01-02T00:00:00+00:00",
+    harbor_version="0.22.0",
+    converter_version="0.1.0",
+)
 
 
 class _RunOverrides(TypedDict, total=False):
@@ -72,7 +66,7 @@ def _run(
         converter=converter,
         now_ns=NOW_NS,
         workers=workers,
-        **_PROVENANCE,
+        provenance=_PROVENANCE,
         **overrides,
     )
 

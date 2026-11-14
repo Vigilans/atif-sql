@@ -29,15 +29,15 @@ from corpus_fixtures import (
     write_session,
 )
 
-from atif_corpus.application.materialize import MaterializationReport, materialize
+from atif_corpus.application.materialize import MaterializationReport, Provenance, materialize
 from atif_corpus.domain.layout import CorpusLayout
 from atif_corpus.infrastructure.fake_converter import FakeConverter
 
-VERSIONS = {
-    "materialized_at": "2026-01-02T00:00:00+00:00",
-    "harbor_version": "0.22.0",
-    "converter_version": "0.1.0",
-}
+VERSIONS = Provenance(
+    materialized_at="2026-01-02T00:00:00+00:00",
+    harbor_version="0.22.0",
+    converter_version="0.1.0",
+)
 
 
 class RecordingProducer:
@@ -91,9 +91,7 @@ def run(
         now_ns=NOW_NS,
         force=force,
         artifact_producer=producer,
-        materialized_at=VERSIONS["materialized_at"],
-        harbor_version=VERSIONS["harbor_version"],
-        converter_version=VERSIONS["converter_version"],
+        provenance=VERSIONS,
     )
 
 

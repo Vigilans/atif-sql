@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ports materialization needs filled: a converter and, optionally, an artifact producer and a session sink.
+"""The ports materialization needs filled: a converter and, optionally, an artifact filter, an artifact producer and a session sink.
 
 atif-corpus may never import atif-converter or atif-duck (import-linter
-independence contract), so both Protocols are typed to CONTRACT.md's artifact
+independence contract), so the Protocols are typed to CONTRACT.md's artifact
 shapes rather than to either package's internals. atif-cli adapts the real
-converter and the real columnar producer to these ports; tests use
+converter, its SQL filter stage and the lake writer to these ports; tests use
 :class:`atif_corpus.infrastructure.fake_converter.FakeConverter` and a fake
 producer of their own.
 """
@@ -143,6 +143,31 @@ def source_base(session_jsonl: Path, source_files: Sequence[Path] = ()) -> Path:
         while base not in path.parents and base != base.parent:
             base = base.parent
     return base
+
+
+class ArtifactFilter(Protocol):
+    """Anything that rewrites a converted session before any of it is written.
+
+    The materialize use case calls :meth:`apply` once per session, right after
+    the conversion and before anything reaches the corpus: before the
+    session's blobs enter the shared blob store and before its staged
+    directory is written. Only what :meth:`apply` returns is published, so a
+    blob it leaves out is never stored. atif-cli plugs in the SQL filter stage
+    of ``atif-sql materialize --filter``.
+
+    A pass with a filter writes no raw source archive or ``edges.jsonl``, since
+    the raw bytes and the edges' line per raw record keep what a filter
+    removes, and stamps ``filtered: true`` into every ``meta.json`` it writes.
+
+    Implementations may raise any exception: the use case records the failure
+    against the session and publishes nothing of it, exactly as it does for a
+    converter failure. A pool worker holds its own copy of the filter, so an
+    implementation has to stay picklable.
+    """
+
+    def apply(self, output: ConversionOutput, *, session_id: str) -> ConversionOutput:
+        """Return what ``session_id``'s ``output`` publishes as."""
+        ...
 
 
 class ArtifactProducer(Protocol):

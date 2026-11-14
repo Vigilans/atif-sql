@@ -326,7 +326,7 @@ The console-script entry point behind the `atif-sql` command; it replaces loguru
 with WARNING-and-up (`ATIF_SQL_LOG_LEVEL` widens it) so routine reads keep stderr quiet, then hands
 off to the cyclopts app and turns a cyclopts usage error into exit `64`.
 
-`packages/atif-cli/src/atif_cli/app.py:2543-2576`
+`packages/atif-cli/src/atif_cli/app.py:2546-2579`
 
 ### materialize
 
@@ -336,9 +336,7 @@ def materialize(
     source_root: Path,
     corpus_root: Path,
     converter: ConverterPort,
-    materialized_at: str,
-    harbor_version: str,
-    converter_version: str,
+    provenance: Provenance,
     quiesce_seconds: int = 300,
     force: bool = False,
     now_ns: int | None = None,
@@ -351,6 +349,7 @@ def materialize(
     converter_schema: int | None = None,
     session_sink: SessionSink | None = None,
     relocatable: bool = False,
+    artifact_filter: ArtifactFilter | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> MaterializationReport:
 ```
@@ -361,8 +360,12 @@ atif-converter.
 `workers` above `1` runs the convert+write stage on a spawn-context process pool that pickles
 `converter` into each worker; `worker_setup` is the composition root's per-process hook (atif-cli
 uses it to install its stderr log sink). The default `1` is the inline path.
+`provenance` carries the `materialized_at` instant and the two version pins stamped into every
+`meta.json`. `artifact_filter` hands each converted session to an `ArtifactFilter` before its
+blobs are stored or anything is staged; a pass with one writes no raw source archive or edges and
+stamps `filtered: true`, and a pass without one fails every filtered session it plans.
 
-`packages/atif-corpus/src/atif_corpus/application/materialize.py:1525-1855`
+`packages/atif-corpus/src/atif_corpus/application/materialize.py:1593-1935`
 
 ### MaterializationReport
 
@@ -375,7 +378,7 @@ What one materialization pass did, for logs and the CLI status line. `convert_se
 per-session sum and `workers` the pool size the pass used, so with several workers
 `convert_seconds` can exceed `total_seconds`, the wall clock.
 
-`packages/atif-corpus/src/atif_corpus/application/materialize.py:216-314`
+`packages/atif-corpus/src/atif_corpus/application/materialize.py:250-348`
 
 ### message_prompt
 

@@ -74,11 +74,11 @@ One pass = sweep → scan → plan → convert → write → advance watermark:
 
 Three more rules decide what a pass converts:
 
-* Raw source archive. Every live conversion is handed ``<staging>/source/``
-  and writes a zstd copy of every source file there from the bytes it parsed
-  (the converter's verifying re-read, so no extra open of a transcript).
-  ``meta.json`` lists it under ``source_archive``, and it publishes in the same
-  directory swap as the artifacts it produced.
+* Raw source archive. Every live conversion of an unfiltered pass is handed
+  ``<staging>/source/`` and writes a zstd copy of every source file there from
+  the bytes it parsed (the converter's verifying re-read, so no extra open of
+  a transcript). ``meta.json`` lists it under ``source_archive``, and it
+  publishes in the same directory swap as the artifacts it produced.
 * Generation staleness. A session whose ``meta.json`` records a different
   ``converter_schema`` (the converter-owned output version; the caller passes
   it) or ``columnar_schema`` (when the caller expects one) than this pass would
@@ -111,12 +111,22 @@ and an ordinary pass the ones with no host: each marks, retains and
 re-converts from an archive only its own, and only its own trip the
 empty-scan guard.
 
+A filtered pass (``artifact_filter``, an
+:class:`~atif_corpus.domain.ports.ArtifactFilter`) hands each converted
+session to the filter before its blobs are stored or anything is staged, and
+publishes only what the filter returns. It writes no raw source archive and
+re-converts no session from one, because raw source bytes hold what a filter
+exists to keep out, and every ``meta.json`` it writes says ``filtered: true``.
+A session re-materialized that way loses the archive it had. An unfiltered
+pass never overwrites a session that says ``filtered: true``: each one it
+plans is recorded as a failure and left as it is.
+
 A failing session is recorded in the report and skipped — one broken
 transcript must never abort a corpus sync.
 
 Clock discipline: ``materialized_at`` / ``harbor_version`` /
-``converter_version`` are passed IN by the caller (atif-cli owns the wall
-clock and the version pins); the only clocks read here are ``time.time_ns``
+``converter_version`` are passed IN by the caller as a :class:`Provenance`
+(atif-cli owns the wall clock and the version pins); the only clocks read here are ``time.time_ns``
 for the quiescence "now" when the caller does not supply one, and
 ``time.perf_counter`` for durations (the per-session convert timer can be
 swapped for another clock, ``convert_clock``, which is how a test pins the
@@ -181,6 +191,7 @@ from atif_corpus.infrastructure.source_archive import (
 
 if TYPE_CHECKING:
     from atif_corpus.domain.ports import (
+        ArtifactFilter,
         ArtifactProducer,
         BlobOutput,
         ConverterPort,
@@ -201,6 +212,29 @@ class SuspiciousEmptyScanError(RuntimeError):
     can point ``source_root`` at an empty directory on purpose and delete the
     corpus by hand if that is what they want.
     """
+
+
+class FilteredSessionError(RuntimeError):
+    """An unfiltered pass reached a session a filtered pass published.
+
+    Overwriting it would publish what the filter kept out, so the session is
+    recorded as a failure and left as it is; a pass with a filter
+    re-materializes it.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class Provenance:
+    """What the caller stamps into every ``meta.json`` a pass writes."""
+
+    #: ISO-8601 UTC instant of the pass; also the ``source_removed_at`` of
+    #: every session marked this pass.
+    materialized_at: str
+    #: The harbor release the ATIF models match; provenance only.
+    harbor_version: str
+    #: The release that did the converting. Compared for staleness only when
+    #: the caller names no ``converter_schema``.
+    converter_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -436,7 +470,7 @@ def read_empty_sessions(path: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-#: The keys ``meta.json`` always carries (or may carry, for the last three),
+#: The keys ``meta.json`` always carries (or may carry, for the last four),
 #: owned by this use case. An artifact producer may add keys but never these:
 #: a producer that could overwrite ``session_id`` or ``agent`` could silently
 #: relabel a session, so a collision is an error.
@@ -453,6 +487,7 @@ _META_CONTRACT_KEYS: frozenset[str] = frozenset(
         "source_present",
         "source_removed_at",
         META_SOURCE_ARCHIVE_KEY,
+        "filtered",
     }
 )
 
@@ -460,6 +495,9 @@ _META_CONTRACT_KEYS: frozenset[str] = frozenset(
 #: output version, and the one it falls back to comparing when it doesn't.
 _CONVERTER_SCHEMA_KEY = "converter_schema"
 _CONVERTER_VERSION_KEY = "converter_version"
+
+#: The ``meta.json`` key a filtered pass sets to ``true``.
+_FILTERED_KEY = "filtered"
 
 
 def _produce_extra_artifacts(
@@ -595,6 +633,7 @@ def _write_session(
     agent: str,
     host: str | None = None,
     artifact_producer: ArtifactProducer | None = None,
+    artifact_filter: ArtifactFilter | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> tuple[float, float]:
     """Convert one session and write its artifacts; returns (convert, artifact) seconds.
@@ -621,12 +660,26 @@ def _write_session(
     staging dir, see :func:`_store_blobs`) before any of that, so every blob
     a published session references is already on disk.
 
+    With ``artifact_filter``, the converter gets no archive dir, no edges are
+    staged, and the filter's output replaces the conversion's before the blobs
+    are stored, so nothing it leaves out reaches the corpus. Without one, a
+    session whose current ``meta.json`` says ``filtered: true`` raises
+    :class:`FilteredSessionError` before anything is converted or staged.
+
     An archive job restores the previous archive into
     ``.staging/<id>.src-<pid>/`` (swept like any other staging residue if the
     pass dies), converts the restored main transcript, and carries the
     previous archive forward by hard link rather than trusting a re-archive
     of its own restore.
     """
+    if artifact_filter is None:
+        meta = _read_meta(layout, job.session_id)
+        if meta is not None and meta.get(_FILTERED_KEY) is True:
+            msg = (
+                f"session {job.session_id} was published by a filtered pass; "
+                "an unfiltered pass does not overwrite it"
+            )
+            raise FilteredSessionError(msg)
     pid = os.getpid()
     staging = layout.staging_dir / f"{job.session_id}.tmp-{pid}"
     restore_root = layout.staging_dir / f"{job.session_id}.src-{pid}"
@@ -651,11 +704,14 @@ def _write_session(
         else:
             session_jsonl = Path(job.session_jsonl)
             others = tuple(Path(path) for path in job.source_files)
-            archive_dir.mkdir()
+            # A filtered pass archives nothing: the raw bytes are unfiltered.
+            archive_to = archive_dir if artifact_filter is None else None
+            if archive_to is not None:
+                archive_to.mkdir()
             convert_started = convert_clock()
-            output = converter.convert(session_jsonl, source_files=others, archive_dir=archive_dir)
+            output = converter.convert(session_jsonl, source_files=others, archive_dir=archive_to)
             convert_elapsed = convert_clock() - convert_started
-            if output.source_archive:
+            if archive_to is not None and output.source_archive:
                 verify_archive_on_disk(archive_dir, output.source_archive)
                 archive_meta = {
                     META_SOURCE_ARCHIVE_KEY: archive_manifest(
@@ -670,15 +726,17 @@ def _write_session(
                 # An adapter that archives nothing leaves no half-promise on disk.
                 shutil.rmtree(archive_dir, ignore_errors=True)
                 archive_meta = {}
+        if artifact_filter is not None:
+            output = artifact_filter.apply(output, session_id=job.session_id)
         _store_blobs(layout, output.blobs)
         write_json_zstd_atomic(
             staging / stored_filename(TRAJECTORY_FILENAME), output.trajectory_dict, compact=True
         )
         write_json_atomic(staging / LOSS_REPORT_FILENAME, output.loss_report_dict)
-        write_text_zstd_atomic(
-            staging / stored_filename(EDGES_FILENAME),
-            "".join(f"{line}\n" for line in output.edges_lines),
-        )
+        # A filtered pass stages no edges: they list every raw record, the ones it removed too.
+        if artifact_filter is None:
+            edges = "".join(f"{line}\n" for line in output.edges_lines)
+            write_text_zstd_atomic(staging / stored_filename(EDGES_FILENAME), edges)
         write_text_zstd_atomic(
             staging / stored_filename(SESSION_EVENTS_FILENAME),
             "".join(f"{line}\n" for line in output.events_lines),
@@ -710,6 +768,7 @@ def _write_session(
                     if key in job.source_meta
                 },
                 **archive_meta,
+                **({} if artifact_filter is None else {_FILTERED_KEY: True}),
                 **extras,
             },
         )
@@ -755,6 +814,7 @@ def _attempt_session(
     agent: str,
     host: str | None = None,
     artifact_producer: ArtifactProducer | None = None,
+    artifact_filter: ArtifactFilter | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> _SessionOutcome:
     """Run :func:`_write_session` and fold any exception into the outcome."""
@@ -770,6 +830,7 @@ def _attempt_session(
             agent=agent,
             host=host,
             artifact_producer=artifact_producer,
+            artifact_filter=artifact_filter,
             convert_clock=convert_clock,
         )
     except EmptySourceError:
@@ -796,12 +857,15 @@ def _attempt_session(
 _worker_converter: ConverterPort | None = None
 #: The artifact producer handed to the same worker, or ``None`` when none was injected.
 _worker_artifact_producer: ArtifactProducer | None = None
+#: The artifact filter handed to the same worker, or ``None`` on an unfiltered pass.
+_worker_artifact_filter: ArtifactFilter | None = None
 
 
 def _worker_init(
     converter: ConverterPort,
     setup: Callable[[], None] | None,
     artifact_producer: ArtifactProducer | None = None,
+    artifact_filter: ArtifactFilter | None = None,
 ) -> None:
     """Pool initializer: run the caller's process setup, then adopt the converter.
 
@@ -811,11 +875,12 @@ def _worker_init(
     per-process concerns the use case must not know about, such as
     installing the same log sink the parent runs.
     """
-    global _worker_converter, _worker_artifact_producer  # noqa: PLW0603 — the executor offers no other channel
+    global _worker_converter, _worker_artifact_producer, _worker_artifact_filter  # noqa: PLW0603 — the executor offers no other channel
     if setup is not None:
         setup()
     _worker_converter = converter
     _worker_artifact_producer = artifact_producer
+    _worker_artifact_filter = artifact_filter
 
 
 def _worker_attempt(
@@ -845,11 +910,12 @@ def _worker_attempt(
         agent=agent,
         host=host,
         artifact_producer=_worker_artifact_producer,
+        artifact_filter=_worker_artifact_filter,
         convert_clock=convert_clock,
     )
 
 
-class _Provenance(TypedDict):
+class _SessionStamp(TypedDict):
     """What every session of one pass is stamped with, typed per key for ``**`` forwarding."""
 
     materialized_at: str
@@ -874,6 +940,7 @@ def _attempt_sessions(
     agent: str,
     host: str | None = None,
     artifact_producer: ArtifactProducer | None = None,
+    artifact_filter: ArtifactFilter | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> tuple[list[_SessionOutcome], int]:
     """Convert and write every planned session; return outcomes in PLAN order.
@@ -898,7 +965,7 @@ def _attempt_sessions(
     if workers < 1:
         msg = f"workers must be >= 1, got {workers}"
         raise ValueError(msg)
-    provenance: _Provenance = {
+    stamp: _SessionStamp = {
         "materialized_at": materialized_at,
         "harbor_version": harbor_version,
         "converter_version": converter_version,
@@ -914,8 +981,9 @@ def _attempt_sessions(
                 job,
                 converter,
                 artifact_producer=artifact_producer,
+                artifact_filter=artifact_filter,
                 convert_clock=convert_clock,
-                **provenance,
+                **stamp,
             )
             for job in jobs
         ], 1
@@ -923,10 +991,10 @@ def _attempt_sessions(
         max_workers=pool_size,
         mp_context=multiprocessing.get_context("spawn"),
         initializer=_worker_init,
-        initargs=(converter, worker_setup, artifact_producer),
+        initargs=(converter, worker_setup, artifact_producer, artifact_filter),
     ) as pool:
         futures = [
-            pool.submit(_worker_attempt, layout, job, convert_clock=convert_clock, **provenance)
+            pool.submit(_worker_attempt, layout, job, convert_clock=convert_clock, **stamp)
             for job in jobs
         ]
         return [future.result() for future in futures], pool_size
@@ -1527,9 +1595,7 @@ def materialize(
     source_root: Path,
     corpus_root: Path,
     converter: ConverterPort,
-    materialized_at: str,
-    harbor_version: str,
-    converter_version: str,
+    provenance: Provenance,
     quiesce_seconds: int = 300,
     force: bool = False,
     now_ns: int | None = None,
@@ -1542,6 +1608,7 @@ def materialize(
     converter_schema: int | None = None,
     session_sink: SessionSink | None = None,
     relocatable: bool = False,
+    artifact_filter: ArtifactFilter | None = None,
     convert_clock: Callable[[], float] = time.perf_counter,
 ) -> MaterializationReport:
     """Run one materialization pass; see the module docstring for the shape.
@@ -1561,11 +1628,10 @@ def materialize(
         ``meta.json``; its extra files publish in the same directory swap and
         its returned keys land in ``meta.json``. ``None`` (the default) writes
         exactly the contract artifacts plus the source archive.
-    materialized_at
-        ISO-8601 UTC instant to stamp into every ``meta.json`` this pass, and
-        the ``source_removed_at`` of every session marked this pass.
-    harbor_version, converter_version
-        Version pins for provenance; the caller owns them.
+    provenance
+        The pass's ``materialized_at`` instant and version pins, stamped into
+        every ``meta.json`` this pass writes; ``materialized_at`` is also the
+        ``source_removed_at`` of every session marked this pass.
     converter_schema
         The converter's own output version, stamped into ``meta.json`` as
         ``converter_schema``. A session recording a different one (or none) is
@@ -1624,6 +1690,14 @@ def materialize(
         records :func:`~atif_corpus.infrastructure.hostname.machine_hostname`
         as ``meta.host``, and the pass marks, retains, re-converts from an
         archive and guards only the sessions that name this machine.
+    artifact_filter
+        Optional :class:`~atif_corpus.domain.ports.ArtifactFilter`, applied to
+        every converted session before its blobs are stored or anything is
+        staged; only its output publishes. A filtered pass writes no raw
+        source archive (whatever ``relocatable`` says), re-converts nothing
+        from one, and stamps ``filtered: true`` into each ``meta.json``. Without
+        one, a planned session whose ``meta.json`` says ``filtered: true`` is
+        recorded as a failure and left as it is.
 
     Raises
     ------
@@ -1636,8 +1710,9 @@ def materialize(
         stamped converter key.
     """
     pass_started = time.perf_counter()
+    materialized_at = provenance.materialized_at
     expected = expected_generation(
-        converter_version, expected_meta, converter_schema=converter_schema
+        provenance.converter_version, expected_meta, converter_schema=converter_schema
     )
 
     layout = CorpusLayout(corpus_root=corpus_root)
@@ -1733,7 +1808,11 @@ def materialize(
     )
 
     live_jobs = tuple(_live_job(session, source_root) for session in plan.to_materialize)
-    archive_jobs = _archive_jobs(retained, expected, force=force, wanted=wanted)
+    archive_jobs = (
+        _archive_jobs(retained, expected, force=force, wanted=wanted)
+        if artifact_filter is None
+        else ()
+    )
     outcomes, workers_used = _attempt_sessions(
         layout,
         (*live_jobs, *archive_jobs),
@@ -1741,12 +1820,13 @@ def materialize(
         workers=workers,
         worker_setup=worker_setup,
         materialized_at=materialized_at,
-        harbor_version=harbor_version,
-        converter_version=converter_version,
+        harbor_version=provenance.harbor_version,
+        converter_version=provenance.converter_version,
         converter_schema=converter_schema,
         agent=agent,
         host=host,
         artifact_producer=artifact_producer,
+        artifact_filter=artifact_filter,
         convert_clock=convert_clock,
     )
     live_outcomes = outcomes[: len(live_jobs)]
