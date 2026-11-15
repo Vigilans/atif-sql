@@ -16,8 +16,10 @@ plan and every rendered transcript.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import dataclasses
+import hashlib
 import io
 import json
 import os
@@ -29,6 +31,7 @@ from typing import Any
 
 import pytest
 from cli_fixtures import write_synthetic_session
+from filter_fixtures import PASTED_PNG, READ_PNG
 from loguru import logger
 
 from atif_analytics.application.use_cases.classify import classify_sessions
@@ -100,6 +103,22 @@ def _assistant(session_id: str, n: int, ts: str, content: list[dict[str, Any]]) 
     return record
 
 
+def _image_block(data: bytes) -> dict[str, Any]:
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": base64.b64encode(data).decode("ascii"),
+        },
+    }
+
+
+def _placeholder(data: bytes) -> str:
+    sha256 = hashlib.sha256(data).hexdigest()
+    return f"[image blobs/sha256/{sha256[:2]}/{sha256}.png image/png]"
+
+
 def write_rich_session(source_root: Path, session_id: str, day: int) -> None:
     """A session every gate has something to read in.
 
@@ -107,9 +126,9 @@ def write_rich_session(source_root: Path, session_id: str, day: int) -> None:
     that ordered them by id instead of source order would render them
     differently), one result an error followed by a short human question
     (friction rule 3), a short imperative (rule 2), a Stop hook message (a
-    user-role step no human wrote), a list-content user message, non-ASCII
-    arguments and a list-shaped result, and enough human-AI pairs for the
-    perceived gate.
+    user-role step no human wrote), a list-content user message with a
+    pasted image, non-ASCII arguments and a list-shaped result holding an
+    image, and enough human-AI pairs for the perceived gate.
     """
     project = source_root / "-work-proj"
     project.mkdir(parents=True, exist_ok=True)
@@ -151,7 +170,10 @@ def write_rich_session(source_root: Path, session_id: str, day: int) -> None:
                     {
                         "type": "tool_result",
                         "tool_use_id": ids[1],
-                        "content": [{"type": "text", "text": "parser.py:1: def parse"}],
+                        "content": [
+                            {"type": "text", "text": "parser.py:1: def parse"},
+                            _image_block(READ_PNG),
+                        ],
                     },
                     {
                         "type": "tool_result",
@@ -182,7 +204,10 @@ def write_rich_session(source_root: Path, session_id: str, day: int) -> None:
             9,
             "user",
             f"{stamp}:09.000Z",
-            {"role": "user", "content": [{"type": "text", "text": "undo that"}]},
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "undo that"}, _image_block(PASTED_PNG)],
+            },
         ),
         _assistant(session_id, 10, f"{stamp}:10.000Z", [{"type": "text", "text": "Undone."}]),
     ]
@@ -252,6 +277,13 @@ class TestTheLakeReadsWhatTheFilesHold:
         assert len(call_ids) == 3
         assert call_ids != sorted(call_ids)
         assert any(step.has_error_result for step in steps)
+
+    def test_image_parts_read_as_their_blob_paths(self, lake_source: LakeSessionSource) -> None:
+        steps = lake_source.load_steps([RICH_A])[RICH_A]
+        texts = [step.text for step in steps]
+        assert f"undo that\n\n{_placeholder(PASTED_PNG)}" in texts
+        results = dict(result for step in steps for result in step.tool_results)
+        assert f"parser.py:1: def parse\n\n{_placeholder(READ_PNG)}" in results.values()
 
     def test_every_session_reads_the_same_from_both_sources(
         self, built: tuple[Path, Path, Path], lake_source: LakeSessionSource

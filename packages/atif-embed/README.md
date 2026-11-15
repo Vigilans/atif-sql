@@ -101,9 +101,11 @@ implements it over atif-duck's `infrastructure.lake_steps`, and
 
 ## Selection + keying semantics (CONTRACT-V2 §VSS)
 
-- The embeddable unit is a step's flattened text (`str | ContentPart[]`;
-  the ARRAY branch joins part texts with blank lines, mirroring harbor's
-  bundling and atif-duck's `steps` view).
+- The embeddable unit is a step's flattened text (`str | ContentPart[]`),
+  rendered by atif-duck's `content_text` rule: parts are joined with blank
+  lines, and an image or audio part reads as
+  `[<kind> blobs/sha256/<ab>/<sha256>.<ext> <media_type>]`, as in the
+  `steps` view's `message`.
 - Main chain AND sidechain steps are included.
 - Only texts of >= 32 characters qualify.
 - **uuid keying:** each row is keyed by the step's PRIMARY raw-record uuid —

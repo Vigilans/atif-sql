@@ -12,9 +12,9 @@ bound list parameter, never as statement text.
 
 Selection semantics (CONTRACT-V2 §VSS):
 
-* the embeddable unit is a step's flattened text (``str | ContentPart[]``,
-  the ARRAY branch joined with blank lines — mirrors atif-duck's ``steps``
-  view and harbor's own text bundling);
+* the embeddable unit is a step's flattened text (``str | ContentPart[]``
+  rendered by :func:`content_text_sql`, the rule of atif-duck's ``steps``
+  view, so an image or audio part reads as its blob path);
 * main chain AND sidechain steps are included (no ``is_sidechain`` filter);
 * only texts of >= 32 characters qualify — shorter step texts are acks and
   noise;
@@ -87,6 +87,49 @@ _FETCH_PAGE_ROWS = 512
 _BATCH_MAX_BYTES = 4 * 1024 * 1024
 
 
+#: The prefix that makes a blob path relative to a session directory.
+_SESSION_BLOB_PREFIX = "../../blobs/"
+
+
+def content_text_sql(content: str) -> str:
+    """SQL rendering ATIF content (``str | ContentPart[]``) as one text body.
+
+    atif-duck's ``content_text(content)`` macro, which this package may not
+    import; atif-cli's ``test_content_text_twin_pin.py`` pins the two to one
+    rule. ``content`` is SQL for the JSON value. A JSON string is returned
+    unquoted; a ``ContentPart`` array joins its parts with blank lines, a
+    ``text`` part as its text and an ``image`` or ``audio`` part as
+    ``[<type> <path> <media_type>]``, its path read from the corpus root.
+    """
+    path = "json_extract_string(part, '$.source.path')"
+    # ``substr(..., 7)`` drops the leading ``../../``.
+    shown = (
+        f"CASE WHEN starts_with({path}, '{_SESSION_BLOB_PREFIX}') "
+        f"THEN substr({path}, 7) ELSE {path} END"
+    )
+    part = (
+        "CASE WHEN json_extract_string(part, '$.type') = 'text' "
+        "AND json_type(part, '$.text') = 'VARCHAR' "
+        "THEN json_extract_string(part, '$.text') "
+        "WHEN json_extract_string(part, '$.type') IN ('image', 'audio') "
+        "AND json_type(part, '$.source.path') = 'VARCHAR' "
+        "AND json_type(part, '$.source.media_type') = 'VARCHAR' "
+        "THEN '[' || json_extract_string(part, '$.type') || ' ' || "
+        f"{shown} || ' ' || json_extract_string(part, '$.source.media_type') || ']' END"
+    )
+    value = f"CAST({content} AS JSON)"
+    return (
+        f"CASE WHEN json_type({value}) = 'ARRAY' "
+        f"THEN array_to_string(list_transform(CAST(json_extract({value}, '$[*]') AS JSON[]), "
+        f"lambda part: {part}), '\n\n') "
+        f"ELSE json_extract_string({value}, '$') END"
+    )
+
+
+#: A step's text: its rendered message.
+_STEP_TEXT_SQL = content_text_sql("json_extract(step, '$.message')")
+
+
 def _step_texts_sql(max_object_size: int) -> str:
     """SQL selecting ``(uuid, text_content)`` from ONE BATCH of trajectories.
 
@@ -133,16 +176,7 @@ def _step_texts_sql(max_object_size: int) -> str:
                 o.trajectory                                         AS trajectory,
                 json_extract(step, '$.step_id')::BIGINT              AS step_id,
                 json_extract_string(step, '$.extra.source_uuids[0]') AS uuid,
-                CASE WHEN json_type(step, '$.message') = 'ARRAY'
-                     THEN array_to_string(
-                              list_transform(
-                                  json_extract(step, '$.message[*].text'),
-                                  lambda part: json_extract_string(part, '$')
-                              ),
-                              '\n\n'
-                          )
-                     ELSE json_extract_string(step, '$.message')
-                END                                                  AS text_content
+                {_STEP_TEXT_SQL}                                     AS text_content
             FROM owned o, UNNEST(o.steps) AS s(step)
         )
         SELECT uuid, text_content
@@ -314,4 +348,4 @@ def _step_rows(paths: list[tuple[str, int]]) -> Iterator[tuple[str, str]]:
         con.close()
 
 
-__all__ = ["MIN_TEXT_CHARS", "DuckDbTextRows"]
+__all__ = ["MIN_TEXT_CHARS", "DuckDbTextRows", "content_text_sql"]

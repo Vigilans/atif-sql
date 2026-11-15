@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from atif_analytics.domain.transcript import StepEvent, step_event
+from atif_analytics.domain.transcript import StepEvent, content_text, step_event
 from atif_analytics.infrastructure.corpus_reader import (
     META_FILENAME,
     TrajectoryFileSource,
@@ -248,7 +248,7 @@ class LakeSessionSource:
             in_lake
         ):
             results[(str(sid), str(trajectory_id), int(step_id))].append(
-                (call_id, _json(content), is_error is True)
+                (call_id, content_text(_json(content)), is_error is True)
             )
         grouped: dict[str, list[StepEvent]] = defaultdict(list)
         for (

@@ -30,8 +30,11 @@ much as the work it avoids.
 Semantic notes (mirrors atif-duck's ``steps`` view; the shared projection is
 :func:`~atif_analytics.domain.transcript.step_event`):
 
-* ``Step.message`` is ``str | ContentPart[]``; the list branch joins the
-  parts' ``text`` fields with blank lines.
+* ``Step.message`` and ``ObservationResult.content`` are
+  ``str | ContentPart[]``, rendered by
+  :func:`~atif_analytics.domain.transcript.content_text`, so an image or
+  audio part reads as its blob path, as in the ``steps`` view's
+  ``message``.
 * the step uuid is ``extra.source_uuids[0]`` — the FIRST source uuid, the
   documented primary raw-record key (same choice the VSS branch embeds on).
 * ATIF ``source`` maps ``agent`` → ``assistant`` for the prompt surface, and
@@ -58,6 +61,7 @@ from loguru import logger
 from atif_analytics.domain.config import TranscriptCaps
 from atif_analytics.domain.transcript import (
     StepEvent,
+    content_text,
     render_session_text,
     session_kind,
     step_event,
@@ -97,21 +101,6 @@ def parse_ts(raw: str | None) -> datetime | None:
     return dt.astimezone(UTC)
 
 
-def _flatten_message(message: Any) -> str:
-    """Flatten ATIF ``Step.message`` (str | ContentPart[]) to one text body."""
-    if isinstance(message, str):
-        return message
-    if isinstance(message, list):
-        parts: list[str] = []
-        for part in message:
-            if isinstance(part, dict):
-                text = part.get("text")
-                if isinstance(text, str) and text:
-                    parts.append(text)
-        return "\n\n".join(parts)
-    return ""
-
-
 def parse_trajectory_step(step: dict[str, Any], *, embedded: bool = False) -> StepEvent:
     """Project one raw ``trajectory.json`` step dict into a :class:`StepEvent`.
 
@@ -132,11 +121,17 @@ def parse_trajectory_step(step: dict[str, Any], *, embedded: bool = False) -> St
         res_extra = res.get("extra") or {}
         meta = res_extra.get("tool_result_metadata") or {}
         is_error = res_extra.get("is_error") is True or meta.get("is_error") is True
-        results.append((res.get("source_call_id"), res.get("content"), is_error))
+        results.append(
+            (
+                res.get("source_call_id"),
+                content_text(res.get("content")),
+                is_error,
+            )
+        )
     return step_event(
         ts=parse_ts(str(step.get("timestamp") or "")),
         source=str(step.get("source") or ""),
-        text=_flatten_message(step.get("message")),
+        text=content_text(step.get("message")),
         source_uuids=extra.get("source_uuids"),
         is_sidechain=embedded or bool(extra.get("is_sidechain") or False),
         is_compact_summary=bool(extra.get("is_compact_summary") or False),

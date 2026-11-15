@@ -201,9 +201,9 @@ sequenceDiagram
    reading ahead in the newest-first walk order, and every other session from its files. Without
    a lake, rows are read with stdlib `json` over `<corpus_root>/sessions/<id>/trajectory.json.zst` (or the plain file on an old-layout session);
    atif-analytics declares no DuckDB dependency, and the `forbidden` import contract puts atif-duck
-   out of its reach (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:242`, `pyproject.toml:618`).
+   out of its reach (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:237`, `pyproject.toml:618`).
    Either way the steps sit behind the reader's bounded memos
-   (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:331`), and the
+   (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:326`), and the
    reader labels each session's kind with the same rule `session_outcomes.kind` applies, so
    classify and conflicts can skip `turn_audit` and `one_shot_job` sessions.
 4. Before the first stage starts, one `RunBudget` is constructed from the per-run dollar ceiling
@@ -218,7 +218,7 @@ sequenceDiagram
    `:753`). The renderer writes each tool result as a one-line stub with the content's length, so
    what a tool returned stays on disk and never reaches Bedrock;
    `ATIF_SQL_SESSION_TEXT_TOOL_RESULT_BODIES=true` puts the bodies back, each clipped at 50,000
-   characters (`packages/atif-analytics/src/atif_analytics/domain/transcript.py:247`).
+   characters (`packages/atif-analytics/src/atif_analytics/domain/transcript.py:289`).
 7. `build_structured_provider` picks the adapter by the resolved spec's family and imports only that
    adapter's module: `OpenAiBedrockProvider` for openai, the default, and `AnthropicBedrockProvider`
    for anthropic (`packages/atif-models/src/atif_models/infrastructure/providers.py:20`). Each

@@ -137,10 +137,10 @@ intra-module use site is named after the table.
 | `STATE_DB_FILENAME` | `packages/atif-analytics/src/atif_analytics/domain/layout.py:41` | 2026-08-28 |
 | `TOOL_INPUT_PREVIEW_CHARS` | `packages/atif-analytics/src/atif_analytics/domain/transcript.py:68` | 2026-08-28 |
 | `UUID_HEADER_ESCAPE` | `packages/atif-analytics/src/atif_analytics/domain/transcript.py:79` | 2026-08-28 |
-| `main_chain` | `packages/atif-analytics/src/atif_analytics/domain/transcript.py:242` | 2026-08-28 |
-| `parse_trajectory_step` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:115` | 2026-09-28 |
-| `read_trajectory_steps` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:242` | 2026-09-28 |
-| `read_edges_uuids` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:263` | 2026-09-28 |
+| `main_chain` | `packages/atif-analytics/src/atif_analytics/domain/transcript.py:284` | 2026-08-28 |
+| `parse_trajectory_step` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:104` | 2026-09-28 |
+| `read_trajectory_steps` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:237` | 2026-09-28 |
+| `read_edges_uuids` | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:258` | 2026-09-28 |
 | `is_sharded_dir` | `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:35` | 2026-08-28 |
 | `write_part` | `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:90` | 2026-08-28 |
 | `read_all` | `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:114` | 2026-08-28 |
@@ -232,13 +232,13 @@ numbers follow it as plain numbers.
   `UUID_HEADER_ESCAPE` is the substitution at
   `packages/atif-analytics/src/atif_analytics/domain/transcript.py:91`;
   `main_chain` is called at
-  `packages/atif-analytics/src/atif_analytics/domain/transcript.py:282`. The
+  `packages/atif-analytics/src/atif_analytics/domain/transcript.py:324`. The
   `main_chain` in
   `packages/atif-duck/tests/test_result_views.py:86` is a local variable.
 - `parse_trajectory_step` is called at
-  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:257`,
-  inside the walk `read_trajectory_steps` runs, which a reader method calls at `:317`;
-  `read_edges_uuids` is called at `:325`.
+  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:252`,
+  inside the walk `read_trajectory_steps` runs, which a reader method calls at `:312`;
+  `read_edges_uuids` is called at `:320`.
 - `is_sharded_dir` is called at
   `packages/atif-analytics/src/atif_analytics/infrastructure/parquet_cache.py:97`;
   the module functions `write_part` and `read_all` are what the `ParquetCache`

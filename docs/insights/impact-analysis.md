@@ -41,7 +41,7 @@ than pedantic:
 The internal graph is a star: `atif-cli` to its declared siblings, plus exactly one
 `atif-analytics → atif-models` edge. atif-cli doesn't declare atif-models
 (`packages/atif-cli/pyproject.toml:32-36` lists its siblings, none of them atif-models), and its
-only import of it is in a test (`packages/atif-cli/tests/test_analyze_lake.py:44`). The CLI surface was
+only import of it is in a test (`packages/atif-cli/tests/test_analyze_lake.py:47`). The CLI surface was
 enumerated from the `@app.command` decorator sites, not from route literals.
 
 ## The static DuckDB catalog
@@ -123,13 +123,13 @@ places with no import edge between them.
 | --- | --- | --- | --- |
 | `atif_corpus.application.materialize`: the writer, routed through `CorpusLayout` | direct import | yes | `packages/atif-corpus/src/atif_corpus/application/materialize.py:158-167` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1718` |
 | `atif_duck.infrastructure.registry`: builds globs under `corpus_root / "sessions"` | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:758-768` |
-| `atif_embed.infrastructure.corpus_text_rows`: its own `sessions/` walk, gated on `meta.json` | indirect | yes | `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:178-196` |
-| `atif_analytics.infrastructure.corpus_reader`: re-declares the filename constants | indirect | yes | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:72-74` and `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:182-195` |
+| `atif_embed.infrastructure.corpus_text_rows`: its own `sessions/` walk, gated on `meta.json` | indirect | yes | `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:212-230` |
+| `atif_analytics.infrastructure.corpus_reader`: re-declares the filename constants | indirect | yes | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:76-78` and `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:177-190` |
 | `atif_cli.app.convert`: writes `edges.jsonl` beside a `--trajectory-out` trajectory on the one-shot path | indirect | likely | `packages/atif-cli/src/atif_cli/app.py:789-790` |
 | `atif_cli.app.status`: reads the watermark through the producer's public `read_watermark` | direct import | likely | `packages/atif-cli/src/atif_cli/app.py:1370` |
 | `docs/CONTRACT.md:22-60`: the specification; the file declares itself orchestrator-owned and changeable only via itself | config | yes | `docs/CONTRACT.md:3` |
 | `test_domain.py::TestCorpusLayout.test_contract_paths`: pins every contract string | test | yes | `packages/atif-corpus/tests/test_domain.py:245-258` |
-| Independent fixture-corpus builders, one per consuming package | test | yes | `packages/atif-duck/tests/duck_fixtures.py:608`, `packages/atif-embed/tests/embed_fixtures.py:120`, `packages/atif-analytics/tests/analytics_fixtures.py:282` |
+| Independent fixture-corpus builders, one per consuming package | test | yes | `packages/atif-duck/tests/duck_fixtures.py:608`, `packages/atif-embed/tests/embed_fixtures.py:127`, `packages/atif-analytics/tests/analytics_fixtures.py:282` |
 
 ### Blast-radius notes
 
@@ -168,7 +168,7 @@ atif-models, and the atif-embed adapters live in the same package as their ports
 Protocol-typed argument themselves: `LakeTextRows` imports `TextRowsPort` to type the fallback reader
 it wraps (`packages/atif-embed/src/atif_embed/infrastructure/lake_text_rows.py:52`), and the
 analytics corpus reader imports `SessionSource` to type `CorpusReader`'s source
-(`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:70`). Each row below
+(`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:74`). Each row below
 marked `indirect` names a class whose only textual reference to the Protocol is a docstring, so no
 import-graph query reaches it.
 
@@ -184,7 +184,7 @@ import-graph query reaches it.
 | `FakeConverter`: shipped in `src/` rather than `tests/`; same shape, same non-import | indirect | yes | `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:21-26` and `packages/atif-corpus/src/atif_corpus/infrastructure/fake_converter.py:81` |
 | `ConversionOutput`: the frozen dataclass that DOES cross the boundary as an import | direct import | yes | `packages/atif-corpus/src/atif_corpus/domain/ports.py:65-66` |
 | `EmbeddingProvider` / `VectorStorePort` / `TextRowsPort` ← the one embed use case, under `if TYPE_CHECKING:` | direct import | yes | `packages/atif-embed/src/atif_embed/application/embed.py:37`, `packages/atif-embed/src/atif_embed/application/embed.py:48-49`, `packages/atif-embed/src/atif_embed/application/embed.py:67-69` |
-| The production adapters (two embedding providers, the Lance store, and the corpus text-rows reader), none importing its Protocol | indirect | yes | `packages/atif-embed/src/atif_embed/infrastructure/cohere_bedrock.py:285`, `packages/atif-embed/src/atif_embed/infrastructure/gemma_local.py:193`, `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:597`, `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:241` |
+| The production adapters (two embedding providers, the Lance store, and the corpus text-rows reader), none importing its Protocol | indirect | yes | `packages/atif-embed/src/atif_embed/infrastructure/cohere_bedrock.py:285`, `packages/atif-embed/src/atif_embed/infrastructure/gemma_local.py:193`, `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:597`, `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:275` |
 | `test_converter_adapter.py`: imports `ConverterPort` and binds `RealConverter` to it by annotation; `test_embed_ports.py` and `test_models_ports.py` do the same for the embed and model ports | test | yes | `packages/atif-cli/tests/test_converter_adapter.py:17` and `packages/atif-cli/tests/test_converter_adapter.py:92`, `packages/atif-embed/tests/test_embed_ports.py:27` |
 | `[tool.coverage.report] exclude_also`: a bare `...` line is excluded because a Protocol body is a signature | config | no | `pyproject.toml:656-659` |
 
@@ -228,7 +228,7 @@ surfaces above exist as duplicated strings and Protocols instead of imports.
 | `TextRowsPort`: exists because atif-embed may not import atif-duck | indirect | yes | `packages/atif-embed/src/atif_embed/domain/ports.py:11-15` |
 | The `embedding_guard` twins: one rule, copied into atif-duck and atif-embed | direct import | yes | `packages/atif-duck/src/atif_duck/domain/embedding_guard.py:51` and `packages/atif-embed/src/atif_embed/domain/embedding_guard.py:38` |
 | `test_guard_twin_pin.py`: reads the atif-duck copy as SOURCE TEXT via `ast`, never importing it | test | yes | `packages/atif-embed/tests/test_guard_twin_pin.py:41` and `packages/atif-embed/tests/test_guard_twin_pin.py:55-72` |
-| The independent corpus readers | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:665`, `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:178`, `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:182` |
+| The independent corpus readers | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:665`, `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:212`, `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:177` |
 | `[tool.coverage.run] source`: the same import packages, named rather than pathed | config | likely | `pyproject.toml:632-640` |
 
 ### Blast-radius notes

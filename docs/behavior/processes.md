@@ -143,7 +143,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:1826`
    it, shared by every stage: the steps memo is the expensive part and every
    stage walks the same sessions
    (`packages/atif-analytics/src/atif_analytics/application/analyze.py:62`,
-   `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:328`).
+   `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:323`).
 3. Construct the run-wide `RunBudget` from `llm_max_cost_usd_per_run`, priced
    from the providers' running actual usage rather than estimates:
    `packages/atif-analytics/src/atif_analytics/application/use_cases/_shared.py:97`.
@@ -203,7 +203,7 @@ turns, the main-chain user steps whose author is `human`.
    The rendered transcript carries each tool result as a size stub,
    `[tool_result <id> <ts>] (N chars omitted)`, unless
    `ATIF_SQL_SESSION_TEXT_TOOL_RESULT_BODIES` turns the bodies on:
-   `packages/atif-analytics/src/atif_analytics/domain/transcript.py:308-311`.
+   `packages/atif-analytics/src/atif_analytics/domain/transcript.py:350-353`.
 6. Dispatch each write chunk in budget-checked sub-batches of
    `BUDGET_CHECK_BATCH`, advancing the cursor by what was actually sent so a
    mid-chunk budget stop leaves the remainder unstamped rather than silently

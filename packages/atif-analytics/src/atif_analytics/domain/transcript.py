@@ -149,6 +149,48 @@ class StepEvent:
             self.author = "harness" if self.is_compact_summary else step_author("user", self.text)
 
 
+#: The prefix that makes a blob path relative to a session directory.
+_SESSION_BLOB_PREFIX = "../../blobs/"
+
+
+def content_text(content: object) -> str | None:
+    """ATIF content (``str | ContentPart[]``) as one text body, ``None`` when absent.
+
+    atif-duck's ``content_text(content)`` macro, rule for rule (pinned by
+    atif-cli's ``test_content_text_twin_pin.py``): a string is itself, and a
+    ``ContentPart`` list joins its parts with blank lines, a ``text`` part as
+    its text and an ``image`` or ``audio`` part as ``[<type> <path>
+    <media_type>]``, its ``source.path`` read from the corpus root
+    (``../../blobs/...`` is ``blobs/...``). A part of any other shape renders
+    nothing, and a list none of whose parts renders is ``None``.
+    """
+    if content is None or isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+    rendered = [text for part in content if (text := _part_text(part)) is not None]
+    if content and not rendered:
+        return None
+    return "\n\n".join(rendered)
+
+
+def _part_text(part: object) -> str | None:
+    if not isinstance(part, dict):
+        return None
+    kind = part.get("type")
+    if kind == "text":
+        text = part.get("text")
+        return text if isinstance(text, str) else None
+    source = part.get("source")
+    if kind not in {"image", "audio"} or not isinstance(source, dict):
+        return None
+    path, media_type = source.get("path"), source.get("media_type")
+    if not isinstance(path, str) or not isinstance(media_type, str):
+        return None
+    shown = path.removeprefix("../../") if path.startswith(_SESSION_BLOB_PREFIX) else path
+    return f"[{kind} {shown} {media_type}]"
+
+
 def format_step_ts(ts: datetime | None) -> str:
     """Spell a step timestamp the way the transcript renders it (``...T10:00:00.000Z``).
 
@@ -183,8 +225,8 @@ def step_event(
     """Project one ATIF step's values into a :class:`StepEvent`: the rules both sources share.
 
     ``tool_calls`` holds ``(function_name, arguments)`` and ``tool_results``
-    ``(source_call_id, content, is_error)``, with ``arguments`` and
-    ``content`` as parsed JSON values. The rules:
+    ``(source_call_id, content, is_error)``, with ``arguments`` a parsed JSON
+    value and ``content`` the result's :func:`content_text`. The rules:
 
     * ATIF ``source`` ``agent`` renders as ``assistant``; an absent source as
       ``unknown``.
@@ -357,6 +399,7 @@ __all__ = [
     "TOOL_INPUT_PREVIEW_CHARS",
     "UUID_HEADER_ESCAPE",
     "StepEvent",
+    "content_text",
     "escape_uuid_headers",
     "format_step_ts",
     "human_ai_pair_count",

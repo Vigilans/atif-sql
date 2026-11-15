@@ -129,10 +129,10 @@ Sources, in dispatch order:
   `run_analyze` called at `:1910`.
 - run_analyze: `packages/atif-analytics/src/atif_analytics/application/analyze.py:37`; the
   `stages` list at `:103-108`, each stage invoked at `:129`.
-- CorpusReader: `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:328`,
+- CorpusReader: `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:323`,
   constructed once per run at
   `packages/atif-analytics/src/atif_analytics/application/analyze.py:62`; `session_text` at
-  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:498`.
+  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:493`.
 - LLM stages: the classify exemplar at
   `packages/atif-analytics/src/atif_analytics/application/use_cases/classify.py:374`; structured
   call dispatched at

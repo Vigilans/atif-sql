@@ -11,6 +11,7 @@ from typing import Any, TypedDict, Unpack
 
 import pytest
 from embed_fixtures import (
+    ARRAY_IMAGE_PATH,
     ARRAY_PART_ONE,
     ARRAY_PART_TWO,
     EXPECTED_EMBEDDABLE_UUIDS,
@@ -199,7 +200,9 @@ class TestSelection:
 
     def test_array_message_flattens_with_blank_lines(self, corpus_root: Path) -> None:
         texts = {p.uuid: p.text for p in _rows(corpus_root)}
-        assert texts["uc-1"] == f"{ARRAY_PART_ONE}\n\n{ARRAY_PART_TWO}"
+        assert texts["uc-1"] == (
+            f"{ARRAY_PART_ONE}\n\n{ARRAY_PART_TWO}\n\n[image {ARRAY_IMAGE_PATH} image/png]"
+        )
 
     def test_torn_session_dirs_are_excluded(self, corpus_root: Path) -> None:
         uuids = {p.uuid for p in _rows(corpus_root)}

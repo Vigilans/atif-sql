@@ -56,7 +56,7 @@ is the one member permitted to import a sibling: atif-models and nothing else (`
 - `packages/atif-analytics/src/atif_analytics/domain/transcript.py`: `render_session_text`
   renders the transcript a stage sends, each tool result as a one-line stub with the content's
   length, so what a tool returned stays on disk and never reaches Bedrock
-  (`packages/atif-analytics/src/atif_analytics/domain/transcript.py:247`).
+  (`packages/atif-analytics/src/atif_analytics/domain/transcript.py:289`).
   `ATIF_SQL_SESSION_TEXT_TOOL_RESULT_BODIES=true` puts the bodies back, each clipped at 50,000
   characters (`packages/atif-analytics/src/atif_analytics/infrastructure/settings.py:94`, `:90`).
 - `packages/atif-analytics/src/atif_analytics/domain/models.py`: the response schemas, from
@@ -206,7 +206,7 @@ per-session reader otherwise.
   `embed_query` the search command calls (`:286`).
 - `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py`: reads the
   contract corpus layout with its own DuckDB connection, since importing atif-duck is forbidden
-  (`packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:241`).
+  (`packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:275`).
 - `packages/atif-embed/src/atif_embed/domain/ports.py`: the port Protocols:
   `EmbeddingProvider` (`packages/atif-embed/src/atif_embed/domain/ports.py:37`), `VectorStorePort`
   (`:65`), `TextRowsPort` (`:89`), and `LakeStepsPort` (`:198`).

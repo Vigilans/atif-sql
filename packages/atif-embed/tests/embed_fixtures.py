@@ -33,6 +33,8 @@ LONG_SIDECHAIN_TEXT = (
 )
 ARRAY_PART_ONE = "Compact summary part one carries enough characters to qualify."
 ARRAY_PART_TWO = "Part two adds more."
+ARRAY_IMAGE_SHA256 = "cd" * 32
+ARRAY_IMAGE_PATH = f"blobs/sha256/cd/{ARRAY_IMAGE_SHA256}.png"
 
 #: uuids the fixture corpus should yield as embeddable, in scan order.
 EXPECTED_EMBEDDABLE_UUIDS = ["ua-1", "aa-1", "sa-1", "uc-1", "ub-1"]
@@ -84,13 +86,18 @@ def _session_one() -> dict[str, Any]:
                 "extra": {"is_sidechain": False},
             },
             {
-                # ARRAY message — parts joined with blank lines.
+                # ARRAY message — parts joined with blank lines, the image
+                # part as its blob path.
                 "step_id": 6,
                 "timestamp": "2026-08-20T10:00:40.000Z",
                 "source": "user",
                 "message": [
                     {"type": "text", "text": ARRAY_PART_ONE},
                     {"type": "text", "text": ARRAY_PART_TWO},
+                    {
+                        "type": "image",
+                        "source": {"media_type": "image/png", "path": f"../../{ARRAY_IMAGE_PATH}"},
+                    },
                 ],
                 "extra": {"is_sidechain": False, "source_uuids": ["uc-1"]},
             },

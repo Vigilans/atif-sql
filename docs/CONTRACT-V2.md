@@ -83,7 +83,9 @@ KEY PROPERTY: pipelines read the MATERIALIZED corpus
 (trajectory.json steps + edges.jsonl, or the lake), not raw JSONL.
 Transcript text for prompts = steps-based rendering under fixed caps (800K/session). Tool
 calls render with their arguments (400 chars); each tool result renders as a
-size stub, so tool output stays on disk.
+size stub, so tool output stays on disk. A step's message and a result's
+content are rendered by the content_text rule (CONTRACT.md), so an image or
+audio part reads as its blob path.
 ATIF_SQL_SESSION_TEXT_TOOL_RESULT_BODIES=true sends result bodies instead,
 clipped at 50K each. conflicts needs uuid-addressable turns -> use messages(edges)
 uuids in headers; validate returned uuids against edges.
@@ -98,8 +100,11 @@ The stack: cohere embed v4 (the default; EmbeddingGemma 2 on this machine with
 ATIF_SQL_EMBED_PROVIDER=gemma, in its own store) -> Lance store written through duckdb lance
 ATTACH -> message_embeddings view + semantic_search(query_vec,k) macro +
 search CLI (cosine-distance ranking, int8-doc caveat). Embeds messages_text
-analogue = steps text >=32 chars (main+sidechain), uuid-keyed via source_uuids
-primary uuid (first source uuid per step; document choice).
+analogue = steps text >=32 chars (main+sidechain), the message rendered by the
+content_text rule, uuid-keyed via source_uuids
+primary uuid (first source uuid per step; document choice). atif-duck's
+macro, atif-embed's SQL and atif-analytics' content_text are pinned to one
+rule by atif-cli's test_content_text_twin_pin.py.
 
 ## Cron
 scripts/atif-sql-refresh.sh: lanes (materialize */10, structural :17,

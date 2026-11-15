@@ -54,9 +54,9 @@ The sections below aren't ranked; "Other contracts" at the end collects the smal
   glob (and, further down, each session's stored-file list) and binds it as the one parameter of
   its `read_json` readers, spelling the names from its own constants at
   `packages/atif-duck/src/atif_duck/domain/artifacts.py:28-36`.
-- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:178-196`: gates on
+- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:212-230`: gates on
   `meta.json` and opens each stored trajectory with its own DuckDB connection.
-- `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:72-74`: declares
+- `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:76-78`: declares
   `TRAJECTORY_FILENAME` / `EDGES_FILENAME` / `META_FILENAME` again as its own constants.
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:732-774`: the writer side, the
   only place the artifacts are produced.
@@ -103,8 +103,8 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
 
 - **`meta.json` present means the session dir is complete.** Every reader implements the same
   torn-set gate independently: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:770-776` restricts the edges and loss readers to
-  dirs where `v_raw_meta` has a row (the trajectory list is built from `v_raw_meta` too); `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:187-192` skips a dir with no `meta.json`;
-  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:182-195` does the same and logs a warning. Nothing in the file layout expresses
+  dirs where `v_raw_meta` has a row (the trajectory list is built from `v_raw_meta` too); `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:221-226` skips a dir with no `meta.json`;
+  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:177-190` does the same and logs a warning. Nothing in the file layout expresses
   this: it's a write-ORDER promise made at
   `packages/atif-corpus/src/atif_corpus/application/materialize.py:649-652`.
 - **No reader ever sees a partially written directory**, because the writer stages every
@@ -114,7 +114,7 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
 - **`trajectory.json` is ONE JSON document, `edges.jsonl` is newline-delimited.** atif-duck encodes
   that split in its reader choice at `packages/atif-duck/src/atif_duck/infrastructure/registry.py:25-28`, and in its read bounds: the bound for a
   document follows the largest file (`:249`), and the bound for `edges.jsonl` follows its longest line (`:272`). atif-embed re-derives the split at
-  `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:99`.
+  `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:142`.
 - **A single trajectory document can be enormous.** Both DuckDB readers allow a 1 GiB
   `maximum_object_size`, and their measured ceilings disagree: atif-duck caps a bound it sizes from the largest file at 1 GiB, citing 436 MB
   observed (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:220-223`), while atif-embed sizes each batch's bound from its largest document under the same 1 GiB cap, citing 85 MB (`packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:56-59`). Same ceiling, two independent
@@ -284,7 +284,7 @@ forbidden_modules = ["atif_converter", "atif_corpus", "atif_duck", "atif_embed",
   It leaves atif-cli and atif-analytics free to import atif-models, and atif-cli neither declares
   atif-models in `packages/atif-cli/pyproject.toml:32-36` nor imports it from `src/`:
   `grep -rn 'atif_models' packages/atif-cli/` finds one test import
-  (`packages/atif-cli/tests/test_analyze_lake.py:44`). The live atif-models edge is
+  (`packages/atif-cli/tests/test_analyze_lake.py:47`). The live atif-models edge is
   atif-analytics' alone, its import sites led by
   `packages/atif-analytics/src/atif_analytics/application/use_cases/_shared.py:32-33`.
 - **Every cross-package import under `src/` is INDENTED** (inside a function body or a
@@ -427,7 +427,7 @@ a mismatched adapter fails the typecheck gate.
 
 - `packages/atif-duck/src/atif_duck/domain/raw_readers.py:62-72`: `EDGE_COLUMNS` (the registry's
   `_EDGE_COLUMNS`), the same keys in the same order with DuckDB types.
-- `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:263-282`: reads the
+- `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:258-277`: reads the
   `uuid` field for the conflicts pipeline's returned-uuid validity guard.
 - `packages/atif-corpus/src/atif_corpus/application/materialize.py:736-739`: writes the lines and
   owns line termination; a filtered pass writes none.
@@ -489,10 +489,10 @@ editing `packages/atif-duck/src/atif_duck/domain/raw_readers.py:62-72` in the sa
   picks between them.
 - `packages/atif-embed/src/atif_embed/infrastructure/lance_store.py:597`: the `VectorStorePort`
   adapter.
-- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:241`: the `TextRowsPort`
+- `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:275`: the `TextRowsPort`
   adapter over the corpus files; `packages/atif-embed/src/atif_embed/infrastructure/lake_text_rows.py:89`
   wraps it with a lake-backed reader and a watermark.
-- `packages/atif-embed/tests/embed_fixtures.py:203`: the deterministic `EmbeddingProvider` double.
+- `packages/atif-embed/tests/embed_fixtures.py:210`: the deterministic `EmbeddingProvider` double.
 - `packages/atif-embed/tests/test_embed_use_case.py:501`: a recording `TextRowsPort` double.
 
 **Shape:**
@@ -953,12 +953,14 @@ rather than skipping a file that no longer contains the current version; the gua
   both the row's `truncated` flag and the adapter's wire-level clip so the two can never disagree
   (`packages/atif-embed/src/atif_embed/domain/text_stamp.py:31-34`).
 - **The `steps`-view rendering semantics, mirrored without a shared symbol**:
-  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:30-44` reproduces
+  `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:30-47` reproduces
   atif-duck's `steps` rules by hand (message-union flattening, `extra.source_uuids[0]` as the
   step key, `agent` → `assistant`, error recovery from the typed `extra.is_error` or from
   `extra.tool_result_metadata.is_error`), and
   `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:13-26` reproduces some of
-  them again.
+  them again. The flattening alone is pinned: `packages/atif-cli/tests/test_content_text_twin_pin.py`
+  checks that the `content_text` macro, atif-embed's `content_text_sql` and atif-analytics'
+  `content_text` render every case alike.
 - **The retryable Bedrock error codes, declared twice**: `RETRY_CODES` at
   `packages/atif-models/src/atif_models/infrastructure/bedrock_common.py:27-42`, which both LLM
   adapters retry on through `is_retryable` (`:66-73`), and its twin at
@@ -986,7 +988,7 @@ rather than skipping a file that no longer contains the current version; the gua
   atif-cli's `DuckLakeSteps` fits (`packages/atif-cli/src/atif_cli/embed_lake.py:70`); and
   atif-analytics' `SessionSource` (`packages/atif-analytics/src/atif_analytics/domain/ports.py:40`),
   which `TrajectoryFileSource`
-  (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:285`) and atif-cli's
+  (`packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:280`) and atif-cli's
   `LakeSessionSource` (`packages/atif-cli/src/atif_cli/lake_sessions.py:90`) fit.
 
 ## See also
