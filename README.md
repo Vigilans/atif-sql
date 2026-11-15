@@ -197,15 +197,20 @@ definition of done. `CONTRIBUTING.md` has it.
 
 ```bash
 atif-sql schema                    # every view + macro signature (<50 ms)
-atif-sql examples                  # tested example queries, grouped core/analytics/vss
+atif-sql examples                  # tested example queries (core/analytics/vss), then filter scripts
 atif-sql query 'SELECT * FROM tool_rank(30) LIMIT 10'
 ```
 
-`atif-sql examples` (or `atif-sql query --examples`) emits runnable queries
-derived from the catalog, not hardcoded strings, and every one is executed
-by the test suite against a fixture corpus, so the listing cannot rot.
+`atif-sql examples` emits runnable queries derived from the catalog, not
+hardcoded strings, and every one is executed by the test suite against a
+fixture corpus, so the listing cannot rot.
 Piped output is JSON; filter with `--requires core|analytics|vss` and
-`--category view|table-macro|scalar-macro`.
+`--category view|table-macro|scalar-macro|filter`. The `filter` category
+holds `materialize --filter` scripts for common policies (pruning tool
+results, redacting credentials, replacing home paths, dropping reasoning,
+images and blobs), each executed by the tests through `materialize --filter`.
+`atif-sql query --examples` lists the same queries without the filter
+scripts.
 
 ## Contributing
 

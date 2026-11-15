@@ -67,7 +67,7 @@ The limits of this derivation, stated because no index backs it:
   imports sit *inside* command bodies:
   `packages/atif-cli/src/atif_cli/app.py:761`,
   `packages/atif-cli/src/atif_cli/app.py:1044`, and
-  `packages/atif-cli/src/atif_cli/app.py:1641` are all indented. The import graph
+  `packages/atif-cli/src/atif_cli/app.py:1643` are all indented. The import graph
   uses `ast.walk`, which descends into function
   bodies, and the reference regex is unanchored, so a deferred import counts as
   an inbound edge.
@@ -169,8 +169,8 @@ intra-module use site is named after the table.
 | `ARCHIVE_ZSTD_LEVEL` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:49` | 2026-09-27 |
 | `ArchivedSourceFile` | `packages/atif-converter/src/atif_converter/infrastructure/source_archive.py:63` | 2026-09-27 |
 | `Compressed` | `packages/atif-corpus/src/atif_corpus/infrastructure/compress_artifacts.py:57` | 2026-09-28 |
-| `Requires` | `packages/atif-duck/src/atif_duck/domain/examples.py:49` | 2026-08-28 |
-| `Category` | `packages/atif-duck/src/atif_duck/domain/examples.py:54` | 2026-08-28 |
+| `Requires` | `packages/atif-duck/src/atif_duck/domain/examples.py:56` | 2026-08-28 |
+| `Category` | `packages/atif-duck/src/atif_duck/domain/examples.py:62` | 2026-08-28 |
 | `IDENTITY_COLUMNS` | `packages/atif-duck/src/atif_duck/domain/lake.py:103` | 2026-09-28 |
 | `COLLISION_PREFIX` | `packages/atif-duck/src/atif_duck/domain/lake.py:111` | 2026-09-28 |
 | `INFO_SCHEMA_VERSION` | `packages/atif-duck/src/atif_duck/domain/lake.py:114` | 2026-09-28 |
@@ -283,8 +283,8 @@ numbers follow it as plain numbers.
   and of `compress_in_place` on line 121, and is constructed at `:118` and
   again on line 152.
 - `Requires` feeds `get_args` at
-  `packages/atif-duck/src/atif_duck/domain/examples.py:56` and annotates `:124`;
-  `Category` feeds `get_args` at `:57` and annotates `:125`.
+  `packages/atif-duck/src/atif_duck/domain/examples.py:64` and annotates `:132`;
+  `Category` feeds `get_args` at `:65` and annotates `:133`.
 - In `packages/atif-duck/src/atif_duck/domain/lake.py`, `IDENTITY_COLUMNS`
   leads a table's column list at `:176` and `COLLISION_PREFIX` renames a
   colliding column at `:188`; `LAKE_INFO_COLUMNS` and `CORPORA_COLUMNS` render
@@ -372,7 +372,7 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
 
 The rest sit in modules that do declare an `__all__` and are deliberately
 absent from it, which is the module saying they aren't exported:
-`packages/atif-cli/src/atif_cli/app.py:2429` (`search_rows`),
+`packages/atif-cli/src/atif_cli/app.py:2431` (`search_rows`),
 `packages/atif-cli/src/atif_cli/corpus.py:71` (`SessionLayout`) and `:158`
 (`CorpusSlimReport`), and
 `packages/atif-duck/src/atif_duck/infrastructure/lake.py:121`
@@ -460,7 +460,7 @@ write, over every tracked file:
 - `from atif_duck.infrastructure import ...`: only sites that import a
   **submodule** (`analytics`, `lake`, `registry`), never one of the re-exported
   names: `packages/atif-duck/tests/test_analytics_views.py:24` and
-  `packages/atif-duck/tests/test_examples.py:42`, for example.
+  `packages/atif-duck/tests/test_examples.py:44`, for example.
 - No `import atif_duck` followed by attribute access. The one test that reads
   an `__all__` (`grep -rn '__all__' packages/*/tests scripts`) is
   `packages/atif-converter/tests/test_vendored_atif.py:113`, and it reads the
@@ -469,17 +469,17 @@ write, over every tracked file:
 
 Every real consumer bypasses the facade for the deep module:
 
-- `packages/atif-cli/src/atif_cli/app.py:1641` and
-  `packages/atif-cli/src/atif_cli/app.py:2291-2295` import `register` from
+- `packages/atif-cli/src/atif_cli/app.py:1643` and
+  `packages/atif-cli/src/atif_cli/app.py:2293-2297` import `register` from
   `atif_duck.infrastructure.registry`.
-- `packages/atif-cli/src/atif_cli/app.py:2498`:
+- `packages/atif-cli/src/atif_cli/app.py:2515`:
   `from atif_duck.domain.examples import (...)`.
-- `packages/atif-cli/src/atif_cli/app.py:2580`:
+- `packages/atif-cli/src/atif_cli/app.py:2613`:
   `from atif_duck.domain.catalog import (...)`, which takes `MACRO_SIGNATURES`
   and `VIEW_SCHEMA` with their analytics counterparts.
 - `packages/atif-cli/src/atif_cli/duck_errors.py:27`,
   `packages/atif-cli/tests/test_app.py:137`, and
-  `packages/atif-cli/tests/test_app.py:962`.
+  `packages/atif-cli/tests/test_app.py:1002`.
 
 The one dynamic reference to the package,
 `packages/atif-cli/tests/test_lean_import.py:21`, names

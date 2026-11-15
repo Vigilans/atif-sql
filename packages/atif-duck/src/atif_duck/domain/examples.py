@@ -23,6 +23,13 @@ The only hand-maintained prose is
 :data:`~atif_duck.domain.catalog.DESCRIPTIONS` in ``catalog.py``; a coverage
 drift test forces one description per catalog object.
 
+:data:`FILTER_EXAMPLES` are the exception to derivation: ``materialize
+--filter`` scripts, which are policies over the public views rather than
+objects of the catalog. Each leaves the ``directives`` relation the filter
+stage reads, and each is executed twice over: by ``tests/test_examples.py``
+against the fixture corpus, and by atif-cli's tests through ``materialize
+--filter``.
+
 Pure domain module: no duckdb import, no I/O — safe on the CLI's lean
 import path (``schema`` / ``examples`` / ``--help``).
 """
@@ -50,8 +57,9 @@ Requires = Literal["core", "analytics", "vss"]
 
 #: Structural kind, derived from which catalog the object lives in and
 #: whether its DDL is ``AS TABLE`` (see
-#: :data:`~atif_duck.domain.catalog.TABLE_MACRO_NAMES`).
-Category = Literal["view", "table-macro", "scalar-macro"]
+#: :data:`~atif_duck.domain.catalog.TABLE_MACRO_NAMES`); ``filter`` for a
+#: ``materialize --filter`` script.
+Category = Literal["view", "table-macro", "scalar-macro", "filter"]
 
 REQUIRES_VALUES: tuple[str, ...] = cast("tuple[str, ...]", get_args(Requires))
 CATEGORY_VALUES: tuple[str, ...] = cast("tuple[str, ...]", get_args(Category))
@@ -115,7 +123,7 @@ class ExampleQuery:
     requires
         ``core`` | ``analytics`` | ``vss`` — what must be registered/populated.
     category
-        ``view`` | ``table-macro`` | ``scalar-macro``.
+        ``view`` | ``table-macro`` | ``scalar-macro`` | ``filter``.
     """
 
     name: str
@@ -252,10 +260,121 @@ def build_examples() -> tuple[ExampleQuery, ...]:
     return tuple(examples)
 
 
+#: ``materialize --filter`` scripts for the common policies, each leaving the
+#: ``directives`` relation. Run over one converted session, so a keep list or
+#: a threshold is the only thing a caller adapts.
+FILTER_EXAMPLES: tuple[ExampleQuery, ...] = (
+    ExampleQuery(
+        name="prune_uncited_tool_results",
+        sql="""\
+CREATE TEMP VIEW directives AS
+WITH keep(trajectory_id, tool_use_id) AS (
+    SELECT trajectory_id, tool_use_id FROM tool_results LIMIT 1
+)
+SELECT 'prune_tool_result' AS action, r.trajectory_id, r.step_id, r.tool_use_id
+FROM tool_results r
+WHERE NOT EXISTS (
+    SELECT 1 FROM keep k
+    WHERE k.trajectory_id = r.trajectory_id AND k.tool_use_id = r.tool_use_id
+);""",
+        description=(
+            "Prune every tool result except the (trajectory_id, tool_use_id) pairs in keep "
+            "(replace the subquery with VALUES ... to pin cited calls)."
+        ),
+        requires="core",
+        category="filter",
+    ),
+    ExampleQuery(
+        name="prune_large_tool_results",
+        sql="""\
+CREATE TEMP VIEW directives AS
+SELECT 'prune_tool_result' AS action, trajectory_id, step_id, tool_use_id
+FROM tool_results
+WHERE strlen(content::VARCHAR) > 16384;""",
+        description="Prune every tool result whose content is over 16 KiB of JSON text.",
+        requires="core",
+        category="filter",
+    ),
+    ExampleQuery(
+        name="redact_credentials",
+        sql="""\
+CREATE TEMP VIEW secrets AS
+SELECT DISTINCT unnest(regexp_extract_all(text, '\\b(sk-[A-Za-z0-9_-]{16,})', 1)) AS secret
+FROM (
+    SELECT message AS text FROM steps
+    UNION ALL SELECT tool_input::VARCHAR FROM tool_calls
+    UNION ALL SELECT content::VARCHAR FROM tool_results
+    UNION ALL SELECT payload::VARCHAR FROM session_events
+);
+CREATE TEMP VIEW directives AS
+SELECT DISTINCT 'replace' AS action, variant AS find, '[REDACTED]' AS replacement
+FROM secrets,
+     LATERAL (VALUES
+         (secret),
+         (url_encode(secret)),
+         (to_base64(encode(secret))),
+         (substr(to_json(secret)::VARCHAR, 2, length(to_json(secret)::VARCHAR) - 2))
+     ) AS v(variant);""",
+        description=(
+            "Find provider-style keys with an RE2 capture group over messages, tool "
+            "inputs, tool results and event payloads, and replace each with "
+            "[REDACTED] as written, URL-encoded (url_encode), base64-encoded "
+            "(to_base64) and JSON-escaped (to_json)."
+        ),
+        requires="core",
+        category="filter",
+    ),
+    ExampleQuery(
+        name="replace_home_paths",
+        sql="""\
+CREATE TEMP VIEW directives AS
+SELECT DISTINCT 'replace' AS action, home AS find, '~' AS replacement
+FROM (SELECT regexp_extract(cwd, '^(/home/[^/]+|/Users/[^/]+)', 1) AS home FROM sessions)
+WHERE home <> '';""",
+        description=(
+            "Replace the home directory the session's cwd starts with (/home/<user> or "
+            "/Users/<user>) with ~ everywhere in the session."
+        ),
+        requires="core",
+        category="filter",
+    ),
+    ExampleQuery(
+        name="drop_reasoning_content",
+        sql="""\
+CREATE TEMP VIEW directives AS
+SELECT 'drop_reasoning' AS action, trajectory_id, step_id
+FROM steps
+WHERE reasoning_content IS NOT NULL;""",
+        description="Clear reasoning_content on every step that has any.",
+        requires="core",
+        category="filter",
+    ),
+    ExampleQuery(
+        name="drop_images_and_blobs",
+        sql="""\
+CREATE TEMP VIEW directives AS
+SELECT DISTINCT 'drop_blob' AS action, blob_sha256
+FROM (
+    SELECT sha256 AS blob_sha256 FROM images
+    UNION ALL
+    SELECT unnest(regexp_extract_all(text, 'sha256:([0-9a-f]{64})', 1))
+    FROM (SELECT message AS text FROM steps UNION ALL SELECT content::VARCHAR FROM tool_results)
+);""",
+        description=(
+            "Drop every attachment: each image the images view lists and each blob a "
+            "sha256 placeholder names in a message or a tool result, so none is published."
+        ),
+        requires="core",
+        category="filter",
+    ),
+)
+
+
 __all__ = [
     "ARG_EXEMPLARS",
     "CATEGORY_VALUES",
     "EXCLUSIONS",
+    "FILTER_EXAMPLES",
     "REQUIRES_VALUES",
     "Category",
     "ExampleQuery",

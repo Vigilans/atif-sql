@@ -22,7 +22,8 @@ atif-sql status --vector-probe         # time search's exact kNN over the store
 atif-sql query 'SQL' [--format auto|table|json|csv]
 atif-sql schema                        # static catalog, no duckdb bind, <50ms
 atif-sql examples                      # tested example queries per view/macro
-                                       #   (alias: atif-sql query --examples)
+                                       #   (atif-sql query --examples lists the
+                                       #   queries without the filter scripts)
 atif-sql analyze                       # v2 analytics pipelines; dry-run by
                                        #   default, spends only with --no-dry-run
 atif-sql embed --all --no-dry-run      # embed corpus steps into the Lance store

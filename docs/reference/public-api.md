@@ -76,7 +76,7 @@ Derives the full example inventory from the static catalogs in a fixed order (co
 view, analytics views, then core macros, the VSS macro, analytics macros), so the CLI listing and the
 JSON array are deterministic across runs.
 
-`packages/atif-duck/src/atif_duck/domain/examples.py:191-252`
+`packages/atif-duck/src/atif_duck/domain/examples.py:199-260`
 
 ### build_plan
 
@@ -326,7 +326,7 @@ The console-script entry point behind the `atif-sql` command; it replaces loguru
 with WARNING-and-up (`ATIF_SQL_LOG_LEVEL` widens it) so routine reads keep stderr quiet, then hands
 off to the cyclopts app and turns a cyclopts usage error into exit `64`.
 
-`packages/atif-cli/src/atif_cli/app.py:2637-2670`
+`packages/atif-cli/src/atif_cli/app.py:2670-2703`
 
 ### materialize
 

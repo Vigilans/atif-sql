@@ -59,11 +59,11 @@ per run, per pipeline) is stated per row.
 | An anthropic string enum value that differs from one declared member only in letter case is that member | Models | `packages/atif-models/src/atif_models/infrastructure/anthropic_bedrock.py:102-127`, `packages/atif-models/src/atif_models/infrastructure/anthropic_bedrock.py:282-283`; tests `packages/atif-models/tests/test_anthropic_provider.py:218`, `packages/atif-models/tests/test_anthropic_provider.py:225`, `packages/atif-models/tests/test_anthropic_provider.py:232`, `packages/atif-models/tests/test_anthropic_provider.py:237` | coerce: folded onto the declared spelling before `model_validate`; a value matching no member, or more than one, passes through for pydantic to reject |
 | A store's stamped `(model, dim)` must match the active embedder before any vector is read or appended | Embeddings | `packages/atif-embed/src/atif_embed/domain/embedding_guard.py:38-80`, `packages/atif-embed/src/atif_embed/application/embed.py:180-190`; tests `packages/atif-embed/tests/test_embed_use_case.py:157`, `packages/atif-embed/tests/test_lance_store.py:724` and `packages/atif-embed/tests/test_lance_store.py:733` | raise `EmbeddingProviderMismatch` (`terminal = True`); `query`/`search` exit 65, `embed` exits 78 |
 | A text over 50,000 characters (per embeddable text) cannot be embedded whole | Embeddings | `packages/atif-embed/src/atif_embed/domain/text_stamp.py:35`, `packages/atif-embed/src/atif_embed/domain/text_stamp.py:43-47`, `packages/atif-embed/src/atif_embed/domain/text_stamp.py:65-68`; tests `packages/atif-embed/tests/test_embed_use_case.py:413` and `packages/atif-embed/tests/test_embed_use_case.py:430` | coerce: sent head-only, and the row stamps `truncated = true` so the search miss is attributable |
-| Every macro parameter name must have an `ARG_EXEMPLARS` entry | SQL surface | `packages/atif-duck/src/atif_duck/domain/examples.py:59-76`, `packages/atif-duck/src/atif_duck/domain/examples.py:161-171`; test `packages/atif-duck/tests/test_examples.py:218` | `build_examples()` raises; the drift test fails with it |
-| Every catalog object must yield a runnable example or carry a documented `EXCLUSIONS` entry | SQL surface | `packages/atif-duck/src/atif_duck/domain/examples.py:95-100`; test `packages/atif-duck/tests/test_examples.py:190` | drift test fails |
+| Every macro parameter name must have an `ARG_EXEMPLARS` entry | SQL surface | `packages/atif-duck/src/atif_duck/domain/examples.py:67-84`, `packages/atif-duck/src/atif_duck/domain/examples.py:169-179`; test `packages/atif-duck/tests/test_examples.py:220` | `build_examples()` raises; the drift test fails with it |
+| Every catalog object must yield a runnable example or carry a documented `EXCLUSIONS` entry | SQL surface | `packages/atif-duck/src/atif_duck/domain/examples.py:103-108`; test `packages/atif-duck/tests/test_examples.py:192` | drift test fails |
 | A materialized session dir with no `meta.json` is incomplete | SQL surface | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:705-710`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:769-775`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:593-598`; test `packages/atif-duck/tests/test_duck_views.py:690` | excluded from every view, plus one WARNING per skipped dir so the exclusion is observable |
-| A real `embed` run needs an explicit scope: `--limit N` or `--all` | CLI | `packages/atif-cli/src/atif_cli/app.py:2102-2112` | exit 64 with the hint naming both flags and `--dry-run` |
-| `search` against an empty embeddings store is not a zero-result query | CLI | `packages/atif-cli/src/atif_cli/app.py:2354-2382` | exit 2 with the hint `atif-sql embed --all --no-dry-run` |
+| A real `embed` run needs an explicit scope: `--limit N` or `--all` | CLI | `packages/atif-cli/src/atif_cli/app.py:2104-2114` | exit 64 with the hint naming both flags and `--dry-run` |
+| `search` against an empty embeddings store is not a zero-result query | CLI | `packages/atif-cli/src/atif_cli/app.py:2356-2384` | exit 2 with the hint `atif-sql embed --all --no-dry-run` |
 
 Notes on two rows above. The strict-JSON transform in
 `packages/atif-models/src/atif_models/domain/schema.py:6-11` is a *rewriting* validation
@@ -154,12 +154,12 @@ pinned by `packages/atif-models/tests/test_anthropic_provider.py:112` and
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
 | Registration order is raw TEMP tables, then views, then VSS, then macros, then the authorship macro and views, then the v2 analytics views and macros; each layer binds against the previous at CREATE time | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2291-2312`; test `packages/atif-duck/tests/test_duck_views.py:675` |
-| `DESCRIPTIONS` covers the catalog exactly | Application code | `packages/atif-duck/src/atif_duck/domain/catalog.py:494`; test `packages/atif-duck/tests/test_examples.py:208` |
+| `DESCRIPTIONS` covers the catalog exactly | Application code | `packages/atif-duck/src/atif_duck/domain/catalog.py:494`; test `packages/atif-duck/tests/test_examples.py:210` |
 | `cost_estimate`'s `est_cost_usd` covers PRICED steps only and is meaningful only when `unpriced_steps = 0`; an inner join would return a partial number indistinguishable from a complete one | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2043-2048`, `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2056-2072`; tests `packages/atif-duck/tests/test_duck_views.py:464` and `packages/atif-duck/tests/test_duck_views.py:542` |
 | Both `cost_estimate` counters filter on `model_name IS NOT NULL`, because user steps carry no model and would otherwise make every session look like a pricing gap | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2062-2067`; test `packages/atif-duck/tests/test_duck_views.py:425` |
 | An absent or unattachable Lance store degrades to an empty `message_embeddings` TABLE with the right schema, so `semantic_search` always binds | Application code | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1759-1790`; tests `packages/atif-duck/tests/test_vss.py:209` and `packages/atif-duck/tests/test_vss.py:345` |
 | Exit codes are a stable wire contract: `EXIT_CODES` is the workspace's one table, atif-converter carries no codes of its own (`convert` translates its typed errors), and no number is ever reassigned, so the retired `harbor_missing` keeps 127 | Application code | `packages/atif-cli/src/atif_cli/errors.py:5-17`, `packages/atif-cli/src/atif_cli/errors.py:29-66` |
-| `terminal` versus transient decides the `embed` exit code, so an unattended lane can stop retrying instead of burning identical ticks | Application code | `packages/atif-embed/src/atif_embed/domain/errors.py:17-26`, `packages/atif-cli/src/atif_cli/app.py:2139-2153` |
+| `terminal` versus transient decides the `embed` exit code, so an unattended lane can stop retrying instead of burning identical ticks | Application code | `packages/atif-embed/src/atif_embed/domain/errors.py:17-26`, `packages/atif-cli/src/atif_cli/app.py:2141-2155` |
 
 ## Calculations
 
@@ -224,7 +224,7 @@ perceived pipeline admits a session only at 2 or more pairs
   explicit-scope gate under Embeddings and the SQL surface is what keeps a mistyped `embed`
   from spending. `packages/atif-analytics/src/atif_analytics/application/analyze.py:42`,
   `packages/atif-analytics/src/atif_analytics/application/use_cases/perceived.py:366`,
-  `packages/atif-cli/src/atif_cli/app.py:1830`,
+  `packages/atif-cli/src/atif_cli/app.py:1832`,
   `packages/atif-embed/src/atif_embed/application/embed.py:71`.
 - **Session ceiling:** each LLM pipeline admits at most `llm_max_sessions_per_run`
   sessions per run (default 50, newest-first so fresh sessions win), enforced DURING the
@@ -320,10 +320,10 @@ perceived pipeline admits a session only at 2 or more pairs
   so an unattended lane exits 78 and suppresses retries instead of burning identical
   ticks. `packages/atif-embed/src/atif_embed/domain/embedding_guard.py:3-18`,
   `packages/atif-embed/src/atif_embed/domain/errors.py:29-41`,
-  `packages/atif-cli/src/atif_cli/app.py:2139-2153`.
+  `packages/atif-cli/src/atif_cli/app.py:2141-2155`.
 - **Embed requires an explicit scope:** a bare `atif-sql embed` is a real run and exits 64,
   so a full backfill cannot happen from a mistyped command; `--dry-run` needs no scope
-  because it spends nothing. `packages/atif-cli/src/atif_cli/app.py:2058-2062`, `packages/atif-cli/src/atif_cli/app.py:2102-2112`.
+  because it spends nothing. `packages/atif-cli/src/atif_cli/app.py:2060-2064`, `packages/atif-cli/src/atif_cli/app.py:2104-2114`.
 - **`skip_vss` escape hatch:** registration can skip both the `message_embeddings` view
   and the `semantic_search` macro, because the backfill writes the store the view reads
   and binding it first would be circular. `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2253-2259`;
@@ -335,8 +335,8 @@ perceived pipeline admits a session only at 2 or more pairs
 - **A new view or macro cannot land silently:** the drift tests require a `DESCRIPTIONS`
   entry, an `ARG_EXEMPLARS` entry for any new parameter name, `TABLE_MACRO_NAMES`
   membership when the DDL is `AS TABLE`, and an example that EXECUTES, or a documented
-  `EXCLUSIONS` entry. `packages/atif-duck/src/atif_duck/domain/examples.py:95-100`; tests
-  `packages/atif-duck/tests/test_examples.py:190`, `packages/atif-duck/tests/test_examples.py:208`, `packages/atif-duck/tests/test_examples.py:218`, `packages/atif-duck/tests/test_examples.py:227`.
+  `EXCLUSIONS` entry. `packages/atif-duck/src/atif_duck/domain/examples.py:103-108`; tests
+  `packages/atif-duck/tests/test_examples.py:192`, `packages/atif-duck/tests/test_examples.py:210`, `packages/atif-duck/tests/test_examples.py:220`, `packages/atif-duck/tests/test_examples.py:229`.
 
 ### Scheduling
 

@@ -16,10 +16,11 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Iterator
+from pathlib import Path
 
 import duckdb
 import pytest
-from duck_fixtures import build_corpus
+from duck_fixtures import build_corpus, register_via
 from test_analytics_views import _populate_analytics
 from test_vss import _write_lance
 
@@ -35,6 +36,7 @@ from atif_duck.domain.examples import (
     ARG_EXEMPLARS,
     CATEGORY_VALUES,
     EXCLUSIONS,
+    FILTER_EXAMPLES,
     REQUIRES_VALUES,
     ExampleQuery,
     build_examples,
@@ -250,3 +252,55 @@ def test_example_fields_are_well_formed() -> None:
         assert example.category in CATEGORY_VALUES
         assert example.name in example.sql
         assert example.description == DESCRIPTIONS[example.name]
+
+
+# ---------------------------------------------------------------------------
+# Filter scripts: each EXECUTES and leaves a well-formed directives relation
+# ---------------------------------------------------------------------------
+
+#: The actions and columns a ``directives`` relation may hold (atif-cli's
+#: ``filter_directives`` validates them; atif-duck may not import it).
+FILTER_ACTIONS = frozenset(
+    {"prune_tool_result", "drop_reasoning", "drop_event", "drop_blob", "replace"}
+)
+DIRECTIVE_COLUMNS = frozenset(
+    {
+        "action",
+        "trajectory_id",
+        "step_id",
+        "tool_use_id",
+        "event_seq",
+        "blob_sha256",
+        "find",
+        "replacement",
+    }
+)
+
+
+@pytest.mark.parametrize("example", FILTER_EXAMPLES, ids=[e.name for e in FILTER_EXAMPLES])
+def test_every_filter_example_leaves_directives(
+    example: ExampleQuery, corpus_root: Path, read_path: str, shared_lakes_dir: Path
+) -> None:
+    """Each script runs over the fixture corpus and leaves rows the filter stage accepts."""
+    con = duckdb.connect()
+    register_via(con, corpus_root, read_path, lakes_dir=shared_lakes_dir)
+    con.execute(example.sql)
+    cursor = con.execute("SELECT * FROM directives")
+    columns = {column[0] for column in cursor.description or ()}
+    assert "action" in columns
+    assert columns <= DIRECTIVE_COLUMNS
+    actions = {row[0] for row in con.execute("SELECT DISTINCT action FROM directives").fetchall()}
+    assert actions <= FILTER_ACTIONS
+    con.close()
+
+
+def test_filter_examples_are_well_formed() -> None:
+    """Names unique and apart from the catalog's; every one a core filter with prose."""
+    names = [e.name for e in FILTER_EXAMPLES]
+    assert len(names) == len(set(names))
+    assert not set(names) & _all_catalog_objects()
+    for example in FILTER_EXAMPLES:
+        assert example.category == "filter"
+        assert example.requires == "core"
+        assert example.description.strip()
+        assert "directives" in example.sql

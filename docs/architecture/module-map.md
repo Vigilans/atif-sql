@@ -108,7 +108,7 @@ it carries no layers contract (`pyproject.toml:557`).
   (`packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119`).
 - `packages/atif-duck/src/atif_duck/domain/examples.py`: `build_examples` derives one
   runnable query per catalog object from `ARG_EXEMPLARS` rather than hardcoding strings
-  (`packages/atif-duck/src/atif_duck/domain/examples.py:191`).
+  (`packages/atif-duck/src/atif_duck/domain/examples.py:199`).
 - `packages/atif-duck/src/atif_duck/domain/authorship.py`: the `step_author` rule table:
   prefix matches after stripping leading whitespace, first rule wins, twinned in atif-analytics
   (`packages/atif-duck/src/atif_duck/domain/authorship.py:51`).
@@ -133,8 +133,8 @@ The composition root: it declares five of its six siblings as `==`-pinned depend
 (`packages/atif-cli/pyproject.toml:32-36`) and wires every cross-package seam: the `ConverterPort`
 adapter, the clock, version pins, the DuckDB connection (`packages/atif-cli/src/atif_cli/app.py:7-9`).
 The commands hang off one cyclopts `App`: `@app.command` functions from `convert`
-(`packages/atif-cli/src/atif_cli/app.py:724`) to `schema` (`:2563`), plus the `cron`, `lake`, and
-`corpus` sub-apps registered at `:104-109`, with `main` (`:2637`) exposed as the single console
+(`packages/atif-cli/src/atif_cli/app.py:724`) to `schema` (`:2596`), plus the `cron`, `lake`, and
+`corpus` sub-apps registered at `:104-109`, with `main` (`:2670`) exposed as the single console
 script named `atif-sql` (`pyproject.toml:74`). Heavy imports (duckdb, the ATIF models through
 atif-converter, pydantic through atif-corpus) are deferred into the command bodies that use them so
 `schema`, `--help`, and `--version` stay on a lean import graph that a fresh-interpreter test pins

@@ -421,14 +421,19 @@ For an LLM agent driving `atif-sql`, the discovery loop is this:
 1. `atif-sql schema`: every view (with columns) and macro signature, core
    and analytics, each with what it `requires`, from the static catalog in
    <50 ms. Its output ends with an `examples_hint`.
-2. `atif-sql examples` (alias: `atif-sql query --examples`): runnable
-   example queries for every view and macro, DERIVED from the catalog (never
-   hardcoded per object) and each one EXECUTED by
+2. `atif-sql examples`: runnable example queries for every view and macro,
+   DERIVED from the catalog (never hardcoded per object) and each one EXECUTED by
    `packages/atif-duck/tests/test_examples.py` against a fixture corpus, and
    the header's "test-executed against this version" is literal. Piped
    output is JSON `{note, examples: [{name, sql, description, requires,
    category}]}`; filter with `--requires core|analytics|vss` and
-   `--category view|table-macro|scalar-macro`.
+   `--category view|table-macro|scalar-macro|filter`. The `filter` category
+   lists `materialize --filter` scripts (`FILTER_EXAMPLES` in
+   `atif_duck.domain.examples`), executed by the same test file and by
+   `packages/atif-cli/tests/test_materialize_filter_cli.py`, and the TTY
+   listing prints them last, under `[filter]`. `atif-sql query --examples`
+   lists the query examples alone, and the filter scripts only with
+   `--category filter`.
 3. `atif-sql query '<sql>'`: run it. `--agent codex` points it at the Codex
    corpus without spelling the path, and `--all-corpora` runs it over every
    corpus the lake holds (`sessions.corpus` names each row's corpus). Copy an example verbatim (the `sid`

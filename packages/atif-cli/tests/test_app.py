@@ -184,12 +184,12 @@ class TestExamples:
     def test_json_payload_matches_derived_examples(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        from atif_duck.domain.examples import build_examples
+        from atif_duck.domain.examples import FILTER_EXAMPLES, build_examples
 
         examples(fmt=OutputFormat.JSON)
         payload = json.loads(capsys.readouterr().out)
         assert "test-executed" in payload["note"]
-        derived = build_examples()
+        derived = (*build_examples(), *FILTER_EXAMPLES)
         assert len(payload["examples"]) == len(derived)
         by_name = {e["name"]: e for e in payload["examples"]}
         for example in derived:
@@ -210,6 +210,15 @@ class TestExamples:
             e["category"] == "table-macro" and e["requires"] == "core" for e in payload["examples"]
         )
 
+    def test_filter_category_lists_the_filter_scripts(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from atif_duck.domain.examples import FILTER_EXAMPLES
+
+        examples(category="filter", fmt=OutputFormat.JSON)
+        payload = json.loads(capsys.readouterr().out)
+        assert [e["name"] for e in payload["examples"]] == [e.name for e in FILTER_EXAMPLES]
+
     def test_unknown_filter_value_exits_64(self, capsys: pytest.CaptureFixture[str]) -> None:
         with pytest.raises(SystemExit) as excinfo:
             examples(requires="bogus", fmt=OutputFormat.JSON)
@@ -226,12 +235,43 @@ class TestExamples:
             assert group in out
         assert "SELECT * FROM sessions" in out
 
+    def test_table_output_lists_the_filter_scripts_last_with_aligned_sql(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from atif_duck.domain.examples import FILTER_EXAMPLES
+
+        examples(fmt=OutputFormat.TABLE)
+        out = capsys.readouterr().out
+        headers = [line for line in out.splitlines() if line.startswith("[")]
+        assert headers == ["[core]", "[analytics]", "[vss]", "[filter]"]
+        lines = out.split("\n[filter]\n", 1)[1].splitlines()
+        width = max(len(example.name) for example in FILTER_EXAMPLES)
+        indent = " " * (width + 4)
+        for example in FILTER_EXAMPLES:
+            first, *rest = example.sql.splitlines()
+            start = lines.index(f"  {example.name:<{width}}  {first}")
+            assert lines[start + 1 : start + 2 + len(rest)] == [
+                *(f"{indent}{line}" for line in rest),
+                f"{indent}# {example.description}",
+            ]
+
     def test_query_examples_flag_short_circuits(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """``query --examples`` lists without SQL and without touching DuckDB."""
+        """``query --examples`` lists the query examples without SQL and without touching DuckDB."""
+        from atif_duck.domain.examples import build_examples
+
         query(None, examples_flag=True, fmt=OutputFormat.JSON)
         payload = json.loads(capsys.readouterr().out)
         assert "test-executed" in payload["note"]
-        assert payload["examples"]
+        assert [e["name"] for e in payload["examples"]] == [e.name for e in build_examples()]
+
+    def test_query_examples_lists_the_filter_scripts_under_their_category(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from atif_duck.domain.examples import FILTER_EXAMPLES
+
+        query(None, examples_flag=True, category="filter", fmt=OutputFormat.JSON)
+        payload = json.loads(capsys.readouterr().out)
+        assert [e["name"] for e in payload["examples"]] == [e.name for e in FILTER_EXAMPLES]
 
     def test_query_without_sql_exits_64_with_examples_hint(
         self, capsys: pytest.CaptureFixture[str]

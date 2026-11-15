@@ -14,10 +14,12 @@ its signature. It reads a static catalog rather than the corpus, so it answers i
 of a second, needs no materialized data, and doubles as a liveness check on the install. Its output
 ends with a pointer to the examples command.
 
-`atif-sql examples` (the same thing as `atif-sql query --examples`) prints a runnable query per view
-and per macro. Those queries are **derived from the catalog**, never hardcoded per object, and every
-one is executed against a fixture corpus by `atif-duck`'s test suite. Filter with
-`--requires core|analytics|vss` and `--category view|table-macro|scalar-macro`. Piped output is JSON.
+`atif-sql examples` prints a runnable query per view and per macro, then the tested
+`materialize --filter` scripts. Those queries are **derived from the catalog**, never hardcoded per
+object, and every one is executed against a fixture corpus by `atif-duck`'s test suite.
+`atif-sql query --examples` prints the same queries without the filter scripts. Filter with
+`--requires core|analytics|vss` and `--category view|table-macro|scalar-macro|filter`. Piped output
+is JSON.
 
 :::agent
 

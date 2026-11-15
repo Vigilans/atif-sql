@@ -134,8 +134,8 @@ every one of them; atif-models reaches it through atif-analytics, which imports 
 `docs/CONTRACT.md:17-19` leaves VSS/`semantic_search` and the analytics pipelines to
 `docs/CONTRACT-V2.md` rather than ruling them out; both are shipped commands (the `atif-analytics`
 and `atif-embed` pins at `packages/atif-cli/pyproject.toml:32` and `:36`, plus the `analyze`,
-`embed`, and `search` commands at `packages/atif-cli/src/atif_cli/app.py:1824`, `:1992`, and
-`:2222`). Read `docs/CONTRACT.md:22-58` as authoritative for the layout (that's the part the
+`embed`, and `search` commands at `packages/atif-cli/src/atif_cli/app.py:1826`, `:1994`, and
+`:2224`). Read `docs/CONTRACT.md:22-58` as authoritative for the layout (that's the part the
 packages actually implement) and the manifests as authoritative for who imports whom.
 
 **Drift risk:** a new artifact, a renamed file, or a new `meta.json` key must be applied in every
@@ -155,16 +155,16 @@ write side. Any layout change starts there and then greps the reader modules nam
 
 **Consumers:**
 
-- `packages/atif-cli/src/atif_cli/app.py:2563-2615`: the `schema` command reads `VIEW_SCHEMA`,
+- `packages/atif-cli/src/atif_cli/app.py:2596-2648`: the `schema` command reads `VIEW_SCHEMA`,
   `MACRO_SIGNATURES`, `ANALYTICS_VIEW_SCHEMA`, and `ANALYTICS_MACRO_SIGNATURES`, tags each object
   with its `requires` value, and answers with no DuckDB connection.
-- `packages/atif-duck/src/atif_duck/domain/examples.py:35-44`: the examples generator imports every
+- `packages/atif-duck/src/atif_duck/domain/examples.py:42-51`: the examples generator imports every
   catalog and derives one runnable query per object.
-- `packages/atif-cli/src/atif_cli/app.py:2522`: the `examples` command calls
-  `build_examples()`.
+- `packages/atif-cli/src/atif_cli/app.py:2540`: the `examples` command lists
+  `build_examples()` followed by `FILTER_EXAMPLES`.
 - `packages/atif-duck/tests/test_duck_views.py:51` and `:67`: the `DESCRIBE`-vs-`VIEW_SCHEMA` and
   DDL-vs-`MACRO_SIGNATURES` drift tests.
-- `packages/atif-duck/tests/test_examples.py:208`, `:218`, and `:227`: `DESCRIPTIONS` coverage,
+- `packages/atif-duck/tests/test_examples.py:210`, `:220`, and `:229`: `DESCRIPTIONS` coverage,
   `ARG_EXEMPLARS` coverage, and the `AS TABLE` set drift test.
 - `packages/atif-duck/tests/test_analytics_views.py:260` and `:242`: the analytics-side drift
   tests.
@@ -202,17 +202,17 @@ MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
 - **Column ORDER is part of the contract, not just the column set.** The drift test asserts tuple
   equality against `DESCRIBE` output, stated at `packages/atif-duck/src/atif_duck/domain/catalog.py:56-58`; reordering a view's `SELECT`
   list fails CI even though every column still exists.
-- **`DESCRIPTIONS` covers every object in every catalog, exactly.** `packages/atif-duck/tests/test_examples.py:208`
+- **`DESCRIPTIONS` covers every object in every catalog, exactly.** `packages/atif-duck/tests/test_examples.py:210`
   fails on a missing entry AND on a stale entry keyed to an object that no longer exists, so the
   dict is a bijection with the union of the name catalogs.
 - **Every macro parameter name has an `ARG_EXEMPLARS` literal**, or example generation raises
-  rather than emitting a broken query: `packages/atif-duck/src/atif_duck/domain/examples.py:165-171` fails loud, and
-  `packages/atif-duck/tests/test_examples.py:218` pre-empts it.
-- **`TABLE_MACRO_NAMES` decides the SQL call shape.** `packages/atif-duck/src/atif_duck/domain/examples.py:172-175` emits
+  rather than emitting a broken query: `packages/atif-duck/src/atif_duck/domain/examples.py:173-179` fails loud, and
+  `packages/atif-duck/tests/test_examples.py:220` pre-empts it.
+- **`TABLE_MACRO_NAMES` decides the SQL call shape.** `packages/atif-duck/src/atif_duck/domain/examples.py:180-183` emits
   `SELECT * FROM name(args)` for a member and `SELECT name(args)` otherwise, so a macro whose DDL
   gains or loses `AS TABLE` breaks every derived example, pinned by the regex test at
-  `packages/atif-duck/tests/test_examples.py:227`.
-- **The catalog is answerable without a corpus.** `packages/atif-cli/src/atif_cli/app.py:2572-2574` states the sub-50 ms,
+  `packages/atif-duck/tests/test_examples.py:229`.
+- **The catalog is answerable without a corpus.** `packages/atif-cli/src/atif_cli/app.py:2605-2607` states the sub-50 ms,
   no-DuckDB-bind guarantee the `schema` command rests on; a runtime `DESCRIBE` would violate it.
 - **The raw readers are deliberately NOT in `VIEW_NAMES`** (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:143-144`), so a
   consumer enumerating `VIEW_NAMES` does not see `v_raw_trajectories` and friends.
@@ -549,7 +549,7 @@ class TextRowsPort(Protocol):
   yielded with `replaces_existing=True` (`packages/atif-embed/src/atif_embed/domain/ports.py:108-111`), and the caller must delete before
   appending or the uuid fans out to two vectors
   (`packages/atif-embed/src/atif_embed/application/embed.py:219-226`).
-- **The CLI injects only the text-rows port.** `packages/atif-cli/src/atif_cli/app.py:2131-2137` calls
+- **The CLI injects only the text-rows port.** `packages/atif-cli/src/atif_cli/app.py:2133-2139` calls
   `run_backfill` with `corpus_root`, `settings`, `text_rows` (`DuckDbTextRows`, wrapped in
   `LakeTextRows` unless `--no-lake` is passed), `limit`, and `dry_run`; the use case constructs the
   default store and embedder itself under deferred imports (`packages/atif-embed/src/atif_embed/application/embed.py:114-117`, `packages/atif-embed/src/atif_embed/application/embed.py:173-176`),

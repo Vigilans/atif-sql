@@ -77,10 +77,10 @@ sequenceDiagram
 
 Sources, in dispatch order:
 
-- CLI query: `packages/atif-cli/src/atif_cli/app.py:1483`; `duckdb.connect()` at `:1658`, the lake
-  attached at `:1664` when it holds the corpus, `register` called at `:1668`,
-  `_harden_query_connection` at `:537` called from `:1677`, caller SQL executed at `:1699`, emit at
-  `:1705`.
+- CLI query: `packages/atif-cli/src/atif_cli/app.py:1483`; `duckdb.connect()` at `:1660`, the lake
+  attached at `:1666` when it holds the corpus, `register` called at `:1670`,
+  `_harden_query_connection` at `:537` called from `:1679`, caller SQL executed at `:1701`, emit at
+  `:1707`.
 - atif_duck register: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2215`, whose
   documented order is fixed at `:2235-2243`: `register_raw` `:664` (`register_lake_raw` instead when
   the lake is attached), `register_views` `:1051`, `register_vss` `:1671`, `register_macros` `:1975`,
@@ -125,8 +125,8 @@ sequenceDiagram
 
 Sources, in dispatch order:
 
-- CLI analyze: `packages/atif-cli/src/atif_cli/app.py:1824`; settings resolved at `:1890-1897`,
-  `run_analyze` called at `:1908`.
+- CLI analyze: `packages/atif-cli/src/atif_cli/app.py:1826`; settings resolved at `:1892-1899`,
+  `run_analyze` called at `:1910`.
 - run_analyze: `packages/atif-analytics/src/atif_analytics/application/analyze.py:37`; the
   `stages` list at `:103-108`, each stage invoked at `:129`.
 - CorpusReader: `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:328`,

@@ -1499,9 +1499,11 @@ def query(
     macros via ``atif_duck.register``, executes, and emits: TTY -> plain
     table, pipe -> JSON array of row objects.
 
-    ``--examples`` short-circuits to the ``examples`` listing (same output,
-    same ``--category`` / ``--requires`` filters) without opening DuckDB —
-    the natural discovery path when an agent is already composing a query.
+    ``--examples`` short-circuits to the ``examples`` listing of the query
+    examples (same output, same ``--category`` / ``--requires`` filters; the
+    ``materialize --filter`` scripts only under ``--category filter``)
+    without opening DuckDB — the natural discovery path when an agent is
+    already composing a query.
 
     Where the rows come from
     ------------------------
@@ -1606,7 +1608,7 @@ def query(
     spelling its path. ``--corpus-root`` still wins.
     """
     if examples_flag:
-        examples(category=category, requires=requires, fmt=fmt)
+        _list_examples(category, requires, fmt, filters=False)
         return
     if sql is None:
         emit_error(
@@ -2474,29 +2476,45 @@ def examples(
     requires: str | None = None,
     fmt: Annotated[OutputFormat, cyclopts.Parameter(name="--format")] = OutputFormat.AUTO,
 ) -> None:
-    """List tested example queries for every view and macro.
+    """List tested example queries for every view and macro, and example filter scripts.
 
     Examples are DERIVED from the static atif-duck catalog (never hardcoded
     per object) and each one is executed by atif-duck's test suite against a
     fixture corpus — the listing is proof-carrying, not documentation that
-    can rot. Answers from :mod:`atif_duck.domain` alone: no DuckDB import,
-    no connection, lean-import fast like ``schema``.
+    can rot. The ``filter`` category lists ``materialize --filter`` scripts
+    for the common policies, executed by the same suite and by atif-cli's
+    through ``materialize --filter``. Answers from :mod:`atif_duck.domain`
+    alone: no DuckDB import, no connection, lean-import fast like ``schema``.
 
     Output
     ------
-    TTY: a table grouped by ``requires`` (core / analytics / vss). Piped or
-    ``--format json``: ``{"note": ..., "examples": [{name, sql, description,
-    requires, category}, ...]}``.
+    TTY: the query examples grouped by ``requires`` (core / analytics /
+    vss), then the filter scripts under ``[filter]``. Piped or ``--format
+    json``: ``{"note": ..., "examples": [{name, sql, description, requires,
+    category}, ...]}``.
 
     Flags
     -----
-    --category   Filter: view | table-macro | scalar-macro.
+    --category   Filter: view | table-macro | scalar-macro | filter.
     --requires   Filter: core | analytics | vss.
 
     Exit codes: 0 ok, 64 unknown --category/--requires value.
     """
+    _list_examples(category, requires, fmt, filters=True)
+
+
+def _list_examples(
+    category: str | None, requires: str | None, fmt: OutputFormat, *, filters: bool
+) -> None:
+    """Emit the examples ``category`` and ``requires`` select.
+
+    With no ``category``, the ``filter`` scripts are listed only when
+    ``filters`` is set: ``query --examples`` lists the statements ``query``
+    runs, and a filter script is a ``materialize --filter`` policy.
+    """
     from atif_duck.domain.examples import (
         CATEGORY_VALUES,
+        FILTER_EXAMPLES,
         REQUIRES_VALUES,
         build_examples,
     )
@@ -2519,22 +2537,37 @@ def examples(
 
     selected = [
         example
-        for example in build_examples()
-        if (category is None or example.category == category)
+        for example in (*build_examples(), *FILTER_EXAMPLES)
+        if (
+            example.category == category
+            if category is not None
+            else filters or example.category != "filter"
+        )
         and (requires is None or example.requires == requires)
     ]
 
     if resolve_format(fmt) is OutputFormat.TABLE:
         print(f"# {len(selected)} examples — {_EXAMPLES_NOTE}")
-        for group in ("core", "analytics", "vss"):
-            grouped = [e for e in selected if e.requires == group]
+        queries = [e for e in selected if e.category != "filter"]
+        sections = [
+            *(
+                (group, [e for e in queries if e.requires == group])
+                for group in ("core", "analytics", "vss")
+            ),
+            ("filter", [e for e in selected if e.category == "filter"]),
+        ]
+        for header, grouped in sections:
             if not grouped:
                 continue
-            print(f"\n[{group}]")
+            print(f"\n[{header}]")
             width = max(len(e.name) for e in grouped)
+            indent = f"  {'':<{width}}  "
             for example in grouped:
-                print(f"  {example.name:<{width}}  {example.sql}")
-                print(f"  {'':<{width}}  # {example.description}")
+                first, *rest = example.sql.splitlines()
+                print(f"  {example.name:<{width}}  {first}")
+                for line in rest:
+                    print(f"{indent}{line}")
+                print(f"{indent}# {example.description}")
         return
     emit_json(
         {

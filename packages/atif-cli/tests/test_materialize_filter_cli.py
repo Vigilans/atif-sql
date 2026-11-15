@@ -33,6 +33,7 @@ from atif_cli.app import app, materialize, query
 from atif_cli.output import OutputFormat
 from atif_cli.sql_filter import SqlArtifactFilter
 from atif_converter.domain.atif import Trajectory
+from atif_duck.domain.examples import FILTER_EXAMPLES, ExampleQuery
 
 PASTED_SHA = hashlib.sha256(PASTED_PNG).hexdigest()
 READ_SHA = hashlib.sha256(READ_PNG).hexdigest()
@@ -499,3 +500,64 @@ class TestScriptInput:
     def test_the_filter_pickles_with_its_scripts(self) -> None:
         restored = pickle.loads(pickle.dumps(SqlArtifactFilter([NO_DIRECTIVES])))  # noqa: S301 - our own object
         assert restored.scripts == (NO_DIRECTIVES,)
+
+
+def _effect_queries(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    """What each filter example changes, read back from the filtered corpus."""
+    session_dir = _session_dir(tmp_path)
+    text = "".join(
+        read_artifact_text(session_dir / name)
+        for name in ("trajectory.json.zst", "session_events.jsonl.zst")
+    )
+    return {
+        "unpruned": _query(
+            tmp_path,
+            capsys,
+            "SELECT count(*) AS n FROM tool_results WHERE content::VARCHAR <> '\"\"'",
+        )[0]["n"],
+        "reasoning": _query(
+            tmp_path, capsys, "SELECT count(*) AS n FROM steps WHERE reasoning_content IS NOT NULL"
+        )[0]["n"],
+        "images": _query(tmp_path, capsys, "SELECT count(*) AS n FROM images")[0]["n"],
+        "blobs": _stored_blobs(tmp_path),
+        "secret": SECRET in text,
+        "home": HOME in text,
+    }
+
+
+#: Each filter example's effect on the fixture session, over what it starts with.
+EXAMPLE_EFFECTS: dict[str, dict[str, Any]] = {
+    "prune_uncited_tool_results": {"unpruned": 1, "images": 1, "blobs": {PASTED_SHA}},
+    "prune_large_tool_results": {},
+    "redact_credentials": {"secret": False},
+    "replace_home_paths": {"home": False},
+    "drop_reasoning_content": {"reasoning": 0},
+    "drop_images_and_blobs": {"images": 0, "blobs": set()},
+}
+
+
+@pytest.mark.integration
+class TestFilterExamples:
+    def test_every_example_has_an_effect_check(self) -> None:
+        assert set(EXAMPLE_EFFECTS) == {example.name for example in FILTER_EXAMPLES}
+
+    @pytest.mark.parametrize("example", FILTER_EXAMPLES, ids=[e.name for e in FILTER_EXAMPLES])
+    def test_the_example_filters_the_session(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], example: ExampleQuery
+    ) -> None:
+        baseline = tmp_path / "baseline"
+        baseline.mkdir()
+        _run(baseline, capsys, _scripts(baseline, NO_DIRECTIVES))
+        before = _effect_queries(baseline, capsys)
+        assert before == {
+            "unpruned": 4,
+            "reasoning": 2,
+            "images": 2,
+            "blobs": {READ_SHA, PASTED_SHA},
+            "secret": True,
+            "home": True,
+        }
+        report = _run(tmp_path, capsys, _scripts(tmp_path, example.sql))
+        assert (report["materialized"], report["failed"]) == (1, 0), report["failures"]
+        Trajectory.model_validate(_trajectory(tmp_path))
+        assert _effect_queries(tmp_path, capsys) == {**before, **EXAMPLE_EFFECTS[example.name]}
