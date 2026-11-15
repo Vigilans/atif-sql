@@ -81,6 +81,8 @@ CATEGORY_VALUES: tuple[str, ...] = cast("tuple[str, ...]", get_args(Category))
 #:   queries the flow is two-step: embed the query text first (``atif-sql
 #:   search`` wraps both steps); see
 #:   :data:`~atif_duck.domain.catalog.DESCRIPTIONS`.
+#: * ``content`` — a stored tool result's content, picked from the corpus
+#:   like ``sid``.
 ARG_EXEMPLARS: dict[str, str] = {
     "sid": "(SELECT session_id FROM sessions LIMIT 1)",
     "since_days": "30",
@@ -92,6 +94,7 @@ ARG_EXEMPLARS: dict[str, str] = {
     "src": "'user'",
     "msg": "'Stop hook feedback: the claim has no evidence'",
     "interval_text": "'7 days'",
+    "content": "(SELECT content FROM tool_results LIMIT 1)",
     "query_vec": (
         "(SELECT list_transform("
         "me.embedding, lambda v: (v / sqrt(list_sum("

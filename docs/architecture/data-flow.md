@@ -115,7 +115,7 @@ sequenceDiagram
    memory (`:1660`).
 3. Registration builds the whole catalog on that connection in a fixed order (raw TEMP tables,
    base views, VSS, macros, the authorship macro and views, analytics views, analytics macros),
-   because each later stage binds against the earlier one at `CREATE` time (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2291-2312`).
+   because each later stage binds against the earlier one at `CREATE` time (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2297-2318`).
 4. When the DuckLake at `ATIF_SQL_LAKE_ROOT` exists, its recorded schema matches the running code,
    and it holds this corpus at this root, the raw relations are views over the lake tables instead,
    filtered to this corpus (`--all-corpora` drops the filter): the command loads the ducklake
@@ -133,12 +133,12 @@ sequenceDiagram
    (DuckDB's JSON reader decompresses a `.zst` file itself) into a TEMP TABLE over an explicit
    path list; the two sets are unioned
    into one raw view per surface. The parse cost of a `query` invocation is therefore O(sessions
-   without artifacts) per connection (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:664`).
+   without artifacts) per connection (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:665`).
 6. The edges and loss readers are semi-joined against the meta table, and the trajectory path list
    is built from it, so a session directory missing its `meta.json` contributes nothing rather than
-   a partial artifact set. This is the read-side half of flow 1's meta-last write ordering (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:775`).
-7. The VSS step `ATTACH`es the Lance store through the lance extension (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1749`) and reads the
-   store's stamped `model` and `dim` back out (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1796`) before creating any view over it; a store
+   a partial artifact set. This is the read-side half of flow 1's meta-last write ordering (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:776`).
+7. The VSS step `ATTACH`es the Lance store through the lance extension (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1750`) and reads the
+   store's stamped `model` and `dim` back out (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:1797`) before creating any view over it; a store
    written by a different provider or width raises instead of binding, because vectors from
    different models live in incompatible spaces and would return numerically valid but meaningless
    cosine scores (`packages/atif-duck/src/atif_duck/domain/embedding_guard.py:78`).

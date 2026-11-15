@@ -12,7 +12,7 @@ The views
 sessions, messages(→steps), tool_calls, tool_results, todo_events,
 todo_state_current, subagent views (subagent_spawns, subagent_steps, subagents), images,
 task_creations/task_updates/tasks_state_current,
-skill_invocations + macros ago, model_used, cost_estimate, tool_rank,
+skill_invocations + macros ago, content_text, model_used, cost_estimate, tool_rank,
 todo_velocity, subagent_fanout, skill_rank, skill_source_mix; CLI query/schema/status.
 VSS/semantic_search and the analytics pipelines are shipped commands, bound
 by CONTRACT-V2 rather than by this file; their absence from the list above
@@ -350,6 +350,13 @@ proofs are out of scope for the workspace.
   step is is_sidechain, and its agent_id falls back to its trajectory's id.
 - steps (and the parquet and lake tables behind it) carries reasoning_content,
   the step's ATIF reasoning_content as written, NULL on a step without one.
+- content_text(content) renders ATIF content (string or ContentPart array)
+  as text: a JSON string unquoted; an array's parts joined with blank lines,
+  a text part as its text and an image or audio part as
+  `[<kind> <path> <media_type>]`, where `<path>` is `source.path` read from
+  the corpus root (`../../blobs/...` is `blobs/...`). steps.message is
+  content_text(step.message); tool_results.content stays the stored JSON,
+  and content_text(content) is its text.
 - messages-parity view name: `steps` (one row per ATIF step) PLUS a `messages`
   compatibility view reconstructed from edges (uuid-keyed: uuid, parent_uuid,
   session_id, ts, type, is_sidechain, is_compact_summary, message_id,

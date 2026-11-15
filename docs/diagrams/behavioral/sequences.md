@@ -81,20 +81,20 @@ Sources, in dispatch order:
   attached at `:1666` when it holds the corpus, `register` called at `:1670`,
   `_harden_query_connection` at `:537` called from `:1679`, caller SQL executed at `:1701`, emit at
   `:1707`.
-- atif_duck register: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2215`, whose
-  documented order is fixed at `:2235-2243`: `register_raw` `:664` (`register_lake_raw` instead when
-  the lake is attached), `register_views` `:1051`, `register_vss` `:1671`, `register_macros` `:1975`,
+- atif_duck register: `packages/atif-duck/src/atif_duck/infrastructure/registry.py:2221`, whose
+  documented order is fixed at `:2241-2249`: `register_raw` `:665` (`register_lake_raw` instead when
+  the lake is attached), `register_views` `:1052`, `register_vss` `:1672`, `register_macros` `:1976`,
   then the authorship surface and the analytics pair.
 - DuckDB in-process: the connection opened by the CLI; the sandbox settings and
   `lock_configuration` are issued against it at `packages/atif-cli/src/atif_cli/app.py:597-606`.
 - corpus artifacts: on the per-session path, session globs read through `read_json` at
-  `packages/atif-duck/src/atif_duck/infrastructure/registry.py:781-796`; the analytics parquets bind
+  `packages/atif-duck/src/atif_duck/infrastructure/registry.py:782-797`; the analytics parquets bind
   through `packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119`, with the analytics
   macros at `:236`.
 - Lance store: written by atif-embed and read here, both through DuckDB's lance extension;
-  `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1732-1751` loads it and ATTACHes the
-  store (installing it is `install_lance_extension` at `:1655`, behind `atif-sql embed`); the
-  stamped `(model, dim)` identity is read at `:1796` and checked by
+  `packages/atif-duck/src/atif_duck/infrastructure/registry.py:1733-1752` loads it and ATTACHes the
+  store (installing it is `install_lance_extension` at `:1656`, behind `atif-sql embed`); the
+  stamped `(model, dim)` identity is read at `:1797` and checked by
   `packages/atif-duck/src/atif_duck/domain/embedding_guard.py:51`.
 - stdout emitter: `packages/atif-cli/src/atif_cli/output.py:158`; a registration failure routes
   through `packages/atif-cli/src/atif_cli/duck_errors.py:67` instead.

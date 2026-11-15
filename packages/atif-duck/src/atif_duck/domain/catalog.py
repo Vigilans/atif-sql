@@ -330,6 +330,7 @@ VIEW_SCHEMA: dict[str, tuple[tuple[str, str], ...]] = {
 # separately, because their backing views exist only once the pipelines run.
 MACRO_NAMES: tuple[str, ...] = (
     "ago",
+    "content_text",
     "model_used",
     "cost_estimate",
     "tool_rank",
@@ -349,6 +350,7 @@ MACRO_NAMES: tuple[str, ...] = (
 # ``atif-sql schema`` prints and what ARG_EXEMPLARS keys the examples on.
 MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
     "ago": ("interval_text",),
+    "content_text": ("content",),
     "model_used": ("sid",),
     "cost_estimate": ("sid",),
     "tool_rank": ("last_n_days",),
@@ -565,6 +567,11 @@ DESCRIPTIONS: dict[str, str] = {
     ),
     # -- core macros --------------------------------------------------------
     "ago": "Timestamp N ago; use in filters like WHERE ts >= ago('7 days').",
+    "content_text": (
+        "Render ATIF content (a JSON string or ContentPart array) as text, with image and "
+        "audio parts as [<kind> blobs/sha256/<ab>/<sha256>.<ext> <media_type>]; "
+        "steps.message already applies it."
+    ),
     "model_used": "Model name one session used.",
     "cost_estimate": (
         "Estimated USD cost of one session from token counts and pricing, as "

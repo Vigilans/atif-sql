@@ -59,11 +59,6 @@ class StepMemberAccess:
         column, root = self._locate(member)
         return SqlFragment(f"json_extract_string({column}, '{root}{path}')")
 
-    def type_of(self, member: str) -> SqlFragment:
-        """SQL for ``json_type`` of ``member``."""
-        column, root = self._locate(member)
-        return SqlFragment(f"json_type({column}, '{root}')")
-
     def _locate(self, member: str) -> tuple[str, str]:
         if self.whole_step_column is not None:
             return self.whole_step_column, f"$.{member}"
@@ -100,14 +95,58 @@ STEP_MEMBERS: tuple[str, ...] = (
 )
 
 
+#: The prefix that makes a blob path relative to a session directory.
+_SESSION_BLOB_PREFIX = "../../blobs/"
+
+
+def content_text_sql(content: str) -> SqlFragment:
+    """SQL rendering ATIF content (``str | ContentPart[]``) as one text body.
+
+    ``content`` is SQL for the JSON value (``Step.message``,
+    ``ObservationResult.content``). A JSON string is returned unquoted. A
+    ``ContentPart`` array joins its parts with blank lines: a ``text`` part is
+    its text, and an ``image`` or ``audio`` part is ``[<type> <path>
+    <media_type>]``, its ``source.path`` read from the corpus root
+    (``../../blobs/...`` is ``blobs/...``). A part of any other shape renders
+    nothing.
+    """
+    path = "json_extract_string(part, '$.source.path')"
+    # ``substr(..., 7)`` drops the leading ``../../``.
+    shown = (
+        f"CASE WHEN starts_with({path}, '{_SESSION_BLOB_PREFIX}') "
+        f"THEN substr({path}, 7) ELSE {path} END"
+    )
+    part = (
+        "CASE WHEN json_extract_string(part, '$.type') = 'text' "
+        "AND json_type(part, '$.text') = 'VARCHAR' "
+        "THEN json_extract_string(part, '$.text') "
+        "WHEN json_extract_string(part, '$.type') IN ('image', 'audio') "
+        "AND json_type(part, '$.source.path') = 'VARCHAR' "
+        "AND json_type(part, '$.source.media_type') = 'VARCHAR' "
+        "THEN '[' || json_extract_string(part, '$.type') || ' ' || "
+        f"{shown} || ' ' || json_extract_string(part, '$.source.media_type') || ']' END"
+    )
+    value = f"CAST({content} AS JSON)"
+    return SqlFragment(
+        f"CASE WHEN json_type({value}) = 'ARRAY' "
+        f"THEN array_to_string(list_transform(CAST(json_extract({value}, '$[*]') AS JSON[]), "
+        f"lambda part: {part}), '\n\n') "
+        f"ELSE json_extract_string({value}, '$') END"
+    )
+
+
+#: The body of the ``content_text(content)`` macro.
+CONTENT_TEXT_SQL: SqlFragment = content_text_sql("content")
+
+
 def step_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
     """``(expression, alias)`` pairs for every ``steps`` column after ``session_id``.
 
     Column semantics a transcript-shaped reader would misread:
 
     * ``message`` is flattened text: ATIF ``Step.message`` is
-      ``str | ContentPart[]``; the ARRAY branch joins the parts' ``text``
-      fields with blank lines (mirrors harbor's own text bundling).
+      ``str | ContentPart[]``, rendered by :func:`content_text_sql`, so a
+      pasted image or audio clip reads as its blob path.
     * ``prompt_tokens`` is the ATIF TOTAL (input + cache_read +
       cache_creation); ``cached_tokens`` is the cache-read subset;
       ``cache_creation`` is dug out of ``metrics.extra`` because harbor only
@@ -129,21 +168,12 @@ def step_columns(access: StepMemberAccess) -> tuple[tuple[str, str], ...]:
     * ``reasoning_content`` is ATIF ``Step.reasoning_content`` as written,
       NULL when the step carries none.
     """
-    message_parts = access.json("message", "[*].text")
     return (
         (f"{access.json('step_id')}::BIGINT", "step_id"),
         (f"{access.string('timestamp')}::TIMESTAMP", "ts"),
         (access.string("source"), "source"),
         (access.string("model_name"), "model_name"),
-        (
-            (
-                f"CASE WHEN {access.type_of('message')} = 'ARRAY' "
-                f"THEN array_to_string(list_transform({message_parts}, "
-                "lambda part: json_extract_string(part, '$')), '\n\n') "
-                f"ELSE {access.string('message')} END"
-            ),
-            "message",
-        ),
+        (content_text_sql(access.json("message")), "message"),
         (
             (
                 f"(coalesce({access.json('extra', '.is_sidechain')}::BOOLEAN, false) "
@@ -247,6 +277,7 @@ def render(columns: tuple[tuple[str, str], ...]) -> SqlFragment:
 
 __all__ = [
     "CALL_COLUMNS",
+    "CONTENT_TEXT_SQL",
     "EMBEDDED",
     "EVENT_COLUMNS",
     "MEMBER_COLUMNS",
@@ -255,6 +286,7 @@ __all__ = [
     "TRAJECTORY_KEY",
     "WHOLE_STEP",
     "StepMemberAccess",
+    "content_text_sql",
     "render",
     "step_columns",
     "step_key_columns",

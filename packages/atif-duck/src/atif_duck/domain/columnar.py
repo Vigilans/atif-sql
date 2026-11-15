@@ -54,7 +54,10 @@ if TYPE_CHECKING:
 #: embedded ``subagent_trajectories`` entry too, and gained ``trajectory_id``.
 #:
 #: 4: ``steps`` gained ``reasoning_content``.
-COLUMNAR_SCHEMA_VERSION: int = 4
+#:
+#: 5: ``steps.message`` renders a ``ContentPart`` message's image and audio
+#: parts as their blob paths (``content_text``).
+COLUMNAR_SCHEMA_VERSION: int = 5
 
 #: The ``meta.json`` key that records which columnar schema a session's
 #: parquet files were written against. Absent on sessions materialized

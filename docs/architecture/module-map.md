@@ -67,7 +67,7 @@ is the one member permitted to import a sibling: atif-models and nothing else (`
 
 `register(con, corpus_root)` binds a DuckDB connection to a contract-shaped corpus tree and exposes the
 core views and macros (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`,
-`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2215`). Those names are not introspected
+`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2221`). Those names are not introspected
 at runtime: a static catalog answers `atif-sql schema` in under 50 ms with no DuckDB bind, and two
 drift tests assert it column-for-column against `DESCRIBE` and signature-for-signature against the
 DDL (`packages/atif-duck/src/atif_duck/domain/catalog.py:3`). The analytics views and
@@ -78,8 +78,8 @@ macros register separately, each only when its backing parquet is populated, bec
 it carries no layers contract (`pyproject.toml:557`).
 
 - `packages/atif-duck/src/atif_duck/infrastructure/registry.py`: the raw readers
-  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:664`), most of the core views
-  (`:1051`) and macros (`:1975`), and the Lance attach path (`:1671`).
+  (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:665`), most of the core views
+  (`:1052`) and macros (`:1976`), and the Lance attach path (`:1672`).
 - `packages/atif-duck/src/atif_duck/domain/raw_readers.py`: the raw relation names and
   column shapes the registry binds and the lake stores, so neither declares them twice.
 - `packages/atif-duck/src/atif_duck/domain/lake.py`: the lake's tables, partition specs and
@@ -101,14 +101,14 @@ it carries no layers contract (`pyproject.toml:557`).
   `ATIF_SQL_`-prefixed lake root, corpus base, batch sizes, stage worker count, lock timeout and
   snapshot expiry.
 - `packages/atif-duck/src/atif_duck/domain/catalog.py`: `VIEW_NAMES`
-  (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`), `MACRO_SIGNATURES` (`:350`), the
-  analytics catalogs (`:377-469`), and one `DESCRIPTIONS` entry per object (`:494`).
+  (`packages/atif-duck/src/atif_duck/domain/catalog.py:30`), `MACRO_SIGNATURES` (`:351`), the
+  analytics catalogs (`:379-471`), and one `DESCRIPTIONS` entry per object (`:496`).
 - `packages/atif-duck/src/atif_duck/infrastructure/analytics.py`: the v2 views and macros
   over the analytics parquet outputs, gated on file presence
   (`packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119`).
 - `packages/atif-duck/src/atif_duck/domain/examples.py`: `build_examples` derives one
   runnable query per catalog object from `ARG_EXEMPLARS` rather than hardcoding strings
-  (`packages/atif-duck/src/atif_duck/domain/examples.py:199`).
+  (`packages/atif-duck/src/atif_duck/domain/examples.py:202`).
 - `packages/atif-duck/src/atif_duck/domain/authorship.py`: the `step_author` rule table:
   prefix matches after stripping leading whitespace, first rule wins, twinned in atif-analytics
   (`packages/atif-duck/src/atif_duck/domain/authorship.py:51`).

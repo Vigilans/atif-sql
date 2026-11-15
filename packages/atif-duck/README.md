@@ -76,7 +76,9 @@ it writes.
   `session_events`, `message_embeddings` (the VSS view; empty until
   `atif-sql embed --all --no-dry-run` runs), and the three authorship views
   `user_steps`, `human_turns`, `session_outcomes` (below).
-- **Macros**: `ago`, `model_used`, `cost_estimate`, `tool_rank`,
+- **Macros**: `ago`, `content_text(content)` (ATIF content as text, each
+  image or audio part as its blob path; `steps.message` applies it),
+  `model_used`, `cost_estimate`, `tool_rank`,
   `todo_velocity`, `subagent_fanout`, `skill_rank`, `skill_source_mix`,
   `semantic_search(query_vec, k)` (kNN over `message_embeddings`; skipped
   when `register(..., skip_vss=True)`), and `step_author(src, msg)`.

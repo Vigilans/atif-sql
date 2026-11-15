@@ -55,9 +55,9 @@ The catalogs (`VIEW_NAMES`, `MACRO_NAMES`, `ANALYTICS_VIEW_NAMES`,
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | `atif_duck.domain.examples`: derives every example from every catalog | direct import | yes | `packages/atif-duck/src/atif_duck/domain/examples.py:42-51` |
-| `DESCRIPTIONS`: one entry per object; `_description()` raises `KeyError` without it | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:494` and `packages/atif-duck/src/atif_duck/domain/examples.py:190-196` |
-| `ARG_EXEMPLARS`: needed only when a macro introduces a NEW parameter name; `_macro_sql()` raises `KeyError` without it | direct import | yes | `packages/atif-duck/src/atif_duck/domain/examples.py:84-101` and `packages/atif-duck/src/atif_duck/domain/examples.py:171-179` |
-| `TABLE_MACRO_NAMES`: membership required when the DDL says `AS TABLE`, or the derived SQL uses the wrong call shape | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:476` |
+| `DESCRIPTIONS`: one entry per object; `_description()` raises `KeyError` without it | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:496` and `packages/atif-duck/src/atif_duck/domain/examples.py:193-199` |
+| `ARG_EXEMPLARS`: needed only when a macro introduces a NEW parameter name; `_macro_sql()` raises `KeyError` without it | direct import | yes | `packages/atif-duck/src/atif_duck/domain/examples.py:86-104` and `packages/atif-duck/src/atif_duck/domain/examples.py:174-182` |
+| `TABLE_MACRO_NAMES`: membership required when the DDL says `AS TABLE`, or the derived SQL uses the wrong call shape | direct import | yes | `packages/atif-duck/src/atif_duck/domain/catalog.py:478` |
 | `atif_duck.infrastructure.registry`: owns the real DDL and imports `DEFAULT_PRICING` | direct import | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:87` |
 | `atif_duck.infrastructure.analytics`: `register_analytics` and `register_analytics_macros` own the DDL the analytics catalogs describe | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/analytics.py:119` and `packages/atif-duck/src/atif_duck/infrastructure/analytics.py:236` |
 | `atif_duck.infrastructure.authorship`: `register_authorship` owns the DDL for `step_author`, `user_steps`, `human_turns`, and `session_outcomes` | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/authorship.py:38` |
@@ -75,7 +75,7 @@ The catalogs (`VIEW_NAMES`, `MACRO_NAMES`, `ANALYTICS_VIEW_NAMES`,
 
 - **`EXCLUSIONS` is the only sanctioned way to add a catalog object without an example, and it is
   policed in both directions.** The dict is currently empty
-  (`packages/atif-duck/src/atif_duck/domain/examples.py:108`), and a stale key (or a key that still
+  (`packages/atif-duck/src/atif_duck/domain/examples.py:111`), and a stale key (or a key that still
   emits an example) fails `test_exclusions_reference_real_catalog_objects`
   (`packages/atif-duck/tests/test_examples.py:202`).
 - **`atif-sql schema` prints every catalog, each object tagged with its `requires` value.** It
@@ -122,7 +122,7 @@ places with no import edge between them.
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | `atif_corpus.application.materialize`: the writer, routed through `CorpusLayout` | direct import | yes | `packages/atif-corpus/src/atif_corpus/application/materialize.py:158-167` and `packages/atif-corpus/src/atif_corpus/application/materialize.py:1718` |
-| `atif_duck.infrastructure.registry`: builds globs under `corpus_root / "sessions"` | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:757-767` |
+| `atif_duck.infrastructure.registry`: builds globs under `corpus_root / "sessions"` | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:758-768` |
 | `atif_embed.infrastructure.corpus_text_rows`: its own `sessions/` walk, gated on `meta.json` | indirect | yes | `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:178-196` |
 | `atif_analytics.infrastructure.corpus_reader`: re-declares the filename constants | indirect | yes | `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:72-74` and `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:182-195` |
 | `atif_cli.app.convert`: writes `edges.jsonl` beside a `--trajectory-out` trajectory on the one-shot path | indirect | likely | `packages/atif-cli/src/atif_cli/app.py:789-790` |
@@ -137,7 +137,7 @@ places with no import edge between them.
   import edge connects them, so the only signal is each package's own fixture corpus going out of
   agreement with the writer. The `meta.json`-written-last torn-set rule is re-implemented in every
   reader: evidence of the duplication cost, and one place per reader to edit if the completion marker
-  ever moves (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:705-710`,
+  ever moves (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:706-711`,
   `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:28-29`,
   `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:13-15`).
 - **`.staging` sits outside `sessions/` for a reader-visibility reason, not tidiness.** DuckDB's
@@ -147,7 +147,7 @@ places with no import edge between them.
 - **`LossReport.to_json()`'s keys are wire contract, not an internal shape.** atif-duck reads them
   back through `_LOSS_REPORT_COLUMNS`, so renaming a key breaks the `loss_reports` view with no type
   error anywhere (`packages/atif-converter/src/atif_converter/domain/fidelity.py:149-173`,
-  `packages/atif-duck/src/atif_duck/infrastructure/registry.py:331`).
+  `packages/atif-duck/src/atif_duck/infrastructure/registry.py:332`).
 
 ## The domain Protocols
 
@@ -228,7 +228,7 @@ surfaces above exist as duplicated strings and Protocols instead of imports.
 | `TextRowsPort`: exists because atif-embed may not import atif-duck | indirect | yes | `packages/atif-embed/src/atif_embed/domain/ports.py:11-15` |
 | The `embedding_guard` twins: one rule, copied into atif-duck and atif-embed | direct import | yes | `packages/atif-duck/src/atif_duck/domain/embedding_guard.py:51` and `packages/atif-embed/src/atif_embed/domain/embedding_guard.py:38` |
 | `test_guard_twin_pin.py`: reads the atif-duck copy as SOURCE TEXT via `ast`, never importing it | test | yes | `packages/atif-embed/tests/test_guard_twin_pin.py:41` and `packages/atif-embed/tests/test_guard_twin_pin.py:55-72` |
-| The independent corpus readers | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:664`, `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:178`, `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:182` |
+| The independent corpus readers | indirect | yes | `packages/atif-duck/src/atif_duck/infrastructure/registry.py:665`, `packages/atif-embed/src/atif_embed/infrastructure/corpus_text_rows.py:178`, `packages/atif-analytics/src/atif_analytics/infrastructure/corpus_reader.py:182` |
 | `[tool.coverage.run] source`: the same import packages, named rather than pathed | config | likely | `pyproject.toml:632-640` |
 
 ### Blast-radius notes
@@ -265,7 +265,7 @@ driving the CLI reads, so the dict is the surface, not the individual numbers, a
 | `ClassifiedError.to_payload()`: the JSON error envelope on non-TTY stderr | indirect | likely | `packages/atif-cli/src/atif_cli/errors.py:78-86` |
 | `test_app.py`: asserts against the dict, never against a literal, except where the number itself is the claim | test | yes | `packages/atif-cli/tests/test_app.py:42` and `packages/atif-cli/tests/test_app.py:1582` |
 | `test_cron.py`, `test_integration.py`, `test_vss_commands.py`: more suites keyed off the dict | test | yes | `packages/atif-cli/tests/test_cron.py:28`, `packages/atif-cli/tests/test_integration.py:147`, `packages/atif-cli/tests/test_vss_commands.py:23` |
-| `docs/CONTRACT.md:376-413` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:376-413` |
+| `docs/CONTRACT.md:383-420` §CLI: the documented command surface these codes are raised from | config | likely | `docs/CONTRACT.md:383-420` |
 
 ### Blast-radius notes
 
@@ -356,7 +356,7 @@ it.
 
 ## Other notable surfaces
 
-- **`DEFAULT_PRICING`** (`packages/atif-duck/src/atif_duck/domain/catalog.py:624`): models with
+- **`DEFAULT_PRICING`** (`packages/atif-duck/src/atif_duck/domain/catalog.py:631`): models with
   published list rates. A model absent here lands in `cost_estimate`'s `unpriced_steps` rather than
   being dropped, and tests pin the table: an exact oracle
   (`packages/atif-duck/tests/test_duck_views.py:519`) and a corpus-coverage gate
@@ -384,8 +384,8 @@ it.
 - **The `# noqa: S608` sites**: `S608` is enforced, and each suppression carries its
   static-catalog reason inline; some of them are in the examples generator, where the interpolated
   name comes from the catalog rather than from user input
-  (`packages/atif-duck/src/atif_duck/domain/examples.py:165`,
-  `packages/atif-duck/src/atif_duck/domain/examples.py:182`, `pyproject.toml:214-217`).
+  (`packages/atif-duck/src/atif_duck/domain/examples.py:168`,
+  `packages/atif-duck/src/atif_duck/domain/examples.py:185`, `pyproject.toml:214-217`).
 - **Watermark and quiescence** (`packages/atif-corpus/src/atif_corpus/domain/watermark.py:57`): the
   freshness rule that decides what `materialize` re-converts, surfaced to `status` through the
   producer's public `read_watermark` (`packages/atif-cli/src/atif_cli/app.py:1382`) rather than a

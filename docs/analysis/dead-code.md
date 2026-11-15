@@ -283,8 +283,8 @@ numbers follow it as plain numbers.
   and of `compress_in_place` on line 121, and is constructed at `:118` and
   again on line 152.
 - `Requires` feeds `get_args` at
-  `packages/atif-duck/src/atif_duck/domain/examples.py:64` and annotates `:132`;
-  `Category` feeds `get_args` at `:65` and annotates `:133`.
+  `packages/atif-duck/src/atif_duck/domain/examples.py:64` and annotates `:135`;
+  `Category` feeds `get_args` at `:65` and annotates `:136`.
 - In `packages/atif-duck/src/atif_duck/domain/lake.py`, `IDENTITY_COLUMNS`
   leads a table's column list at `:176` and `COLLISION_PREFIX` renames a
   colliding column at `:188`; `LAKE_INFO_COLUMNS` and `CORPORA_COLUMNS` render
@@ -306,8 +306,8 @@ numbers follow it as plain numbers.
   `SNAPSHOT_RANGE_SQL` are executed at `:131`, `:136`, `:152`, `:203`, and
   `:204`.
 - `StepMemberAccess` is constructed at
-  `packages/atif-duck/src/atif_duck/infrastructure/projections.py:74` and
-  annotates `:103`.
+  `packages/atif-duck/src/atif_duck/infrastructure/projections.py:69` and
+  annotates `:142`.
 - `is_compressed` is called at
   `packages/atif-duck/src/atif_duck/infrastructure/stored_artifacts.py:58`.
 - `SqlFragment` is the return type of `sql_literal` at

@@ -76,7 +76,7 @@ Derives the full example inventory from the static catalogs in a fixed order (co
 view, analytics views, then core macros, the VSS macro, analytics macros), so the CLI listing and the
 JSON array are deterministic across runs.
 
-`packages/atif-duck/src/atif_duck/domain/examples.py:199-260`
+`packages/atif-duck/src/atif_duck/domain/examples.py:202-263`
 
 ### build_plan
 
@@ -299,6 +299,7 @@ terminally or `ProviderUnavailable` retryably.
 ```py
 MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
     "ago": ("interval_text",),
+    "content_text": ("content",),
     "model_used": ("sid",),
     "cost_estimate": ("sid",),
     "tool_rank": ("last_n_days",),
@@ -314,7 +315,7 @@ MACRO_SIGNATURES: dict[str, tuple[str, ...]] = {
 Hand-maintained parameter names for every core macro, kept static because DuckDB's
 `duckdb_functions()` returns NULL `parameters` for table macros and cannot recover them at runtime.
 
-`packages/atif-duck/src/atif_duck/domain/catalog.py:350-361`
+`packages/atif-duck/src/atif_duck/domain/catalog.py:351-363`
 
 ### main
 
@@ -479,7 +480,7 @@ each session that has no current per-session parquet into TEMP tables, so the co
 per connection and a caller should reuse one connection per process. With `lake`, the raw relations
 are views over the lake's tables and nothing loads eagerly.
 
-`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2215-2314`
+`packages/atif-duck/src/atif_duck/infrastructure/registry.py:2221-2320`
 
 ### run_analyze
 

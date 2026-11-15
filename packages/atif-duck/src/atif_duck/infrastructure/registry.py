@@ -116,6 +116,7 @@ from atif_duck.domain.sql_literal import SqlFragment, sql_literal
 from atif_duck.infrastructure.columnar import ColumnarCoverage, session_has_columnar
 from atif_duck.infrastructure.projections import (
     CALL_COLUMNS,
+    CONTENT_TEXT_SQL,
     EMBEDDED,
     EVENT_COLUMNS,
     RESULT_COLUMNS,
@@ -2021,6 +2022,11 @@ def register_macros(
             """
         )
 
+        # ``content_text(content)`` -> a tool result's (or any ATIF
+        # content's) text, each image and audio part as its blob path. The
+        # ``steps.message`` column applies the same expression.
+        con.execute(f"CREATE OR REPLACE MACRO content_text(content) AS ({CONTENT_TEXT_SQL});")
+
         con.execute(
             """
             CREATE OR REPLACE MACRO model_used(sid) AS (
@@ -2185,7 +2191,7 @@ def register_macros(
 
         _semantic_search_part = "" if skip_vss else "semantic_search, "
         logger.debug(
-            "Registered macros: ago, model_used, cost_estimate, tool_rank, "
+            "Registered macros: ago, content_text, model_used, cost_estimate, tool_rank, "
             f"todo_velocity, subagent_fanout, {_semantic_search_part}skill_rank, "
             "skill_source_mix"
         )
