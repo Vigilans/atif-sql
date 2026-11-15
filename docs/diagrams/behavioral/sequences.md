@@ -36,9 +36,9 @@ Sources, in dispatch order:
 - scanner: `packages/atif-corpus/src/atif_corpus/infrastructure/scanner.py:224`.
 - build_plan: `packages/atif-corpus/src/atif_corpus/domain/sessions.py:187`.
 - RealConverter: `packages/atif-cli/src/atif_cli/converter_adapter.py:82`, calling
-  `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:235`.
+  `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:241`.
 - converter: our ported Claude Code converter,
-  `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1380`, reached from the
+  `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1459`, reached from the
   seam at `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:136`; the ATIF
   data classes and the validator the seam checks with (`:81`) are harbor's, vendored under
   `atif_converter.domain.atif`.

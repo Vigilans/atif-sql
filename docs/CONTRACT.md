@@ -92,7 +92,8 @@ proofs are out of scope for the workspace.
   The converter reads the agent-*.meta.json sidecars itself, in the same
   single pass as the transcripts (fingerprinted and re-checked the same way,
   and archived by that re-check), for subagent linkage; they carry no records
-  and stay out of the census. The watermark also watches every *.meta.json
+  and stay out of the census. Their isBuiltIn flag says which subagents gain
+  system steps (Converter, item 1). The watermark also watches every *.meta.json
   under the session dir, so a sidecar that changes on its own re-materializes
   the session; meta.source_files lists them too.
 - Nothing outside sessions/<id>/ belongs to a session: materialize never
@@ -265,7 +266,14 @@ proofs are out of scope for the workspace.
    embedded under the root, and each parent's final_metrics include its
    children's usage and cost. A side-file's copy of its parent's history is
    dropped. A root transcript with no step of its own converts with every
-   transcript as one stream.
+   transcript as one stream. The embedded trajectory of a subagent whose
+   agent-<id>.meta.json says `"isBuiltIn": false` gains `source: "system"`
+   steps from its prompt_snapshot attachments, which harbor 0.26.0 drops
+   (harbor #3333): the first snapshot's prompt (its `systemPrompt` sections
+   joined with blank lines) before the turn steps, and each later snapshot
+   whose prompt differs from the last one emitted at its place in the
+   transcript. Each names its snapshot record in extra.source_uuids. The root
+   and built-in subagents gain none.
 2. Post-conversion enrichment pass over the Trajectory (pure function):
    - step.extra["source_uuids"]: list of raw record uuids contributing to the step
      (join on assistant message.id / tool_use_id; user steps via content match order).
@@ -303,7 +311,7 @@ proofs are out of scope for the workspace.
      carries its own is_error / exit_code. A script whose attribution is
      ambiguous emits none, and the exec result keeps the outcome folded from
      its items. The harbor port emits none, so parity is unchanged.
-   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 18) is
+   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 19) is
      bumped with any change to the converter's output for the same input.
 3. Census + edges + session events are derived from RAW jsonl (never from the
    trajectory). session_events keeps, as rows and NOT as steps: Claude Code
@@ -312,7 +320,9 @@ proofs are out of scope for the workspace.
    and cost-state / mode / permission-mode records; Codex compacted records
    and event_msg turn_aborted / error / stream_error / context_compacted /
    warning. Payloads are bounded to 8 KB (payload_bytes keeps the original
-   size). loss_report.records_captured counts them, and
+   size). loss_report.records_captured counts them, records_converted counts
+   the user and assistant records plus each prompt_snapshot a system step was
+   converted from, and
    records_converted + records_captured + records_dropped = records_total.
    The last Claude Code cost-state's totalCostUSD lands in
    final_metrics.extra.reported_cost_usd; total_cost_usd is NULL when any

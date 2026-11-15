@@ -30,16 +30,17 @@ discover the transcript inside it, which is the shape this module builds.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import tempfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from atif_converter.domain.trajectory_tree import iter_steps
+from atif_converter.domain.trajectory_tree import iter_steps, iter_trajectories
 
 if TYPE_CHECKING:
     from atif_converter.domain.atif import Trajectory
@@ -66,6 +67,15 @@ _CONVERT_METHOD = "_convert_events_to_trajectory"
 #:   not link is linked from the call that reported it
 #:   (``atif_converter.domain.codex_nesting``), so the spawning result carries
 #:   a ``subagent_trajectory_ref`` only in ours.
+#: * The embedded trajectory of a Claude Code subagent whose sidecar says
+#:   ``"isBuiltIn": false`` carries ``source: "system"`` steps from its
+#:   ``prompt_snapshot`` attachments, which harbor 0.26.0's ``claude_code.py``
+#:   drops: ATIF RFC 0001 §II gives the system prompt that step, and harbor
+#:   #3333 (https://github.com/harbor-framework/harbor/issues/3333) reports
+#:   the gap. Every later step id moves, so :func:`parity_diffs` takes those
+#:   steps out of ours before the diff (:func:`_without_system_prompt_steps`)
+#:   for the agent ids its caller names, and every other step is still
+#:   compared with harbor's.
 DELIBERATE_DIVERGENCES: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"^\$(?:\.subagent_trajectories\[\d+\])*\.steps\[\d+\]\.observation\.results\[\d+\]"
@@ -252,6 +262,16 @@ def harbor_codex_session_trajectory(rollouts: list[Path]) -> dict[str, Any] | No
         logs_dir.mkdir()
         trajectory = getattr(Codex(logs_dir=logs_dir), _CONVERT_METHOD)(session_dir)
     return None if trajectory is None else trajectory.to_json_dict()
+
+
+def claude_code_system_prompt_agent_ids(session_jsonl: Path) -> frozenset[str]:
+    """The subagents of a session whose trajectories carry system steps: ``"isBuiltIn": false``."""
+    from atif_converter.domain.claude_code_conversion import custom_subagent_ids
+    from atif_converter.infrastructure.claude_code_converter import sidecars_by_agent_id
+    from atif_converter.infrastructure.raw_records import discover_sidecar_files, read_sidecar
+
+    sidecars = {path: read_sidecar(path) for path in discover_sidecar_files(session_jsonl)}
+    return custom_subagent_ids(sidecars_by_agent_id(sidecars))
 
 
 def golden_path(name: str) -> Path:
@@ -613,10 +633,51 @@ def _covered(path: str, forgiven: set[str]) -> bool:
     return True
 
 
-def parity_diffs(expected: dict[str, Any], ours: dict[str, Any]) -> list[str]:
+def _without_system_prompt_steps(
+    ours: dict[str, Any], agent_ids: Collection[str]
+) -> dict[str, Any]:
+    """``ours`` with the system steps of the embedded ``agent_ids`` trajectories taken out.
+
+    Only an embedded trajectory whose ``trajectory_id`` is one of
+    ``agent_ids`` loses its ``source: "system"`` steps, so a system step on
+    the root or on any other subagent still fails parity. Each later step's
+    ``step_id`` drops by the system steps before it and ``total_steps`` by
+    their count, so a wrong id or total still fails too.
+    """
+    if not agent_ids:
+        return ours
+    ours = copy.deepcopy(ours)
+    for node in iter_trajectories(ours):
+        if node is ours or node.get("trajectory_id") not in agent_ids:
+            continue
+        kept: list[dict[str, Any]] = []
+        removed = 0
+        for step in node.get("steps") or []:
+            if step.get("source") == "system":
+                removed += 1
+                continue
+            if isinstance(step.get("step_id"), int):
+                step["step_id"] -= removed
+            kept.append(step)
+        node["steps"] = kept
+        final_metrics = node.get("final_metrics") or {}
+        if removed and isinstance(final_metrics.get("total_steps"), int):
+            final_metrics["total_steps"] -= removed
+    return ours
+
+
+def parity_diffs(
+    expected: dict[str, Any],
+    ours: dict[str, Any],
+    *,
+    system_prompt_agent_ids: Collection[str] = (),
+) -> list[str]:
     """:func:`diff_paths` minus the documented deliberate divergences.
 
-    Seven kinds are forgiven. Every line a :data:`DELIBERATE_DIVERGENCES`
+    ``system_prompt_agent_ids`` names the Claude Code subagents whose system
+    steps are taken out of ours first (:func:`_without_system_prompt_steps`,
+    usually :func:`claude_code_system_prompt_agent_ids` of the session).
+    Then seven kinds are forgiven. Every line a :data:`DELIBERATE_DIVERGENCES`
     pattern matches, always; a Codex tool output's content where harbor saved
     an image or kept an audio block's JSON text and ours holds the converter's
     part or text for it, only when :func:`_media_content_matches` holds; a
@@ -632,6 +693,7 @@ def parity_diffs(expected: dict[str, Any], ours: dict[str, Any]) -> list[str]:
     model is one the policy prices differently. All but the patterns are
     judged per trajectory, for the root and each embedded trajectory alike.
     """
+    ours = _without_system_prompt_steps(ours, system_prompt_agent_ids)
     step_forgiven: set[str] = set()
     content_forgiven: set[str] = set()
     order_forgiven: list[str] = []

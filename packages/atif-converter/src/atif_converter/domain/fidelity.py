@@ -72,8 +72,10 @@ class FidelityGap(Enum):
     #: queue-operation / mode / last-prompt / summary records are silently dropped.
     #: The ones :mod:`atif_converter.domain.session_events` keeps (hooks, injected
     #: context, API errors, compaction boundaries, cost-state, mode changes) land
-    #: in ``session_events.jsonl`` and count as ``records_captured``; the gap is
-    #: observed only when something is left over after that.
+    #: in ``session_events.jsonl`` and count as ``records_captured``, and a
+    #: subagent's ``prompt_snapshot`` attachment a system step is converted from
+    #: counts as ``records_converted``; the gap is observed only when something
+    #: is left over after that.
     NON_MESSAGE_RECORDS_DROPPED = "non_message_records_dropped"
 
     #: (3) The parentUuid tree is flattened by timestamp sort, not chain-walked,

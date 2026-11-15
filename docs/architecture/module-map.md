@@ -277,18 +277,18 @@ forbids the import (`packages/atif-corpus/src/atif_corpus/domain/agents.py:25`).
 
 `convert_and_audit` returns a conversion result paired with a loss report: the trajectory plus an
 accounting of what upstream dropped
-(`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:235`). The conversion is
+(`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:241`). The conversion is
 ours: `convert_claude_code_records`, a port of harbor 0.26.0's Claude Code converter built on the
-public ATIF data classes (`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1380`),
+public ATIF data classes (`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1459`),
 reached through `convert_loaded_claude_code_session`, which takes the records the use case already
-read (`packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:91`), and
+read (`packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:119`), and
 validated with the vendored copy of harbor's `TrajectoryValidator`
 (`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:81`). The Codex path is
 the same shape one module over: `convert_codex_and_audit`
 (`packages/atif-converter/src/atif_converter/application/convert_codex.py:191`) over
 `convert_codex_records` (`packages/atif-converter/src/atif_converter/domain/codex_conversion.py:1003`),
 one rollout in and one trajectory out by construction. harbor's own private converters are the
-parity ORACLE, reached from the tests only (`packages/atif-converter/tests/harbor_oracle.py:182`, `:222`),
+parity ORACLE, reached from the tests only (`packages/atif-converter/tests/harbor_oracle.py:192`, `:232`),
 frozen to goldens and diffed against the live corpus. harbor is a dev dependency only: the ATIF
 data classes and validator the converters build on are vendored from harbor 0.26.0 in
 `packages/atif-converter/src/atif_converter/domain/atif/` and held to upstream by `packages/atif-converter/tests/test_vendored_atif.py`. The
@@ -327,13 +327,13 @@ table doesn't price is NULL. litellm is a dev dependency, for the identity test 
   imports it (`packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:5-7`).
 - `packages/atif-converter/src/atif_converter/infrastructure/raw_records.py`: the one raw
   reader the census, edges emitter, and enrichment share, with `mutated_files` as the race check
-  (`packages/atif-converter/src/atif_converter/infrastructure/raw_records.py:355`, `:421`).
+  (`packages/atif-converter/src/atif_converter/infrastructure/raw_records.py:363`, `:429`).
 - `packages/atif-converter/src/atif_converter/application/convert_and_audit.py`: the use
-  case (`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:235`) and its
-  refusal on any mid-window mutation (`:214`).
+  case (`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:241`) and its
+  refusal on any mid-window mutation (`:222`).
 - `packages/atif-converter/src/atif_converter/domain/fidelity.py`: `RecordType`
   (`packages/atif-converter/src/atif_converter/domain/fidelity.py:26`), `FidelityGap`
-  (`:55`), and the `LossReport` value object (`:116`).
+  (`:55`), and the `LossReport` value object (`:118`).
 - `packages/atif-converter/src/atif_converter/domain/edges.py`: one `edges.jsonl` line per
   raw record, key order fixed by the contract
   (`packages/atif-converter/src/atif_converter/domain/edges.py:22`).

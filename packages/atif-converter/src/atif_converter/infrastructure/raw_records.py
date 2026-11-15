@@ -251,28 +251,36 @@ def _read_and_fingerprint(path: Path) -> tuple[FileFingerprint, list[Any]]:
     return fingerprint, records
 
 
-def _read_sidecar(path: Path) -> tuple[FileFingerprint, Any]:
-    """One pass over a small JSON sidecar: stat, then hash and parse the same bytes.
+def _parse_sidecar(data: bytes, path: Path) -> Any:
+    """A sidecar's JSON, or ``None`` (logged at debug) when it is not valid UTF-8 JSON.
 
-    A sidecar that is not valid UTF-8 JSON parses to ``None`` (logged at debug)
-    rather than failing the session: it only ever adds linkage, and the
-    subagent's transcript converts without it.
+    An unreadable sidecar does not fail the session: it only adds linkage and
+    the subagent's type, and the subagent's transcript converts without it.
     """
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.debug("Skipping unreadable sidecar {}: {}", path, exc)
+        return None
+
+
+def read_sidecar(path: Path) -> Any:
+    """One sidecar's parsed JSON, as :func:`load_session` parses it, with no fingerprint."""
+    return _parse_sidecar(path.read_bytes(), path)
+
+
+def _read_sidecar(path: Path) -> tuple[FileFingerprint, Any]:
+    """One pass over a small JSON sidecar: stat, then hash and parse the same bytes."""
     stat = path.stat()
     data = path.read_bytes()
     digest = _new_digest()
     digest.update(data)
-    try:
-        value: Any = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        logger.debug("Skipping unreadable sidecar {}: {}", path, exc)
-        value = None
     fingerprint = FileFingerprint(
         mtime_ns=stat.st_mtime_ns,
         size=stat.st_size,
         content_hash=digest.digest(),
     )
-    return fingerprint, value
+    return fingerprint, _parse_sidecar(data, path)
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,7 +18,9 @@ sessions are usually live, and a transcript appended between harbor's read and
 ours reads as a divergence that neither converter caused (seen 2026-09-25:
 ``total_steps: harbor=7880 ours=7881``). The snapshot keeps the
 ``<slug>/<stem>.jsonl`` + ``<slug>/<stem>/`` layout both converters discover
-side-files by, and trims every file to its last complete line.
+side-files by, and trims every file to its last complete line. It copies the
+``agent-*.meta.json`` sidecars whole, since they say which subagents carry
+system steps.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from pathlib import Path
 
 import pytest
 from harbor_oracle import (
+    claude_code_system_prompt_agent_ids,
     harbor_claude_code_trajectory,
     harbor_codex_trajectory,
     parity_diffs,
@@ -54,6 +57,10 @@ def _snapshot(session: Path, into: Path) -> Path:
             _copy_complete_lines(
                 side_file, frozen.parent / session.stem / side_file.relative_to(side_dir)
             )
+        for sidecar in side_dir.rglob("agent-*.meta.json"):
+            copy = frozen.parent / session.stem / sidecar.relative_to(side_dir)
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            copy.write_bytes(sidecar.read_bytes())
     return frozen
 
 
@@ -119,7 +126,11 @@ class TestLiveParity:
                         f"harbor={'None' if theirs is None else 'Trajectory'} ours={'None' if ours_dict is None else 'Trajectory'}"
                     ]
                 continue
-            diffs = parity_diffs(theirs, ours_dict)
+            diffs = parity_diffs(
+                theirs,
+                ours_dict,
+                system_prompt_agent_ids=claude_code_system_prompt_agent_ids(frozen),
+            )
             if diffs:
                 divergences[session] = diffs
         assert not divergences, _report(divergences, len(sessions))

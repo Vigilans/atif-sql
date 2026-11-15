@@ -343,15 +343,15 @@ modules that declare no `__all__` at all, so they're module-internal helpers:
 
 - `packages/atif-converter/src/atif_converter/domain/atif/trajectory_validator.py:238`
   (`main`), in the vendored harbor tree.
-- `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:91`
+- `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:102`
   (`SCHEMA_VERSION`),
   `packages/atif-converter/src/atif_converter/domain/edges.py:60`
   (`edge_from_record`),
-  `packages/atif-converter/src/atif_converter/domain/fidelity.py:112`
+  `packages/atif-converter/src/atif_converter/domain/fidelity.py:114`
   (`AnyFidelityGap`), and
   `packages/atif-converter/src/atif_converter/domain/pricing.py:94`
   (`TABLE_FILENAME`).
-- `packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:46`
+- `packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:62`
   (`staged_side_name`) and
   `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:61`
   (`require_transcript_file`).
@@ -406,7 +406,7 @@ they're the only place an import with no consumer survives lint (an isolated ruf
 `__init__.py` files re-export names. atif-converter's vendored
 `domain/atif/__init__.py` re-exports harbor's model classes; the converter
 imports them through it
-(`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:76`),
+(`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:87`),
 and `packages/atif-converter/tests/test_vendored_atif.py:112` pins every name
 against upstream. atif-duck's three `__init__.py` files hold the rest, and
 **every one of those re-exports is consumed by nothing** in the repo. Each name

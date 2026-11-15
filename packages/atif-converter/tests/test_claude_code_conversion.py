@@ -17,17 +17,27 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from harbor_oracle import harbor_claude_code_trajectory, harbor_has_private_api, parity_diffs
+from harbor_oracle import (
+    claude_code_system_prompt_agent_ids,
+    harbor_claude_code_trajectory,
+    harbor_has_private_api,
+    parity_diffs,
+)
 from subagent_fixtures import PASTED_PNG, READ_PNG, blob_part, blob_placeholder
 
 from atif_converter.domain import claude_code_conversion, pricing
+from atif_converter.domain.atif import Trajectory
 from atif_converter.domain.blobs import BlobCollector, extract_claude_code_blobs
-from atif_converter.domain.claude_code_conversion import convert_claude_code_records
+from atif_converter.domain.claude_code_conversion import (
+    convert_claude_code_records,
+    custom_subagent_ids,
+)
 from atif_converter.infrastructure.claude_code_converter import (
     convert_claude_code_session,
     discover_side_files,
     read_session_records,
 )
+from atif_converter.infrastructure.harbor_adapter import validate_trajectory
 
 SID = "22222222-2222-2222-2222-222222222222"
 MODEL = "claude-test-1"
@@ -88,15 +98,28 @@ def _convert(
     tmp_path: Path,
     main: list[dict[str, Any]],
     side: dict[str, list[dict[str, Any]]] | None = None,
+    sidecars: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Convert via the pure function, then cross-check the file path against harbor."""
-    ours = convert_claude_code_records(main, side, fallback_session_id="-p")
+    """Convert via the pure function, then cross-check the file path against harbor.
+
+    ``sidecars`` maps an agent id to the JSON of its ``agent-<id>.meta.json``.
+    """
+    ours = convert_claude_code_records(
+        main,
+        side,
+        fallback_session_id="-p",
+        system_prompt_agent_ids=custom_subagent_ids(sidecars or {}),
+    )
     ours_dict = None if ours is None else ours.to_json_dict()
 
     main_path = tmp_path / "projects" / "-p" / f"{SID}.jsonl"
     _write_jsonl(main_path, main)
     for name, records in (side or {}).items():
         _write_jsonl(main_path.parent / SID / "subagents" / name, records)
+    for agent_id, sidecar in (sidecars or {}).items():
+        path = main_path.parent / SID / "subagents" / f"agent-{agent_id}.meta.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(sidecar), encoding="utf-8")
     via_files = convert_claude_code_session(main_path)
     via_files_dict = None if via_files is None else via_files.to_json_dict()
     assert via_files_dict == ours_dict, "file path and pure path disagree"
@@ -106,7 +129,8 @@ def _convert(
         if theirs is None or ours_dict is None:
             assert theirs is ours_dict
         else:
-            assert parity_diffs(theirs, ours_dict) == []
+            agent_ids = claude_code_system_prompt_agent_ids(main_path)
+            assert parity_diffs(theirs, ours_dict, system_prompt_agent_ids=agent_ids) == []
     return ours_dict
 
 
@@ -922,6 +946,210 @@ class TestSubagentNesting:
         assert out is not None
         assert [s["message"] for s in out["steps"]] == ["only"]
         assert "subagent_trajectories" not in out
+
+
+def _prompt_snapshot(uuid: str, ts: str, prompt: Any) -> dict[str, Any]:
+    """A Claude Code ``prompt_snapshot`` attachment recording ``prompt`` as ``systemPrompt``."""
+    return {
+        "type": "attachment",
+        "uuid": uuid,
+        "sessionId": SID,
+        "timestamp": f"2026-08-22T00:00:{ts}Z",
+        "isSidechain": False,
+        "attachment": {"type": "prompt_snapshot", "systemPrompt": prompt},
+    }
+
+
+#: The sidecar of a subagent of a user-defined agent type.
+_CUSTOM = {"agentType": "reviewer", "isBuiltIn": False}
+
+
+def _spawning_root(*extra: dict[str, Any]) -> list[dict[str, Any]]:
+    """A root transcript whose one ``Task`` call spawned subagent ``c1``."""
+    return [
+        _user("u1", "01", "go"),
+        _assistant("a1", "02", [_task("t1", "inspect")], msg_id="m1"),
+        *extra,
+        _task_result("r1", "30", "t1", "c1"),
+        _assistant("a2", "31", "all done", msg_id="m2"),
+    ]
+
+
+def _child(out: dict[str, Any] | None) -> dict[str, Any]:
+    assert out is not None
+    (child,) = out["subagent_trajectories"]
+    return child
+
+
+class TestSubagentSystemPrompt:
+    """A user-defined subagent's ``prompt_snapshot`` becomes a system step; harbor writes none."""
+
+    def test_the_first_snapshot_leads_the_child_trajectory(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            _spawning_root(),
+            {
+                "agent-c1.jsonl": _side(
+                    "c1",
+                    _prompt_snapshot("c1-s", "03", ["You review code.", "  ", "Be brief."]),
+                    _user("c1-u", "04", "inspect"),
+                    _assistant("c1-a", "05", "looked", msg_id="mc1"),
+                )
+            },
+            {"c1": _CUSTOM},
+        )
+        child = _child(out)
+        system, *turns = child["steps"]
+        assert system == {
+            "step_id": 1,
+            "timestamp": "2026-08-22T00:00:03Z",
+            "source": "system",
+            "message": "You review code.\n\nBe brief.",
+            "extra": {"is_sidechain": True, "agent_id": "c1", "source_uuids": ["c1-s"]},
+        }
+        assert [(s["step_id"], s["source"]) for s in turns] == [(2, "user"), (3, "agent")]
+        assert child["final_metrics"]["total_steps"] == 3
+        assert out is not None
+        assert all(step["source"] != "system" for step in out["steps"])
+        Trajectory.model_validate(out)
+        assert validate_trajectory(out) == ()
+
+    def test_a_snapshot_after_the_first_turn_still_leads(self, tmp_path: Path) -> None:
+        child = _child(
+            _convert(
+                tmp_path,
+                _spawning_root(),
+                {
+                    "agent-c1.jsonl": _side(
+                        "c1",
+                        _user("c1-u", "03", "inspect"),
+                        _prompt_snapshot("c1-s", "04", "You review code."),
+                        _assistant("c1-a", "05", "looked", msg_id="mc1"),
+                    )
+                },
+                {"c1": _CUSTOM},
+            )
+        )
+        assert [(s["source"], s["message"]) for s in child["steps"]] == [
+            ("system", "You review code."),
+            ("user", "inspect"),
+            ("agent", "looked"),
+        ]
+
+    def test_a_repeat_is_skipped_and_a_change_is_a_new_step(self, tmp_path: Path) -> None:
+        child = _child(
+            _convert(
+                tmp_path,
+                _spawning_root(),
+                {
+                    "agent-c1.jsonl": _side(
+                        "c1",
+                        _prompt_snapshot("c1-s1", "03", ["A"]),
+                        _user("c1-u1", "04", "inspect"),
+                        _prompt_snapshot("c1-s2", "05", ["A"]),
+                        _assistant("c1-a1", "06", "x", msg_id="mc1"),
+                        _prompt_snapshot("c1-s3", "07", ["B"]),
+                        _user("c1-u2", "08", "more"),
+                        _prompt_snapshot("c1-s4", "09", "B"),
+                        _assistant("c1-a2", "10", "y", msg_id="mc2"),
+                        _prompt_snapshot("c1-s5", "11", ["A"]),
+                    )
+                },
+                {"c1": _CUSTOM},
+            )
+        )
+        assert [
+            (s["step_id"], s["source"], s["message"], s["extra"].get("source_uuids"))
+            for s in child["steps"]
+        ] == [
+            (1, "system", "A", ["c1-s1"]),
+            (2, "user", "inspect", None),
+            (3, "agent", "x", None),
+            (4, "system", "B", ["c1-s3"]),
+            (5, "user", "more", None),
+            (6, "agent", "y", None),
+            (7, "system", "A", ["c1-s5"]),
+        ]
+        assert child["final_metrics"]["total_steps"] == 7
+
+    @pytest.mark.parametrize(
+        "prompt", [[], ["", "  "], "\n", None, [{"text": "not a section"}]], ids=repr
+    )
+    def test_a_blank_snapshot_is_no_step(self, tmp_path: Path, prompt: Any) -> None:
+        child = _child(
+            _convert(
+                tmp_path,
+                _spawning_root(),
+                {
+                    "agent-c1.jsonl": _side(
+                        "c1", _prompt_snapshot("c1-s", "03", prompt), _user("c1-u", "04", "inspect")
+                    )
+                },
+                {"c1": _CUSTOM},
+            )
+        )
+        assert [s["source"] for s in child["steps"]] == ["user"]
+
+    @pytest.mark.parametrize(
+        "sidecar",
+        [
+            {"agentType": "Explore", "isBuiltIn": True},
+            {"agentType": "reviewer"},
+            {"agentType": "reviewer", "isBuiltIn": "false"},
+            None,
+        ],
+        ids=["built-in", "no-flag", "flag-not-a-bool", "no-sidecar"],
+    )
+    def test_only_a_sidecar_saying_not_built_in_adds_one(
+        self, tmp_path: Path, sidecar: dict[str, Any] | None
+    ) -> None:
+        child = _child(
+            _convert(
+                tmp_path,
+                _spawning_root(),
+                {
+                    "agent-c1.jsonl": _side(
+                        "c1", _prompt_snapshot("c1-s", "03", ["A"]), _user("c1-u", "04", "inspect")
+                    )
+                },
+                None if sidecar is None else {"c1": sidecar},
+            )
+        )
+        assert [s["source"] for s in child["steps"]] == ["user"]
+
+    def test_the_root_gains_none(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            _spawning_root(_prompt_snapshot("root-s", "02", ["Main prompt."])),
+            {"agent-c1.jsonl": _side("c1", _user("c1-u", "04", "inspect"))},
+            {"c1": _CUSTOM},
+        )
+        assert out is not None
+        assert [s["source"] for s in out["steps"]] == ["user", "agent", "agent"]
+
+    def test_a_root_converted_as_one_stream_gains_none(self, tmp_path: Path) -> None:
+        out = _convert(
+            tmp_path,
+            [{"type": "summary", "uuid": "s", "summary": "t", "leafUuid": "x"}],
+            {
+                "agent-c1.jsonl": _side(
+                    "c1", _prompt_snapshot("c1-s", "03", ["A"]), _user("c1-u", "04", "only")
+                )
+            },
+            {"c1": _CUSTOM},
+        )
+        assert out is not None
+        assert [s["message"] for s in out["steps"]] == ["only"]
+
+    def test_custom_subagent_ids_reads_only_a_false_flag(self) -> None:
+        sidecars = {
+            "a": {"isBuiltIn": False},
+            "b": {"isBuiltIn": True},
+            "c": {},
+            "d": None,
+            "e": {"isBuiltIn": 0},
+        }
+        assert custom_subagent_ids(sidecars) == {"a"}
 
 
 class TestRecordFiltering:

@@ -124,3 +124,78 @@ class TestVerbatimResultForgiveness:
     )
     def test_anything_else_still_fails(self, harbor: str, ours: str) -> None:
         assert parity_diffs(_one_result(harbor), _one_result(ours)) != []
+
+
+def _step(step_id: int, source: str, message: str) -> dict[str, object]:
+    return {"step_id": step_id, "source": source, "message": message}
+
+
+def _tree(
+    root_steps: list[dict[str, object]],
+    child_steps: list[dict[str, object]],
+    child_total: int | None = None,
+) -> dict[str, object]:
+    return {
+        "steps": root_steps,
+        "final_metrics": {"total_steps": len(root_steps)},
+        "subagent_trajectories": [
+            {
+                "trajectory_id": "c1",
+                "steps": child_steps,
+                "final_metrics": {
+                    "total_steps": len(child_steps) if child_total is None else child_total
+                },
+            }
+        ],
+    }
+
+
+class TestSystemPromptForgiveness:
+    """A named subagent's system steps are taken out of ours, and nothing else is forgiven."""
+
+    HARBOR = _tree([_step(1, "user", "go")], [_step(1, "user", "inspect"), _step(2, "agent", "x")])
+
+    def test_a_named_subagent_s_system_steps_are_forgiven(self) -> None:
+        ours = _tree(
+            [_step(1, "user", "go")],
+            [
+                _step(1, "system", "A"),
+                _step(2, "user", "inspect"),
+                _step(3, "system", "B"),
+                _step(4, "agent", "x"),
+            ],
+        )
+        assert parity_diffs(self.HARBOR, ours) != []
+        assert parity_diffs(self.HARBOR, ours, system_prompt_agent_ids={"c1"}) == []
+
+    def test_another_subagent_s_system_step_still_fails(self) -> None:
+        ours = _tree(
+            [_step(1, "user", "go")],
+            [_step(1, "system", "A"), _step(2, "user", "inspect"), _step(3, "agent", "x")],
+        )
+        assert parity_diffs(self.HARBOR, ours, system_prompt_agent_ids={"c2"}) != []
+
+    def test_a_root_system_step_still_fails(self) -> None:
+        ours = _tree(
+            [_step(1, "system", "A"), _step(2, "user", "go")],
+            [_step(1, "user", "inspect"), _step(2, "agent", "x")],
+        )
+        ours["trajectory_id"] = "c1"
+        assert parity_diffs(self.HARBOR, ours, system_prompt_agent_ids={"c1"}) != []
+
+    def test_the_other_steps_are_still_compared(self) -> None:
+        wrong_turn = _tree(
+            [_step(1, "user", "go")],
+            [_step(1, "system", "A"), _step(2, "user", "inspect"), _step(3, "agent", "y")],
+        )
+        wrong_id = _tree(
+            [_step(1, "user", "go")],
+            [_step(1, "system", "A"), _step(3, "user", "inspect"), _step(4, "agent", "x")],
+        )
+        wrong_total = _tree(
+            [_step(1, "user", "go")],
+            [_step(1, "system", "A"), _step(2, "user", "inspect"), _step(3, "agent", "x")],
+            child_total=2,
+        )
+        for ours in (wrong_turn, wrong_id, wrong_total):
+            assert parity_diffs(self.HARBOR, ours, system_prompt_agent_ids={"c1"}) != []

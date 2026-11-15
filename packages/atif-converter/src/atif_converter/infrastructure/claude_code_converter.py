@@ -18,17 +18,33 @@ the same name the first in ``rglob`` order wins, which is what the adapter's
 ``if not staged.exists()`` guard did.
 
 No temp dir, no symlinks, no ``harbor.agents`` import. ``*.meta.json``
-sidecars are excluded by the ``*.jsonl`` suffix filter, as before.
+sidecars are excluded by the ``*.jsonl`` suffix filter, as before, and read
+apart from the transcripts: the subagents they mark ``"isBuiltIn": false``
+gain system steps from their prompt snapshots
+(:func:`~atif_converter.domain.claude_code_conversion.custom_subagent_ids`).
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from atif_converter.domain.atif import Trajectory
-from atif_converter.domain.claude_code_conversion import convert_claude_code_records
-from atif_converter.infrastructure.raw_records import LoadedSession, parse_jsonl_records
+from atif_converter.domain.claude_code_conversion import (
+    convert_claude_code_records,
+    custom_subagent_ids,
+)
+from atif_converter.infrastructure.raw_records import (
+    LoadedSession,
+    discover_sidecar_files,
+    parse_jsonl_records,
+    read_sidecar,
+)
+
+#: ``agent-<id>.meta.json``: the sidecar's name carries the subagent id.
+_SIDECAR_PREFIX = "agent-"
+_SIDECAR_SUFFIX = ".meta.json"
 
 
 def read_session_records(path: Path) -> list[dict[str, Any]]:
@@ -69,6 +85,18 @@ def discover_side_files(session_jsonl: Path, *, include_subagents: bool = True) 
     return side_files
 
 
+def sidecars_by_agent_id(sidecars: Mapping[Path, Any]) -> dict[str, Any]:
+    """Parsed ``agent-<id>.meta.json`` sidecars keyed by ``<id>``; first path wins."""
+    by_agent: dict[str, Any] = {}
+    for path, value in sidecars.items():
+        name = path.name
+        if name.startswith(_SIDECAR_PREFIX) and name.endswith(_SIDECAR_SUFFIX):
+            agent_id = name[len(_SIDECAR_PREFIX) : -len(_SIDECAR_SUFFIX)]
+            if agent_id:
+                by_agent.setdefault(agent_id, value)
+    return by_agent
+
+
 def loaded_side_records(
     loaded: LoadedSession, *, include_subagents: bool = True
 ) -> dict[str, list[Any]]:
@@ -103,6 +131,7 @@ def convert_loaded_claude_code_session(
         loaded.main_records,
         loaded_side_records(loaded, include_subagents=include_subagents),
         fallback_session_id=session_jsonl.parent.name or "-unknown",
+        system_prompt_agent_ids=custom_subagent_ids(sidecars_by_agent_id(loaded.sidecars)),
     )
 
 
@@ -116,7 +145,7 @@ def convert_claude_code_session(
     session_jsonl
         The main ``<session-id>.jsonl``. Read errors propagate as ``OSError``.
     include_subagents
-        Whether to read the ``<stem>/`` side-files; off, only the main
+        Whether to read the ``<stem>/`` side-files and sidecars; off, only the main
         transcript is converted.
 
     Returns
@@ -131,8 +160,14 @@ def convert_claude_code_session(
             session_jsonl, include_subagents=include_subagents
         ).items()
     }
+    sidecars = (
+        {path: read_sidecar(path) for path in discover_sidecar_files(session_jsonl)}
+        if include_subagents
+        else {}
+    )
     return convert_claude_code_records(
         main_records,
         side_records,
         fallback_session_id=session_jsonl.parent.name or "-unknown",
+        system_prompt_agent_ids=custom_subagent_ids(sidecars_by_agent_id(sidecars)),
     )

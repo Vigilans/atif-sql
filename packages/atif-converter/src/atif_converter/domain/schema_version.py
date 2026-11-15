@@ -163,12 +163,20 @@ History:
   below the corpus root, ``[file blobs/sha256/<ab>/<sha256>.<ext>
   <media_type>]`` (``image`` / ``audio`` for a type with no ATIF part). A Claude
   Code string tool result is kept verbatim, its outer whitespace included.
+* 19 — the embedded trajectory of a Claude Code subagent whose
+  ``agent-<id>.meta.json`` says ``"isBuiltIn": false`` gains ``source:
+  "system"`` steps from its ``prompt_snapshot`` attachments (harbor #3333):
+  the first snapshot's prompt, its sections joined with blank lines, before
+  the turn steps, and each later snapshot whose prompt differs from the last
+  one emitted at its place in the transcript. Each carries the snapshot's
+  uuid in ``extra.source_uuids`` and counts as ``records_converted``. The
+  root and built-in subagents gain none.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 18
+CONVERTER_SCHEMA_VERSION: Final = 19
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

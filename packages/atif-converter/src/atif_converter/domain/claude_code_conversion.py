@@ -39,6 +39,17 @@ it by the native agent id, the key ``toolUseResult.agentId``, the
 ``agent-<id>.meta.json`` sidecar and the steps' ``extra.agent_id`` already
 share, so a trajectory's identity does not depend on where its file sits.
 
+SYSTEM PROMPTS. harbor 0.26.0 emits only ``user`` and ``agent`` steps, and
+drops the ``prompt_snapshot`` attachments in which Claude Code records the
+system prompt as a list of sections (harbor #3333). The trajectory of a
+subagent whose sidecar says ``"isBuiltIn": false`` (a user-defined agent
+type, :func:`custom_subagent_ids`) gains ATIF's ``source: "system"`` step
+(RFC 0001 §II) from them: the first snapshot's prompt is a step before the
+turn steps, and a later snapshot is one more step, at its place in the
+transcript, only when its prompt differs from the one last emitted. Each
+such step names its snapshot record in ``extra.source_uuids``. The root and
+built-in subagents run Claude Code's own prompt and gain none.
+
 OMITTED: ``_parse_total_cost_from_stream_json``. It reads
 ``<logs_dir>/claude-code.txt``, the stdout tee of a harbor-driven run. Our
 adapter always handed harbor an EMPTY temp ``logs_dir``, so ``read_text``
@@ -65,7 +76,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -594,6 +605,8 @@ class _NormalizationState:
     #: text / reasoning / every tool_use from one LLM inference land on one
     #: ATIF step even if the session log splits them across events.
     turn_by_msgid: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The prompt of the last system step emitted, which a repeated snapshot skips.
+    last_system_prompt: str | None = None
 
 
 def _collect_events(
@@ -946,14 +959,65 @@ def _normalize_user_event(
             )
 
 
+def _prompt_snapshot_text(record: dict[str, Any]) -> str | None:
+    """The system prompt a ``prompt_snapshot`` attachment records, else ``None``.
+
+    ``attachment.systemPrompt`` is a list of prompt sections: each non-blank
+    string section is kept verbatim and the sections are joined with blank
+    lines. A string is the prompt itself. ``None`` for any other record, or a
+    snapshot whose prompt is blank.
+    """
+    if record.get("type") != "attachment":
+        return None
+    attachment = record.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "prompt_snapshot":
+        return None
+    prompt = attachment.get("systemPrompt")
+    if isinstance(prompt, list):
+        prompt = "\n\n".join(
+            section for section in prompt if isinstance(section, str) and section.strip()
+        )
+    return prompt if isinstance(prompt, str) and prompt.strip() else None
+
+
+def _normalize_prompt_snapshot(event: dict[str, Any], state: _NormalizationState) -> None:
+    """A system step for a snapshot whose prompt differs from the last one emitted.
+
+    Not harbor's (module docstring, SYSTEM PROMPTS). The first goes before
+    every turn step; a changed prompt goes at its place in the transcript.
+    """
+    prompt = _prompt_snapshot_text(event)
+    if prompt is None or prompt == state.last_system_prompt:
+        return
+    extra = _event_identity_extra(event)
+    uuid = event.get("uuid")
+    if isinstance(uuid, str) and uuid:
+        extra["source_uuids"] = [uuid]
+    system_event = {
+        "kind": "message",
+        "timestamp": event.get("timestamp"),
+        "role": "system",
+        "text": prompt,
+        "extra": extra,
+    }
+    if state.last_system_prompt is None:
+        state.normalized_events.insert(0, system_event)
+    else:
+        state.normalized_events.append(system_event)
+    state.last_system_prompt = prompt
+
+
 def _normalize_events(
-    events: list[dict[str, Any]], default_model_name: str | None
+    events: list[dict[str, Any]], default_model_name: str | None, *, system_prompts: bool = False
 ) -> list[dict[str, Any]]:
     state = _NormalizationState(
         default_model_name=default_model_name,
         last_usage_by_msg_id=_last_usage_by_msg_id(events),
     )
     for event in events:
+        if system_prompts and event.get("type") == "attachment":
+            _normalize_prompt_snapshot(event, state)
+            continue
         message = event.get("message")
         if not isinstance(message, dict):
             continue
@@ -1043,12 +1107,14 @@ def _convert_events(
     *,
     fallback_session_id: str,
     model_name: str | None,
+    system_prompts: bool = False,
 ) -> Trajectory | None:
     """Harbor 0.26.0's conversion of one event stream, from the point the files were read.
 
     harbor 0.26.0 reads the main transcript and every side-file into this one
     stream; :func:`convert_claude_code_records` hands it one transcript's own
-    events at a time instead.
+    events at a time instead. ``system_prompts`` makes the stream's
+    ``prompt_snapshot`` attachments system steps (module docstring).
 
     Returns ``None`` exactly when harbor returns ``None``: no records at all,
     or no record produced a step.
@@ -1085,7 +1151,7 @@ def _convert_events(
         or model_name
     )
 
-    normalized_events = _normalize_events(events, default_model_name)
+    normalized_events = _normalize_events(events, default_model_name, system_prompts=system_prompts)
 
     steps: list[Step] = []
     for norm_event in normalized_events:
@@ -1377,12 +1443,26 @@ def nest_claude_code_subagents(root: Trajectory, children: Mapping[str, Trajecto
     _roll_up(root)
 
 
+def custom_subagent_ids(sidecars: Mapping[str, Any]) -> frozenset[str]:
+    """The agent ids whose parsed ``agent-<id>.meta.json`` says ``"isBuiltIn": false``.
+
+    ``sidecars`` maps an agent id to its sidecar's JSON. A sidecar that is
+    missing, does not parse, or leaves ``isBuiltIn`` out names no agent here.
+    """
+    return frozenset(
+        agent_id
+        for agent_id, sidecar in sidecars.items()
+        if isinstance(sidecar, dict) and sidecar.get("isBuiltIn") is False
+    )
+
+
 def convert_claude_code_records(
     main_records: Sequence[dict[str, Any]],
     side_records: Mapping[str, Sequence[dict[str, Any]]] | None = None,
     *,
     fallback_session_id: str = "-unknown",
     model_name: str | None = None,
+    system_prompt_agent_ids: Collection[str] = (),
 ) -> Trajectory | None:
     """Convert one Claude Code session's parsed records into an ATIF trajectory.
 
@@ -1409,6 +1489,10 @@ def convert_claude_code_records(
     model_name
         harbor's ``self.model_name``: the run-configured model, used only when
         no record names one. Our adapter never set it.
+    system_prompt_agent_ids
+        The subagents whose embedded trajectory gains system steps from its
+        ``prompt_snapshot`` attachments (module docstring, SYSTEM PROMPTS),
+        usually :func:`custom_subagent_ids` of the session's sidecars.
 
     Returns
     -------
@@ -1438,7 +1522,11 @@ def convert_claude_code_records(
     children: dict[str, Trajectory] = {}
     for agent_id, events in transcripts.children.items():
         child = _convert_events(
-            events, None, fallback_session_id=fallback_session_id, model_name=model_name
+            events,
+            None,
+            fallback_session_id=fallback_session_id,
+            model_name=model_name,
+            system_prompts=agent_id in system_prompt_agent_ids,
         )
         if child is None:
             continue

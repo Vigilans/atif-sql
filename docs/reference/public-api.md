@@ -149,7 +149,7 @@ returning the enriched trajectory and a `LossReport` whose `records_dropped` is 
 the materialized trajectory is missing. With `archive`, the same verifying re-read also streams
 every source file into that writer.
 
-`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:235-315`
+`packages/atif-converter/src/atif_converter/application/convert_and_audit.py:241-323`
 
 ### CorpusLayout
 

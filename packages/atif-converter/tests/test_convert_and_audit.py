@@ -214,6 +214,141 @@ class TestEnrichedWiring:
         assert {"u-1", "a-1", "u-2", "att-1", "q-1", "a-2", "su-1", "sa-1", "wu-1"} == uuids
 
 
+_SYSTEM_PROMPT_SID = "33333333-3333-3333-3333-333333333333"
+
+
+def _record(uuid: str, ts: str, record_type: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "type": record_type,
+        "uuid": uuid,
+        "sessionId": _SYSTEM_PROMPT_SID,
+        "timestamp": f"2026-11-01T00:00:{ts}Z",
+        "isSidechain": False,
+        **fields,
+    }
+
+
+def _snapshot_record(uuid: str, ts: str, prompt: list[str], **fields: Any) -> dict[str, Any]:
+    attachment = {"type": "prompt_snapshot", "systemPrompt": prompt}
+    return _record(uuid, ts, "attachment", attachment=attachment, **fields)
+
+
+def _spawn(uuid: str, ts: str, msg_id: str, call_id: str, prompt: str) -> dict[str, Any]:
+    task = {"type": "tool_use", "id": call_id, "name": "Task", "input": {"prompt": prompt}}
+    message = {"id": msg_id, "role": "assistant", "content": [task]}
+    return _record(uuid, ts, "assistant", message=message)
+
+
+def _spawned(uuid: str, ts: str, call_id: str, agent_id: str) -> dict[str, Any]:
+    result = {"type": "tool_result", "tool_use_id": call_id, "content": "done"}
+    return _record(
+        uuid,
+        ts,
+        "user",
+        message={"role": "user", "content": [result]},
+        toolUseResult={"status": "completed", "agentId": agent_id},
+    )
+
+
+def _child_records(agent_id: str, *prompts: list[str]) -> list[dict[str, Any]]:
+    """``agent_id``'s transcript: a snapshot per prompt, then its prompt and its answer."""
+    side = {"isSidechain": True, "agentId": agent_id}
+    return [
+        *(
+            _snapshot_record(f"{agent_id}-s{index}", f"0{index + 3}", prompt, **side)
+            for index, prompt in enumerate(prompts)
+        ),
+        _record(
+            f"{agent_id}-u", "10", "user", message={"role": "user", "content": agent_id}, **side
+        ),
+        _record(
+            f"{agent_id}-a",
+            "11",
+            "assistant",
+            message={"id": f"m-{agent_id}", "role": "assistant", "content": "ok"},
+            **side,
+        ),
+    ]
+
+
+def _write_system_prompt_session(root: Path, custom_prompts: list[list[str]]) -> Path:
+    """A root that spawns custom subagent ``c1`` and built-in ``c2``; each writes snapshots."""
+    main = root / "-p" / f"{_SYSTEM_PROMPT_SID}.jsonl"
+    side = main.parent / _SYSTEM_PROMPT_SID / "subagents"
+    side.mkdir(parents=True)
+    records = {
+        main: [
+            _snapshot_record("root-s", "00", ["Main prompt."]),
+            _record("u1", "01", "user", message={"role": "user", "content": "go"}),
+            _spawn("a1", "02", "m1", "t1", "c1"),
+            _spawn("a2", "02", "m2", "t2", "c2"),
+            _spawned("r1", "20", "t1", "c1"),
+            _spawned("r2", "21", "t2", "c2"),
+        ],
+        side / "agent-c1.jsonl": _child_records("c1", *custom_prompts),
+        side / "agent-c2.jsonl": _child_records("c2", ["Built-in prompt."]),
+    }
+    for path, lines in records.items():
+        path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    (side / "agent-c1.meta.json").write_text(
+        json.dumps({"agentType": "reviewer", "isBuiltIn": False}), encoding="utf-8"
+    )
+    (side / "agent-c2.meta.json").write_text(
+        json.dumps({"agentType": "Explore", "isBuiltIn": True}), encoding="utf-8"
+    )
+    return main
+
+
+class TestSubagentSystemPrompt:
+    """A custom subagent's emitted snapshot is a converted record; skipped ones stay dropped."""
+
+    @staticmethod
+    def _children(result: ConversionResult) -> dict[str, dict[str, Any]]:
+        return {
+            child["trajectory_id"]: child for child in result.trajectory["subagent_trajectories"]
+        }
+
+    def test_the_emitted_snapshot_is_converted_and_attributed(self, tmp_path: Path) -> None:
+        result, report = convert_and_audit(_write_system_prompt_session(tmp_path, [["A", "B"]]))
+        assert result.is_valid, result.validation_errors
+        children = self._children(result)
+        system, *_turns = children["c1"]["steps"]
+        assert (system["step_id"], system["source"], system["message"]) == (1, "system", "A\n\nB")
+        assert system["extra"] == {
+            "is_sidechain": True,
+            "agent_id": "c1",
+            "source_uuids": ["c1-s0"],
+        }
+        assert [s["source"] for s in children["c2"]["steps"]] == ["user", "agent"]
+        assert all(s["source"] != "system" for s in result.trajectory["steps"])
+        # 9 user/assistant records in all, plus c1's snapshot; the root's and c2's are dropped.
+        assert report.record_counts[RecordType.ATTACHMENT] == 3
+        assert report.records_converted == 9 + 1
+        assert report.records_captured == 0
+        assert report.records_dropped == 2
+        assert report.records_total == 12
+        assert result.events_lines == ()
+        assert FidelityGap.UUID_NOT_PRESERVED not in report.gaps_observed
+        assert "enrichment_unattributed_steps" not in (children["c1"].get("extra") or _NO_EXTRA)
+
+    def test_a_skipped_repeat_stays_dropped(self, tmp_path: Path) -> None:
+        result, report = convert_and_audit(
+            _write_system_prompt_session(tmp_path, [["A"], ["A"], ["B"]])
+        )
+        c1 = self._children(result)["c1"]
+        assert [(s["source"], s["extra"].get("source_uuids")) for s in c1["steps"]][:3] == [
+            ("system", ["c1-s0"]),
+            ("system", ["c1-s2"]),
+            ("user", ["c1-u"]),
+        ]
+        assert report.records_converted == 9 + 2
+        assert report.records_dropped == 3  # the root's, c2's, and c1's repeat
+        assert (
+            report.records_converted + report.records_captured + report.records_dropped
+            == report.records_total
+        )
+
+
 class TestRecordTypeTaxonomy:
     @pytest.mark.parametrize(
         ("raw", "member"),

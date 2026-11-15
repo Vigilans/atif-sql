@@ -58,7 +58,10 @@ from atif_converter.domain.session_events import (
 )
 from atif_converter.domain.trajectory_tree import iter_steps, iter_trajectories
 from atif_converter.infrastructure.census import SessionCensus, census_from_snapshot
-from atif_converter.infrastructure.claude_code_converter import loaded_side_records
+from atif_converter.infrastructure.claude_code_converter import (
+    loaded_side_records,
+    sidecars_by_agent_id,
+)
 from atif_converter.infrastructure.harbor_adapter import (
     ConversionResult,
     convert_loaded_session,
@@ -66,15 +69,10 @@ from atif_converter.infrastructure.harbor_adapter import (
     validate_trajectory,
 )
 from atif_converter.infrastructure.raw_records import (
-    LoadedSession,
     SessionSnapshot,
     mutated_files,
 )
 from atif_converter.infrastructure.source_archive import SourceArchiveWriter
-
-#: ``agent-<id>.meta.json``: the sidecar's name carries the subagent id.
-_SIDECAR_PREFIX = "agent-"
-_SIDECAR_SUFFIX = ".meta.json"
 
 #: Gaps every conversion exhibits regardless of session content. The parent
 #: chain is flattened into a timestamp-sorted step list, and nothing after
@@ -95,6 +93,25 @@ def _attributed_uuids(trajectory: dict[str, Any]) -> set[str]:
         if isinstance(source_uuids, list):
             uuids.update(uuid for uuid in source_uuids if isinstance(uuid, str))
     return uuids
+
+
+def _converted_non_message_records(enriched: dict[str, Any], records: list[dict[str, Any]]) -> int:
+    """Records of a type the census does not convert that a step names anyway.
+
+    A subagent's ``prompt_snapshot`` attachment that became a system step:
+    its uuid is in that step's ``source_uuids``. Counted once per uuid.
+    """
+    convertible = {record_type.value for record_type in CONVERTIBLE_RECORD_TYPES}
+    attributed = _attributed_uuids(enriched)
+    return len(
+        {
+            uuid
+            for record in records
+            if record.get("type") not in convertible
+            and isinstance(uuid := record.get("uuid"), str)
+            and uuid in attributed
+        }
+    )
 
 
 def _has_cache_creation_usage(records: list[dict[str, Any]]) -> bool:
@@ -154,8 +171,9 @@ def _loss_report(
     captured: int,
     unrepaired: set[FidelityGap],
     inlined_sidechain: bool,
+    converted_non_message: int,
 ) -> LossReport:
-    converted = sum(
+    converted = converted_non_message + sum(
         count
         for record_type, count in census.record_counts.items()
         if record_type in CONVERTIBLE_RECORD_TYPES
@@ -199,18 +217,6 @@ def _stamp_reported_cost(enriched: dict[str, Any], reported: dict[str, Any]) -> 
     extra.update(reported)
 
 
-def _sidecars_by_agent_id(loaded: LoadedSession) -> dict[str, Any]:
-    """Parsed ``agent-<id>.meta.json`` sidecars keyed by ``<id>``; first path wins."""
-    by_agent: dict[str, Any] = {}
-    for path, value in loaded.sidecars.items():
-        name = path.name
-        if name.startswith(_SIDECAR_PREFIX) and name.endswith(_SIDECAR_SUFFIX):
-            agent_id = name[len(_SIDECAR_PREFIX) : -len(_SIDECAR_SUFFIX)]
-            if agent_id:
-                by_agent.setdefault(agent_id, value)
-    return by_agent
-
-
 def _refuse_if_mutated(
     snapshot: SessionSnapshot, archive: SourceArchiveWriter | None = None
 ) -> None:
@@ -250,10 +256,11 @@ def convert_and_audit(
     The census counts EVERY raw record, so ``LossReport.records_dropped``
     is an upper bound on what the materialized trajectory is missing.
 
-    Note: ``records_converted`` counts raw user/assistant RECORDS, not ATIF
-    steps. harbor legitimately bundles several assistant events (one
-    ``message.id``) into a single agent step, so the two numbers differ by
-    design.
+    Note: ``records_converted`` counts raw user/assistant RECORDS, plus each
+    ``prompt_snapshot`` attachment a subagent's system step was converted
+    from, not ATIF steps. harbor legitimately bundles several assistant
+    events (one ``message.id``) into a single agent step, so the two numbers
+    differ by design.
 
     With ``archive``, the verifying re-read also streams every source file
     into that writer (see
@@ -293,7 +300,7 @@ def convert_and_audit(
         result.trajectory, records, transcripts, copy_input=False
     )
     annotate_claude_code_trajectory(
-        enriched, records, blob_index, sidecars=_sidecars_by_agent_id(loaded)
+        enriched, records, blob_index, sidecars=sidecars_by_agent_id(loaded.sidecars)
     )
     _stamp_reported_cost(enriched, claude_reported_cost(pairs))
     report = _loss_report(
@@ -301,6 +308,7 @@ def convert_and_audit(
         captured=len(events),
         unrepaired=_unrepaired_gaps(enriched, records),
         inlined_sidechain=_has_inlined_sidechain(enriched),
+        converted_non_message=_converted_non_message_records(enriched, records),
     )
     del pairs, loaded, records, events
     _refuse_if_mutated(snapshot, archive)

@@ -127,7 +127,7 @@ whatever keys an `ArtifactProducer` returns into `meta.json`.
   `VARCHAR` (`packages/atif-duck/src/atif_duck/domain/raw_readers.py:105`); the CLI supplies it (`packages/atif-cli/src/atif_cli/app.py:1075`).
 
 **The hand-written contract and the manifests split the job.** Its CLI heading
-(`docs/CONTRACT.md:395`) names atif-cli the package that composes the others. The atif-cli
+(`docs/CONTRACT.md:405`) names atif-cli the package that composes the others. The atif-cli
 manifest declares five siblings (`packages/atif-cli/pyproject.toml:32-36`) and the CLI imports
 every one of them; atif-models reaches it through atif-analytics, which imports atif-models
 (`packages/atif-analytics/pyproject.toml:23`) as the import-linter contracts permit.
@@ -466,7 +466,7 @@ EDGE_FIELDS: tuple[str, ...] = (
   (`packages/atif-duck/src/atif_duck/infrastructure/registry.py:70-72`, fidelity gap 7 `UUID_NOT_PRESERVED`), which is why the `messages` view is
   reconstructed from edges rather than from steps.
 - **`records_total` in the loss report equals this file's line count.** Stated at
-  `packages/atif-converter/src/atif_converter/domain/fidelity.py:125-129` and asserted by
+  `packages/atif-converter/src/atif_converter/domain/fidelity.py:127-131` and asserted by
   `packages/atif-converter/tests/test_snapshot_and_drift.py:133`. Both derive from the same
   raw census, so a consumer may cross-check one against the other.
 
@@ -803,13 +803,13 @@ the same commit, which is what both docstrings instruct.
 
 **Consumers:**
 
-- `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1380`: `convert_claude_code_records`, our Claude Code converter, a parity port of harbor
+- `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1459`: `convert_claude_code_records`, our Claude Code converter, a parity port of harbor
   0.26.0's, building `Trajectory` / `Step` / `ToolCall` / `Metrics` from the public models.
 - `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:1003`: `convert_codex_records`, the Codex counterpart.
 - `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py`: `validate_trajectory`, the only call into the vendored validator.
 - `packages/atif-converter/tests/test_dev_only_imports_guard.py`: the `ast` guard that keeps `harbor` and `litellm` out of every `src/` tree.
 - `packages/atif-converter/tests/test_vendored_atif.py`: the conformance test (the vendored files equal the installed harbor's, and both agree on the goldens).
-- `packages/atif-converter/tests/harbor_oracle.py:182` and `:222`: the parity ORACLE (harbor's private converters, reached from the tests
+- `packages/atif-converter/tests/harbor_oracle.py:192` and `:232`: the parity ORACLE (harbor's private converters, reached from the tests
   only), with frozen goldens and a live-corpus diff.
 
 **Shape:**
@@ -822,15 +822,15 @@ DEV_ONLY: frozenset[str] = frozenset({"harbor", "litellm"})
 **Assumptions consumers make:**
 
 - **The data classes are the contract, and they are versioned by ATIF.** Our converters write
-  `schema_version` explicitly (`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1108`, `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:1093`), so a harbor release that adds a newer
+  `schema_version` explicitly (`packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:1174`, `packages/atif-converter/src/atif_converter/domain/codex_conversion.py:1093`), so a harbor release that adds a newer
   default still validates what we emit; a release that changes a field fails the drift tests.
 - **Parity is measured, not assumed.** `test_harbor_oracle.py` asserts the live oracle equals the
   frozen goldens, and `test_parity_*` asserts our output equals both. A harbor bump that changes
-  conversion behavior surfaces as a named JSON-path diff (`packages/atif-converter/tests/harbor_oracle.py:273`), which is a decision to
+  conversion behavior surfaces as a named JSON-path diff (`packages/atif-converter/tests/harbor_oracle.py:293`), which is a decision to
   record in the fidelity policy before any re-freeze.
 - **Side-file discovery is ours.** Every `*.jsonl` under a session's side directory is read,
   workflow-nested ones included, with nested path parts joined by `__`
-  (`packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:56`); harbor's
+  (`packages/atif-converter/src/atif_converter/infrastructure/claude_code_converter.py:72`); harbor's
   own discovery cannot see those files, which is why the oracle stages them flat the same way.
 - **harbor ships no `py.typed`**, so every import from it carries an `import-untyped` ignore.
 
@@ -908,7 +908,7 @@ rather than skipping a file that no longer contains the current version; the gua
 ## Other contracts
 
 - **`LossReport.to_json()`**: producer
-  `packages/atif-converter/src/atif_converter/domain/fidelity.py:149`, whose docstring calls the
+  `packages/atif-converter/src/atif_converter/domain/fidelity.py:151`, whose docstring calls the
   keys wire contract; consumed by `packages/atif-duck/src/atif_duck/domain/raw_readers.py:77-90`
   as `LOSS_REPORT_COLUMNS` and by `packages/atif-cli/src/atif_cli/converter_adapter.py:145`.
   `record_counts` and `gaps_observed` stay `JSON` because they are an enum-keyed dict and a sorted

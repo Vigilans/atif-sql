@@ -68,10 +68,10 @@ On a pipe the envelope is the last line on stderr, in this shape:
 | A changed session never materializes | Quiescence: the newest source mtime is younger than `quiesce_seconds` (default 300) | `atif-sql status` reports it under `live`; `--force` overrides staleness but never quiescence | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:88`, `packages/atif-corpus/src/atif_corpus/domain/sessions.py:236-237`, `packages/atif-corpus/src/atif_corpus/domain/sessions.py:238-239` |
 | A session stays `live` forever and warns about a FUTURE mtime | The writing host's clock is ahead, so the age is negative and never meets the threshold | Fix the clock on the host writing the transcript | `packages/atif-corpus/src/atif_corpus/domain/sessions.py:111-117` |
 | `materialize` re-converts every quiescent session after `watermark.json` is damaged | An unreadable, wrong-shaped, or non-numeric watermark degrades to empty with a WARNING, so every session reads as stale | Grep `treating corpus as unmaterialized`; the pass writes a fresh watermark, and the cost is one full re-materialization | `packages/atif-corpus/src/atif_corpus/application/materialize.py:378-412` |
-| Every session fails conversion at once, on the same `ConversionError` | The converter is a port of harbor 0.26.0's, so a systematic failure is a bug in the port or a transcript shape it never saw | Run the parity oracle: `ATIF_PARITY_LIMIT=0 uv run pytest packages/atif-converter/tests/test_parity_live.py`, and read the diff paths | `packages/atif-converter/tests/harbor_oracle.py:616` |
-| One session fails with `N source file(s) changed while converting …` | The session is still being written; the snapshot re-check refused to publish inconsistent artifacts | Retry once the session goes quiet; this is self-clearing | `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:214-233`, `packages/atif-converter/src/atif_converter/domain/errors.py:57` |
+| Every session fails conversion at once, on the same `ConversionError` | The converter is a port of harbor 0.26.0's, so a systematic failure is a bug in the port or a transcript shape it never saw | Run the parity oracle: `ATIF_PARITY_LIMIT=0 uv run pytest packages/atif-converter/tests/test_parity_live.py`, and read the diff paths | `packages/atif-converter/tests/harbor_oracle.py:669` |
+| One session fails with `N source file(s) changed while converting …` | The session is still being written; the snapshot re-check refused to publish inconsistent artifacts | Retry once the session goes quiet; this is self-clearing | `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220-239`, `packages/atif-converter/src/atif_converter/domain/errors.py:57` |
 | `convert` prints a trajectory and then exits 65 | The enriched trajectory failed the `TrajectoryValidator` vendored from harbor | Read `validation_errors` in the JSON it already printed | `packages/atif-cli/src/atif_cli/app.py:794-806`, `packages/atif-converter/src/atif_converter/infrastructure/harbor_adapter.py:81` |
-| `loss_report.json` shows `records_dropped > 0` | Fidelity gap 2: only user and assistant records become steps, and a record `session_events.jsonl` doesn't keep is dropped | Check `gaps_observed` against the named gaps; these are documented losses, not defects | `packages/atif-converter/src/atif_converter/domain/fidelity.py:71-77` |
+| `loss_report.json` shows `records_dropped > 0` | Fidelity gap 2: only user and assistant records become steps, and a record `session_events.jsonl` doesn't keep is dropped | Check `gaps_observed` against the named gaps; these are documented losses, not defects | `packages/atif-converter/src/atif_converter/domain/fidelity.py:71-79` |
 | `analyze` summary carries `budget_exhausted: true` and a stage `{"skipped": "budget_exhausted", "consecutive_skips": N}` | The dollar ceiling was crossed against running actual usage | Read `llm_spent_usd` in the same summary; raise `--max-cost-usd` or wait for the next run | `packages/atif-analytics/src/atif_analytics/application/analyze.py:112-128`, `packages/atif-analytics/src/atif_analytics/application/analyze.py:150-152` |
 | An LLM stage skips the same sessions every run, forever | The retry queue is exhausted at 5 attempts; `attempts >= 5` with `completed_at IS NULL` is permanent and nothing resets it | `sqlite3 <corpus_root>/analytics/state.db 'SELECT * FROM retry_queue'` (note the pipeline is `user_friction`, never `friction`) | `packages/atif-analytics/src/atif_analytics/infrastructure/sqlite_state/retry_queue.py:199-204`, `packages/atif-analytics/src/atif_analytics/infrastructure/sqlite_state/checkpointer.py:37-42` |
 | An LLM run stalls for minutes with no output | Bedrock throttling under tenacity, in either adapter: 10 attempts, exponential 2 s to 60 s | The per-backoff WARNING names the attempt number and the sleep | `packages/atif-models/src/atif_models/infrastructure/openai_bedrock.py:183-189`, `packages/atif-models/src/atif_models/infrastructure/anthropic_bedrock.py:221-227`, `packages/atif-models/src/atif_models/infrastructure/bedrock_common.py:76-85` |
@@ -119,7 +119,7 @@ shell-side refresh log.
 | Embed terminal marker | one file per corpus beside the refresh log; three lines: store path, store mtime, reason | the reason string, parsed out of the exit-78 envelope | `scripts/atif-sql-refresh.sh:489-494` |
 | Analytics durable state | `<corpus_root>/analytics/state.db`, sqlite in WAL mode, no read command | `retry_queue`, `budget_skips`, `session_checkpoint` | `packages/atif-analytics/src/atif_analytics/domain/layout.py:81-83`, `packages/atif-analytics/src/atif_analytics/infrastructure/sqlite_state/checkpointer.py:44-62` |
 | Analyze summary | stdout JSON | `budget_exhausted`, `llm_spent_usd`, `consecutive_skips` | `packages/atif-analytics/src/atif_analytics/application/analyze.py:127`, `packages/atif-analytics/src/atif_analytics/application/analyze.py:150-152` |
-| Per-session loss accounting | `loss_report.json` inside each corpus session dir | `gaps_observed`, `records_dropped`, `records_total` | `packages/atif-converter/src/atif_converter/domain/fidelity.py:116-139` |
+| Per-session loss accounting | `loss_report.json` inside each corpus session dir | `gaps_observed`, `records_dropped`, `records_total` | `packages/atif-converter/src/atif_converter/domain/fidelity.py:118-141` |
 
 These properties of this surface change how you read it.
 
@@ -239,7 +239,7 @@ Cheapest first. Steps 1 through 6 are free and read-only; step 10 spends money.
   parity test names diverging JSON paths. Mitigation: each diff is a decision to
   follow upstream or not, and a decision not to follow is named in the oracle's
   `DELIBERATE_DIVERGENCES`; re-freeze the goldens with `ATIF_FREEZE_GOLDENS=1`
-  only after it (`packages/atif-converter/tests/test_harbor_oracle.py:32`). `packages/atif-converter/tests/harbor_oracle.py:68`
+  only after it (`packages/atif-converter/tests/test_harbor_oracle.py:32`). `packages/atif-converter/tests/harbor_oracle.py:69`
 - **`SourceMutatedDuringConversion`:** a session that resumes writing
   mid-conversion would yield a census, a trajectory, and an `edges.jsonl` each
   describing different bytes. Signal: one session failing with a
@@ -248,7 +248,7 @@ Cheapest first. Steps 1 through 6 are free and read-only; step 10 spends money.
   fingerprints are re-checked (stat and digest) once the artifacts are built,
   refusing rather than publishing; retrying once the session goes quiet succeeds.
   `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:11-24`,
-  `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:214-233`
+  `packages/atif-converter/src/atif_converter/application/convert_and_audit.py:220-239`
 - **`SuspiciousEmptyScanError`:** a wrong `source_root` (a typo, an unmounted
   disk, a stale env var) makes the scan empty, and the pass would then
   mark the entire corpus source-removed. Signal: exit 78 with kind `suspicious_scan`,
@@ -292,7 +292,7 @@ Cheapest first. Steps 1 through 6 are free and read-only; step 10 spends money.
   `loss_report.json`. Mitigation: none is intended; the converter's job is
   honest loss accounting, and unit tests pin each gap so a harbor bump that
   changes behavior trips the suite.
-  `packages/atif-converter/src/atif_converter/domain/fidelity.py:55-101`
+  `packages/atif-converter/src/atif_converter/domain/fidelity.py:55-103`
 - **Budget overshoot and the starved stage:** the cost ceiling stops dispatch
   at an 8-unit batch boundary rather than capping spend exactly, and a stage
   the ceiling keeps cutting off starves run after run. Signal:
