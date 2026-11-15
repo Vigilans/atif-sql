@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""Every Codex tool output image the converter names by placeholder is a stored blob.
+"""Every Codex tool output image the converter names by an image part is a stored blob.
 
 The converter's harbor 0.24.0 port turns an inline image in a tool output list
-into ``[image sha256:<hex> <media> <n> bytes]``, and the pre-pass
+into an ATIF image part whose ``source.path`` is
+``../../blobs/sha256/<ab>/<sha256>.<ext>``, and the pre-pass
 (:func:`~atif_converter.domain.blobs.extract_codex_blobs`) is what hands those
 bytes to the corpus blob store. Both read the image by
 :func:`~atif_converter.domain.blobs.codex_tool_image_ref`, so these tests hold
-the two to one rule: whatever placeholder the port would write, the collector
-holds the bytes it names, the index maps them to the output's ``call_id``, and
+the two to one rule: whatever part the port would write, the collector holds
+the bytes it names, the index maps them to the output's ``call_id``, and
 whatever the port would call ``[image omitted]`` stays in the record untouched.
 """
 
@@ -24,14 +25,13 @@ from typing import Any
 
 import pytest
 from codex_fixtures import codex_rollout_records, write_codex_rollout
-from subagent_fixtures import PASTED_PNG, READ_PNG
+from subagent_fixtures import PASTED_PNG, READ_PNG, blob_part
 
 from atif_converter.application.convert_codex import convert_codex_and_audit
 from atif_converter.domain.blobs import BlobCollector, BlobIndex, extract_codex_blobs
 from atif_converter.domain.codex_conversion import convert_codex_records
 
 _TS = "2026-09-11T17:27:02.{:03d}Z"
-_PLACEHOLDER = re.compile(r"\[image sha256:(?P<sha>[0-9a-f]{64}) (?P<media>\S+) (?P<n>\d+) bytes\]")
 
 _READ_B64 = base64.b64encode(READ_PNG).decode()
 _PASTED_B64 = base64.b64encode(PASTED_PNG).decode()
@@ -39,10 +39,6 @@ _PASTED_B64 = base64.b64encode(PASTED_PNG).decode()
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def _placeholder(data: bytes, media_type: str = "image/png") -> str:
-    return f"[image sha256:{_sha(data)} {media_type} {len(data)} bytes]"
 
 
 def _item(payload: dict[str, Any], n: int) -> dict[str, Any]:
@@ -73,7 +69,7 @@ class TestMcpImageInAToolOutput:
         output = records[0]["payload"]["output"]
         assert output == [
             {"type": "text", "text": "shot:"},
-            {"type": "input_text", "text": _placeholder(READ_PNG)},
+            blob_part(READ_PNG),
         ]
         assert [(blob.ref.sha256, blob.data) for blob in collector.blobs] == [
             (_sha(READ_PNG), READ_PNG)
@@ -104,9 +100,7 @@ class TestMcpImageInAToolOutput:
     ) -> None:
         records = [_output("function_call_output", "c1", [block])]
         collector, index = _extract(records)
-        assert records[0]["payload"]["output"] == [
-            {"type": "input_text", "text": _placeholder(READ_PNG, media_type)}
-        ]
+        assert records[0]["payload"]["output"] == [blob_part(READ_PNG, media_type)]
         assert [blob.ref.media_type for blob in collector.blobs] == [media_type]
         assert [ref.sha256 for ref in index.by_tool_call_id["c1"]] == [_sha(READ_PNG)]
 
@@ -175,9 +169,7 @@ class TestInputImageInAToolOutput:
             _output("function_call_output", "c1", [{"type": "input_image", "image_url": url}])
         ]
         collector, index = _extract(records)
-        assert records[0]["payload"]["output"] == [
-            {"type": "input_text", "text": _placeholder(READ_PNG)}
-        ]
+        assert records[0]["payload"]["output"] == [blob_part(READ_PNG)]
         assert [blob.data for blob in collector.blobs] == [READ_PNG]
         assert [ref.sha256 for ref in index.by_tool_call_id["c1"]] == [_sha(READ_PNG)]
 
@@ -233,21 +225,23 @@ _MIXED_OUTPUT: list[dict[str, Any]] = [
 
 
 class TestEndToEnd:
-    def test_every_placeholder_names_a_stored_blob(self, tmp_path: Path) -> None:
-        """The production use case: each placeholder's sha256 is a blob the result carries."""
+    def test_every_image_part_names_a_stored_blob(self, tmp_path: Path) -> None:
+        """The production use case: each image part's path names a blob the result carries."""
         rollout = write_codex_rollout(tmp_path / "sessions", _tool_call_records(_MIXED_OUTPUT))
         result, _ = convert_codex_and_audit(rollout)
         content = _result(result.trajectory, "call_mcp")["content"]
-        assert content == "\n".join(
-            [
-                "two shots:",
-                _placeholder(READ_PNG),
-                _placeholder(PASTED_PNG, "image/jpeg"),
-                "[image omitted]",
-            ]
-        )
+        assert content == [
+            {"type": "text", "text": "two shots:"},
+            blob_part(READ_PNG),
+            blob_part(PASTED_PNG, "image/jpeg"),
+            {"type": "text", "text": "[image omitted]"},
+        ]
         stored = {blob.ref.sha256: blob for blob in result.blobs}
-        named = [match.group("sha") for match in _PLACEHOLDER.finditer(content)]
+        named = [
+            re.findall(r"[0-9a-f]{64}", part["source"]["path"])[0]
+            for part in content
+            if part["type"] == "image"
+        ]
         assert named == [_sha(READ_PNG), _sha(PASTED_PNG)]
         for sha in named:
             assert hashlib.sha256(stored[sha].data).hexdigest() == sha
@@ -262,7 +256,7 @@ class TestEndToEnd:
         assert result.validation_errors == ()
 
     def test_the_pre_pass_changes_no_converted_byte(self) -> None:
-        """Raw and pre-passed records convert to the same trajectory: placeholders are identical."""
+        """Raw and pre-passed records convert to the same trajectory: image parts are identical."""
         records = _tool_call_records(copy.deepcopy(_MIXED_OUTPUT))
         raw = convert_codex_records(copy.deepcopy(records), fallback_session_id="s")
         lifted = copy.deepcopy(records)
@@ -274,13 +268,13 @@ class TestEndToEnd:
         assert raw.to_json_dict() == pre_passed.to_json_dict()
 
     def test_a_list_the_port_dumps_as_json_keeps_no_base64(self, tmp_path: Path) -> None:
-        """One unknown block makes the port dump the list: the dump holds the placeholder item."""
+        """One unknown block makes the port dump the list: the dump holds the image part."""
         output = [_mcp(_PASTED_B64), {"type": "mystery"}]
         rollout = write_codex_rollout(tmp_path / "sessions", _tool_call_records(output))
         result, _ = convert_codex_and_audit(rollout)
         content = _result(result.trajectory, "call_mcp")["content"]
         assert json.loads(content) == [
-            {"type": "input_text", "text": _placeholder(PASTED_PNG)},
+            blob_part(PASTED_PNG),
             {"type": "mystery"},
         ]
         assert [blob.data for blob in result.blobs] == [PASTED_PNG]
@@ -291,10 +285,6 @@ _WAV = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00"
 _MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00\xff\xfb\x90\x00"
 _WAV_B64 = base64.b64encode(_WAV).decode()
 _MP3_B64 = base64.b64encode(_MP3).decode()
-
-
-def _audio_placeholder(data: bytes, media_type: str = "audio/wav") -> str:
-    return f"[audio sha256:{_sha(data)} {media_type} {len(data)} bytes]"
 
 
 def _audio_url(data: str = _WAV_B64, media_type: str = "audio/wav") -> dict[str, Any]:
@@ -325,7 +315,7 @@ class TestAudioInMessageContent:
         index = extract_codex_blobs(records, collector, record_keys=["u1"])
         assert records[0]["payload"]["content"] == [
             opening,
-            {"type": "input_text", "text": _audio_placeholder(_WAV)},
+            blob_part(_WAV, "audio/wav"),
             closing,
         ]
         (blob,) = collector.blobs
@@ -338,9 +328,7 @@ class TestAudioInMessageContent:
     def test_the_openai_form_is_lifted_too(self) -> None:
         records = [_user_message([_openai_audio(_MP3_B64, "mp3")])]
         collector, _ = _extract(records)
-        assert records[0]["payload"]["content"] == [
-            {"type": "input_text", "text": _audio_placeholder(_MP3, "audio/mpeg")}
-        ]
+        assert records[0]["payload"]["content"] == [blob_part(_MP3, "audio/mpeg")]
         assert [blob.ref.extension for blob in collector.blobs] == ["mp3"]
 
     @pytest.mark.parametrize(
@@ -376,7 +364,7 @@ class TestAudioInAToolOutput:
         collector, index = _extract(records)
         assert records[0]["payload"]["output"] == [
             {"type": "input_text", "text": "heard:"},
-            {"type": "input_text", "text": _audio_placeholder(_WAV)},
+            blob_part(_WAV, "audio/wav"),
         ]
         assert [(blob.ref.sha256, blob.data) for blob in collector.blobs] == [(_sha(_WAV), _WAV)]
         assert [ref.sha256 for ref in index.by_tool_call_id["c1"]] == [_sha(_WAV)]
@@ -433,9 +421,7 @@ class TestAudioInAToolOutput:
     ) -> None:
         records = [_output("function_call_output", "c1", [block])]
         collector, _ = _extract(records)
-        assert records[0]["payload"]["output"] == [
-            {"type": "input_text", "text": _audio_placeholder(_WAV, media_type)}
-        ]
+        assert records[0]["payload"]["output"] == [blob_part(_WAV, media_type)]
         assert [(blob.ref.media_type, blob.ref.extension) for blob in collector.blobs] == [
             (media_type, extension)
         ]
@@ -497,7 +483,7 @@ class TestAudioInAToolOutput:
         ]
         collector, index = _extract(records)
         content = records[0]["payload"]["item"]["result"]["content"]
-        assert content == [{"type": "input_text", "text": _audio_placeholder(_MP3, "audio/mpeg")}]
+        assert content == [blob_part(_MP3, "audio/mpeg")]
         assert [blob.data for blob in collector.blobs] == [_MP3]
         assert [ref.sha256 for ref in index.by_tool_call_id["exec-m1"]] == [_sha(_MP3)]
 
@@ -524,16 +510,22 @@ def _audio_records() -> list[dict[str, Any]]:
 
 
 class TestAudioEndToEnd:
-    def test_every_audio_placeholder_names_a_stored_blob(self, tmp_path: Path) -> None:
+    def test_every_audio_part_names_a_stored_blob(self, tmp_path: Path) -> None:
         rollout = write_codex_rollout(tmp_path / "sessions", _audio_records())
         result, _ = convert_codex_and_audit(rollout)
         tool_result = _result(result.trajectory, "call_mcp")
-        assert tool_result["content"] == "\n".join(
-            ["recorded:", _audio_placeholder(_MP3, "audio/mpeg"), "[audio: file-9]"]
-        )
+        assert tool_result["content"] == [
+            {"type": "text", "text": "recorded:"},
+            blob_part(_MP3, "audio/mpeg"),
+            {"type": "text", "text": "[audio: file-9]"},
+        ]
         assert "images" not in tool_result.get("extra", {})
         messages = [step["message"] for step in result.trajectory["steps"]]
-        spoken = f"transcribe {_audio_placeholder(_WAV)}[audio: https://example.com/b.wav]"
+        spoken = [
+            {"type": "text", "text": "transcribe "},
+            blob_part(_WAV, "audio/wav"),
+            {"type": "text", "text": "[audio: https://example.com/b.wav]"},
+        ]
         assert spoken in messages
         spoken_step = result.trajectory["steps"][messages.index(spoken)]
         assert spoken_step["extra"]["source_uuids"]

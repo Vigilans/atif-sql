@@ -84,10 +84,10 @@ class ConversionOutput:
       ``archive_dir`` it was handed (empty when it was handed none, or when
       the adapter does not archive). Every entry must exist on disk as
       ``<archive_dir>/<relative_path>.zst``; the use case checks that.
-    * ``blobs`` — the inline attachments the converter replaced with a
-      ``[image sha256:<hash> ...]`` placeholder, one per distinct hash. The
-      writer stores each under ``<corpus_root>/blobs/`` BEFORE it publishes
-      the session that references it.
+    * ``blobs`` — the inline attachments the converter replaced with a part
+      or a placeholder naming ``blobs/sha256/<ab>/<hash>.<ext>``, one per
+      distinct hash. The writer stores each under ``<corpus_root>/blobs/``
+      BEFORE it publishes the session that references it.
     """
 
     trajectory_dict: dict[str, Any]

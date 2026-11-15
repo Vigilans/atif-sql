@@ -33,7 +33,9 @@ filtered session never publishes:
    ``images`` go, and its ``tool_result_metadata`` keeps only ``is_error``
    (atif-analytics reads it as a fallback); a dropped step loses its
    ``reasoning_content``; a dropped event leaves ``session_events``; a dropped
-   blob leaves every ``images`` list and is not published.
+   blob leaves every ``images`` list and every ``ContentPart`` list (a step's
+   ``message``, a result's ``content``) whose image or audio part names it,
+   a list left empty becoming ``""``, and is not published.
 3. Replace: every ``find`` is replaced with its ``replacement`` in every
    string value of the session (the trajectory, embedded trajectories and
    ``extra`` included, the session events and the loss report);
@@ -41,7 +43,8 @@ filtered session never publishes:
    it a single pass: a longer match wins on overlap and replaced text is
    never matched again.
 4. Publish only the blobs the session still references: a ``sha256`` field
-   (an ``images`` entry) or a ``sha256:<hex>`` placeholder in any string.
+   (an ``images`` entry) or a blob path (``blobs/sha256/<ab>/<hex>``, in a
+   part's ``source.path`` or a text placeholder) in any string.
 
 Addresses are checked against the session as converted, before any filtering:
 ``(trajectory_id, step_id, tool_use_id)`` must name an observation result,
@@ -83,8 +86,10 @@ DIRECTIVE_COLUMNS: frozenset[str] = frozenset(
     {"action", *(name for params in ACTION_PARAMETERS.values() for name, _ in params)}
 )
 
-#: A blob placeholder's hash, as the converter writes it (``[image sha256:<hex> ...]``).
-_PLACEHOLDER_SHA = re.compile(r"sha256:([0-9a-f]{64})")
+#: The hash a blob path names, as the converter writes it in a ``ContentPart``'s
+#: ``source.path`` (``../../blobs/sha256/<ab>/<hex>.<ext>``) and in a text
+#: placeholder (``[file blobs/sha256/<ab>/<hex>.<ext> ...]``).
+_BLOB_PATH_SHA = re.compile(r"blobs/sha256/[0-9a-f]{2}/([0-9a-f]{64})")
 
 _COMPACT: tuple[str, str] = (",", ":")
 
@@ -397,6 +402,24 @@ def _drop_images(holder: dict[str, Any], hashes: frozenset[str]) -> None:
     _drop_empty(holder, "extra")
 
 
+def _drop_media_parts(holder: dict[str, Any], key: str, hashes: frozenset[str]) -> None:
+    """Remove the image and audio parts of ``holder[key]`` whose path names a dropped blob."""
+    parts = holder.get(key)
+    if not isinstance(parts, list):
+        return
+    kept = [part for part in parts if not _names_blob(part, hashes)]
+    if len(kept) != len(parts):
+        holder[key] = kept or ""
+
+
+def _names_blob(part: object, hashes: frozenset[str]) -> bool:
+    if not isinstance(part, dict) or part.get("type") not in {"image", "audio"}:
+        return False
+    source = part.get("source")
+    path = source.get("path") if isinstance(source, dict) else None
+    return isinstance(path, str) and bool(set(_BLOB_PATH_SHA.findall(path)) & hashes)
+
+
 def _replacer(replacements: Mapping[str, str]) -> Callable[[str], str] | None:
     """One-pass literal replacement of every ``find``, longest first; ``None`` when there is none."""
     if not replacements:
@@ -443,14 +466,14 @@ def _rewrite_lines(
 
 
 def _referenced_hashes(*values: Any) -> set[str]:
-    """Every blob hash ``values`` reference: a ``sha256`` field or a ``sha256:<hex>`` placeholder."""
+    """Every blob hash ``values`` reference: a ``sha256`` field or a blob path in a string."""
     found: set[str] = set()
     stack: list[Any] = list(values)
     while stack:
         value = stack.pop()
         if isinstance(value, str):
-            if "sha256:" in value:
-                found.update(_PLACEHOLDER_SHA.findall(value))
+            if "blobs/sha256/" in value:
+                found.update(_BLOB_PATH_SHA.findall(value))
         elif isinstance(value, dict):
             digest = value.get("sha256")
             if isinstance(digest, str):
@@ -475,8 +498,10 @@ def apply_directives(
                 _prune_result(res)
             if directives.drop_blobs:
                 _drop_images(res, directives.drop_blobs)
+                _drop_media_parts(res, "content", directives.drop_blobs)
         if directives.drop_blobs:
             _drop_images(step, directives.drop_blobs)
+            _drop_media_parts(step, "message", directives.drop_blobs)
     substitute = _replacer(directives.replacements)
     loss_report = copy.deepcopy(output.loss_report_dict)
     if substitute is not None:

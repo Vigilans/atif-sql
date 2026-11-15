@@ -87,7 +87,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:724`
    `packages/atif-converter/src/atif_converter/infrastructure/raw_records.py`
    (`load_session`), reached through `harbor_adapter.read_session`, which
    classifies a non-UTF-8 file as `ConversionError`.
-3. Replace every inline base64 attachment with a placeholder and collect its
+3. Replace every inline base64 attachment with an ATIF part or a placeholder and collect its
    bytes, then convert the records with our ported converter (a port of harbor
    0.26.0's, built on the ATIF models vendored from harbor,
    `packages/atif-converter/src/atif_converter/domain/claude_code_conversion.py:2`) and dump the result to a
@@ -102,7 +102,7 @@ Entry point: `packages/atif-cli/src/atif_cli/app.py:724`
    trajectory in place with `source_uuids`, `is_compact_summary`, and
    `cache_creation_total` (the harbor trajectory has no other consumer, so no
    deep copy is taken): `packages/atif-converter/src/atif_converter/domain/edges.py:111`,
-   `packages/atif-converter/src/atif_converter/domain/enrichment.py:203`.
+   `packages/atif-converter/src/atif_converter/domain/enrichment.py:194`.
 5. Build the loss report: one `FidelityGap` member, `PARENT_CHAIN_FLATTENED`,
    is structural for every conversion, and the rest are added from what the
    census found and from what enrichment didn't repair:

@@ -162,12 +162,12 @@ lands in extra and there is nothing to join on (`:15-20`).
 workspace's complexity ratchets set by one function: `max-branches = 39` and
 `max-complexity = 38` are both pinned at `enrich_trajectory` (`pyproject.toml:343`, `:338`,
 `:347-352`; the function at
-`packages/atif-converter/src/atif_converter/domain/enrichment.py:203`). Each branch is one named
+`packages/atif-converter/src/atif_converter/domain/enrichment.py:194`). Each branch is one named
 fidelity gap, which is why the count is a ratchet rather than a target. Its uncovered units
-sit mostly inside `enrich_trajectory` (`:203-417`) and `_visible_user_text` (`:118-151`),
+sit mostly inside `enrich_trajectory` (`:194-408`) and `_visible_user_text` (`:118-151`),
 the helper that replicates harbor's rules for which user records produce a visible text message.
 Both untested regions are alignment-failure paths: the user-step mismatch arm that logs a warning
-and truncates attribution from that step onward (`:355-365`) is the behavior a reader most needs
+and truncates attribution from that step onward (`:346-356`) is the behavior a reader most needs
 pinned, since it silently narrows enrichment coverage rather than failing.
 
 ### `atif_analytics.application.use_cases.friction`

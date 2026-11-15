@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""Inline base64 attachments -> content-addressed blobs plus a short text placeholder.
+"""Inline base64 attachments -> content-addressed blobs, named by ATIF parts or text placeholders.
 
 Claude Code writes every image a tool returned (a ``Read`` of a PNG, a
 screenshot) and every image a user pasted into the transcript as base64, and
@@ -11,15 +11,30 @@ paid for megabytes of noise per image.
 
 This module lifts the bytes out BEFORE conversion. Each attachment is decoded
 once, named by the SHA-256 of its bytes, handed to the caller as a
-:class:`Blob` to store, and replaced in the raw record by a short, stable
-placeholder::
+:class:`Blob` to store at ``blobs/sha256/<ab>/<sha256>.<ext>`` below the corpus
+root, and replaced in the raw record by a block that names the stored file
+and holds no base64 (:func:`lifted_block`). An image of a type ATIF's
+``ImageSource`` accepts and audio of an ``AudioMediaType`` become the ATIF
+``ContentPart`` itself, its ``source.path`` relative to the session directory
+the trajectory sits in::
 
-    [image sha256:<64 hex> image/png 123456 bytes]
+    {
+        "type": "image",
+        "source": {"media_type": "image/png", "path": "../../blobs/sha256/<ab>/<sha256>.png"},
+    }
 
-(``[audio ...]`` for audio, ``[file ...]`` for anything else), so the
-converter, the enrichment pass and every text consumer see the placeholder and
-never the base64. The rewrite runs on the parsed records the
-converter and the audit share (one read, see
+which the converters carry into ``Step.message`` and
+``ObservationResult.content`` (:func:`lifted_part` recognizes it). Any other
+attachment (a PDF, an image of another type) becomes a text block holding a
+short, stable placeholder that names the blob by its path below the corpus
+root::
+
+    [file blobs/sha256/<ab>/<sha256>.pdf application/pdf]
+
+(``[image ...]`` / ``[audio ...]`` for an image or audio type with no ATIF
+part). The converter, the enrichment pass and every text consumer see the part
+or the placeholder and never the base64. The rewrite runs on the parsed
+records the converter and the audit share (one read, see
 :mod:`atif_converter.infrastructure.raw_records`), so every artifact agrees
 about it.
 
@@ -40,11 +55,11 @@ In a Codex rollout the shape is ``{"type": "input_image", "image_url":
 or a tool output list. A tool output list can also carry an MCP image block,
 ``{"type": "image", "data": "<base64>", "mimeType": "image/png"}``. The
 converter's harbor port names every inline image in a tool output it can save
-by a placeholder (:func:`codex_tool_image_ref` is its rule: a supported image
+by an image part (:func:`codex_tool_image_ref` is its rule: a supported image
 type, a payload that decodes once whitespace is removed, data URL parameters
 allowed), so a tool output's MCP image, and an ``input_image`` the strict data
-URL match above misses, is lifted by that same rule and the placeholder names
-bytes the collector holds.
+URL match above misses, is lifted by that same rule and the part names bytes
+the collector holds.
 
 Codex audio is ``{"type": "input_audio", "audio_url": "data:<media>;base64,
 <data>"}`` in message content or a tool output list, or the OpenAI form
@@ -54,19 +69,19 @@ Codex audio is ``{"type": "input_audio", "audio_url": "data:<media>;base64,
 :func:`codex_audio_ref`, reads all three wherever the converter reads them (a
 media type ATIF's ``AudioMediaType`` names once its aliases are normalized, a
 payload that decodes once whitespace is removed, data URL parameters
-allowed), so the converter's text for an item the pre-pass did not see is the
-placeholder the pre-pass writes for it. An ``input_audio`` that carries only a
+allowed), so the converter's part for an item the pre-pass did not see is the
+part the pre-pass writes for it. An ``input_audio`` that carries only a
 ``file_id`` or a URL holds no bytes and is the converter's
-``[audio: <file_id-or-url>]`` (:func:`codex_audio_text`).
+``[audio: <file_id-or-url>]`` text (:func:`codex_audio_part`).
 
 A base64 value anywhere else (a tool CALL's own arguments, an ``image`` or
 ``audio`` block in message content) is left alone.
 
-Replacement is by block: an attachment block becomes a TEXT block holding the
-placeholder (``input_text`` for Codex), which is the one block type every
-downstream text rule already renders verbatim. A value that does not decode as
-strict base64 is left exactly as it was: a malformed attachment is kept, never
-silently dropped.
+Replacement is by block: an attachment block becomes its ATIF part, or a TEXT
+block holding the placeholder (``input_text`` for Codex), which is the one
+block type every downstream text rule already renders verbatim. A value that
+does not decode as strict base64 is left exactly as it was: a malformed
+attachment is kept, never silently dropped.
 
 Pure: no I/O. The one library call is :mod:`imagesize`, which reads the width
 and height out of the image header in memory; an audio blob records neither.
@@ -84,8 +99,9 @@ from typing import TYPE_CHECKING, Any, get_args
 
 import imagesize  # type: ignore[import-untyped]
 from loguru import logger
+from pydantic import ValidationError
 
-from atif_converter.domain.atif.content import AudioMediaType, AudioSource
+from atif_converter.domain.atif.content import AudioMediaType, AudioSource, ContentPart, ImageSource
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -123,6 +139,9 @@ CODEX_TOOL_IMAGE_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/gif"
 
 #: The audio types an audio blob is lifted under: ATIF v1.8's ``AudioMediaType``.
 _AUDIO_MEDIA_TYPES: frozenset[str] = frozenset(map(str, get_args(AudioMediaType)))
+
+#: The image types ATIF's ``ImageSource`` accepts: the ones an image ``ContentPart`` can name.
+_IMAGE_PART_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 
 #: harbor's data URL for a Codex tool output image: parameters allowed before
 #: ``;base64``. Audio data URLs are read by the same rule.
@@ -162,10 +181,44 @@ class BlobRef:
         """True for an ``audio/*`` media type."""
         return self.media_type.startswith("audio/")
 
+    @property
+    def corpus_path(self) -> str:
+        """The stored file's path below the corpus root: ``blobs/sha256/<ab>/<sha256>.<ext>``."""
+        return f"blobs/sha256/{self.sha256[:2]}/{self.sha256}.{self.extension}"
+
+    @property
+    def session_path(self) -> str:
+        """:attr:`corpus_path` from a session directory (``sessions/<id>/``), where the trajectory sits."""
+        return f"../../{self.corpus_path}"
+
     def placeholder(self) -> str:
-        """The stable text left where the base64 was."""
+        """The stable text left where the base64 was, naming the blob by :attr:`corpus_path`."""
         kind = "image" if self.is_image else "audio" if self.is_audio else "file"
-        return f"[{kind} sha256:{self.sha256} {self.media_type} {self.byte_count} bytes]"
+        return f"[{kind} {self.corpus_path} {self.media_type}]"
+
+    def content_part(self) -> ContentPart | None:
+        """The ATIF ``image`` or ``audio`` part naming this blob, when ATIF has one for its type.
+
+        An image part takes the media types ``ImageSource`` accepts and an audio
+        part an ``AudioMediaType``; the source path is :attr:`session_path`.
+        Any other attachment (a PDF, an SVG, an unknown type) has no part and
+        is named by its :meth:`placeholder` text.
+        """
+        if self.media_type in _IMAGE_PART_MEDIA_TYPES:
+            return ContentPart(
+                type="image",
+                source=ImageSource.model_validate(
+                    {"media_type": self.media_type, "path": self.session_path}
+                ),
+            )
+        if self.media_type in _AUDIO_MEDIA_TYPES:
+            return ContentPart(
+                type="audio",
+                source=AudioSource.model_validate(
+                    {"media_type": self.media_type, "path": self.session_path}
+                ),
+            )
+        return None
 
     def to_json(self) -> dict[str, Any]:
         """The ``extra.images[]`` entry the enrichment pass writes into the trajectory."""
@@ -282,6 +335,38 @@ def _extend_unique(target: list[BlobRef], refs: Iterable[BlobRef]) -> None:
             seen.add(ref.sha256)
 
 
+def lifted_block(ref: BlobRef, text_type: str) -> dict[str, Any]:
+    """The block the pre-pass leaves where ``ref``'s attachment was.
+
+    The attachment's ATIF part (:meth:`BlobRef.content_part`) as JSON, else a
+    ``text_type`` block (``text``, ``input_text``) holding its placeholder.
+    """
+    part = ref.content_part()
+    if part is not None:
+        return part.model_dump(mode="json", exclude_none=True)
+    return {"type": text_type, "text": ref.placeholder()}
+
+
+def lifted_part(block: Any) -> ContentPart | None:
+    """The ATIF ``image`` or ``audio`` part a pre-passed ``block`` is, else ``None``.
+
+    Only :func:`lifted_block`'s own shape matches: ``type`` and ``source``
+    and nothing else, a source ``ContentPart`` accepts. A transcript's own
+    attachment block never does, since its source carries a ``type`` or its
+    data sits beside ``type``.
+    """
+    if (
+        not isinstance(block, dict)
+        or _str(block.get("type")) not in {"image", "audio"}
+        or set(block) != {"type", "source"}
+    ):
+        return None
+    try:
+        return ContentPart.model_validate(block)
+    except ValidationError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Claude Code
 # ---------------------------------------------------------------------------
@@ -307,7 +392,7 @@ def _rewrite_anthropic_blocks(blocks: list[Any], collector: BlobCollector) -> li
         ref = _anthropic_block_ref(block, collector)
         if ref is None:
             continue
-        blocks[index] = {"type": "text", "text": ref.placeholder()}
+        blocks[index] = lifted_block(ref, "text")
         refs.append(ref)
     return refs
 
@@ -388,7 +473,7 @@ def codex_tool_image_ref(data: str, media_type: Any, collector: BlobCollector) -
     :data:`CODEX_TOOL_IMAGE_MEDIA_TYPES` and the payload, with whitespace
     removed, decodes. ``None`` means harbor would write ``[image omitted]``:
     nothing is registered. The converter's port and the pre-pass both call
-    this, so the placeholder text and the stored blob agree byte for byte.
+    this, so the image part and the stored blob agree byte for byte.
     """
     data_url = _BASE64_DATA_URL.fullmatch(data)
     base64_text = data
@@ -463,8 +548,8 @@ def codex_audio_ref(item: dict[str, Any], collector: BlobCollector) -> BlobRef |
     ``audio/mpeg``, ``audio/x-wav`` is ``audio/wav``) and must then be an
     ``AudioMediaType``; the payload, with whitespace removed, must decode.
     ``None`` registers nothing, and the item stays as it was. The converter
-    and the pre-pass both call this, so the placeholder text and the stored
-    blob agree byte for byte.
+    and the pre-pass both call this, so the audio part and the stored blob
+    agree byte for byte.
     """
     data, media_type = _audio_payload(item)
     if not isinstance(data, str):
@@ -492,15 +577,24 @@ def _audio_reference(item: dict[str, Any]) -> str | None:
     return None
 
 
-def codex_audio_text(item: dict[str, Any]) -> str | None:
-    """The converter's text for a Codex audio item, or ``None`` when it has none.
+def codex_audio_part(item: dict[str, Any]) -> ContentPart | None:
+    """The converter's part for a Codex audio item, or ``None`` when it has none.
 
-    Inline audio :func:`codex_audio_ref` reads is its blob placeholder: in
-    production the pre-pass has already put that placeholder in the item's
-    place and stored the bytes, and the throwaway collector here only names
-    them when the records were not pre-passed. An ``input_audio`` holding only
-    a ``file_id`` or a URL is ``[audio: <file_id-or-url>]``.
+    Inline audio :func:`codex_audio_ref` reads is its audio part: in
+    production the pre-pass has already put that part in the item's place and
+    stored the bytes, and the throwaway collector here only names them when
+    the records were not pre-passed. An ``input_audio`` holding only a
+    ``file_id`` or a URL is a text part, ``[audio: <file_id-or-url>]``.
     """
+    ref = codex_audio_ref(item, BlobCollector())
+    if ref is not None:
+        return ref.content_part()
+    reference = _audio_reference(item)
+    return None if reference is None else ContentPart(type="text", text=f"[audio: {reference}]")
+
+
+def codex_audio_text(item: dict[str, Any]) -> str | None:
+    """:func:`codex_audio_part` as text: inline audio is its blob's placeholder."""
     ref = codex_audio_ref(item, BlobCollector())
     if ref is not None:
         return ref.placeholder()
@@ -508,9 +602,15 @@ def codex_audio_text(item: dict[str, Any]) -> str | None:
     return None if reference is None else f"[audio: {reference}]"
 
 
-def _codex_attachment_ref(
+def codex_attachment_ref(
     item: Any, collector: BlobCollector, *, tool_output: bool
 ) -> BlobRef | None:
+    """Register one Codex item the pre-pass lifts: an image or audio in a message or a tool output.
+
+    ``tool_output`` widens the rule to what a tool output list carries (an MCP
+    ``image`` / ``audio`` block, an ``input_image`` by the port's wider rule).
+    ``None`` registers nothing, and the item stays as it was.
+    """
     if not isinstance(item, dict):
         return None
     item_type = item.get("type")
@@ -533,10 +633,10 @@ def _rewrite_codex_items(
 ) -> list[BlobRef]:
     refs: list[BlobRef] = []
     for position, item in enumerate(items):
-        ref = _codex_attachment_ref(item, collector, tool_output=tool_output)
+        ref = codex_attachment_ref(item, collector, tool_output=tool_output)
         if ref is None:
             continue
-        items[position] = {"type": "input_text", "text": ref.placeholder()}
+        items[position] = lifted_block(ref, "input_text")
         refs.append(ref)
     return refs
 
@@ -624,10 +724,14 @@ __all__ = [
     "BlobCollector",
     "BlobIndex",
     "BlobRef",
+    "codex_attachment_ref",
+    "codex_audio_part",
     "codex_audio_ref",
     "codex_audio_text",
     "codex_tool_image_media_type",
     "codex_tool_image_ref",
     "extract_claude_code_blobs",
     "extract_codex_blobs",
+    "lifted_block",
+    "lifted_part",
 ]

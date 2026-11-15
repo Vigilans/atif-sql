@@ -20,11 +20,18 @@ from atif_cli.filter_directives import (
 from atif_corpus.domain.ports import BlobOutput, ConversionOutput
 
 SESSION = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
-SHARED, OWN = "a" * 64, "b" * 64
+SHARED, OWN, FILE = "a" * 64, "b" * 64, "c" * 64
+#: The text placeholder of a blob ATIF has no part for, which names FILE.
+FILE_PLACEHOLDER = f"[file blobs/sha256/cc/{FILE}.pdf application/pdf]"
 
 
 def _image(sha256: str) -> dict[str, Any]:
     return {"sha256": sha256, "media_type": "image/png", "bytes": 1, "extension": "png"}
+
+
+def _image_part(sha256: str) -> dict[str, Any]:
+    path = f"../../blobs/sha256/{sha256[:2]}/{sha256}.png"
+    return {"type": "image", "source": {"media_type": "image/png", "path": path}}
 
 
 def _output() -> ConversionOutput:
@@ -39,7 +46,7 @@ def _output() -> ConversionOutput:
             "results": [
                 {
                     "source_call_id": "c1",
-                    "content": f"[image sha256:{OWN} image/png 1 bytes]",
+                    "content": [_image_part(OWN)],
                     "extra": {"images": [_image(OWN)], "exit_code": 0},
                 }
             ]
@@ -56,7 +63,7 @@ def _output() -> ConversionOutput:
     child_step: dict[str, Any] = {
         "step_id": 1,
         "source": "agent",
-        "message": f"see [image sha256:{SHARED} image/png 1 bytes]",
+        "message": [{"type": "text", "text": f"see {FILE_PLACEHOLDER}"}, _image_part(SHARED)],
         "tool_calls": [
             {
                 "tool_call_id": "c3",
@@ -99,6 +106,7 @@ def _output() -> ConversionOutput:
         blobs=(
             BlobOutput(sha256=SHARED, extension="png", data=b"s"),
             BlobOutput(sha256=OWN, extension="png", data=b"o"),
+            BlobOutput(sha256=FILE, extension="pdf", data=b"f"),
         ),
     )
 
@@ -149,16 +157,33 @@ def test_prune_and_drop_act_on_their_targets_only() -> None:
     }
     assert child["observation"]["results"][0]["content"] == "body"
     assert [json.loads(line)["seq"] for line in filtered.events_lines] == [0]
-    # The pruned result owned OWN alone; SHARED is still named elsewhere.
-    assert [blob.sha256 for blob in filtered.blobs] == [SHARED]
+    # The pruned result owned OWN alone; SHARED and FILE are still named elsewhere.
+    assert [blob.sha256 for blob in filtered.blobs] == [SHARED, FILE]
 
 
 def test_drop_blob_removes_every_reference_entry_and_the_blob() -> None:
     directives = merge_directives([[("drop_blob", (SHARED,))]])
     filtered = apply_directives(_output(), directives, session_id=SESSION)
-    root, _ = _steps(filtered)
+    root, child = _steps(filtered)
     assert "images" not in root["extra"]
-    assert [blob.sha256 for blob in filtered.blobs] == [OWN]
+    assert child["message"] == [{"type": "text", "text": f"see {FILE_PLACEHOLDER}"}]
+    assert [blob.sha256 for blob in filtered.blobs] == [OWN, FILE]
+
+
+def test_drop_blob_empties_a_content_part_list_to_a_string() -> None:
+    directives = merge_directives([[("drop_blob", (OWN,))]])
+    filtered = apply_directives(_output(), directives, session_id=SESSION)
+    root, _ = _steps(filtered)
+    assert root["observation"]["results"][0]["content"] == ""
+    assert [blob.sha256 for blob in filtered.blobs] == [SHARED, FILE]
+
+
+def test_a_dropped_placeholder_blob_is_not_published_and_its_text_stays() -> None:
+    directives = merge_directives([[("drop_blob", (FILE,))]])
+    filtered = apply_directives(_output(), directives, session_id=SESSION)
+    _, child = _steps(filtered)
+    assert child["message"][0] == {"type": "text", "text": f"see {FILE_PLACEHOLDER}"}
+    assert [blob.sha256 for blob in filtered.blobs] == [SHARED, OWN]
 
 
 def test_replace_reaches_every_artifact_but_no_key() -> None:
@@ -181,7 +206,7 @@ def test_targets_are_the_converted_sessions() -> None:
     assert targets.results == {(SESSION, 1, "c1"), ("child", 1, "c3")}
     assert targets.steps == {(SESSION, 1), ("child", 1)}
     assert targets.events == {0, 1}
-    assert targets.blobs == {SHARED, OWN}
+    assert targets.blobs == {SHARED, OWN, FILE}
     targets.check(merge_directives([[("drop_event", (1,)), ("drop_blob", (OWN,))]]))
     with pytest.raises(FilterError, match="address no step"):
         targets.check(merge_directives([[("drop_reasoning", ("child", 2))]]))

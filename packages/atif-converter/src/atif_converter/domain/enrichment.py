@@ -72,6 +72,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from atif_converter.domain.claude_code_conversion import user_message_content
 from atif_converter.domain.trajectory_tree import iter_trajectories
 
 if TYPE_CHECKING:
@@ -115,36 +116,26 @@ def _stringify(value: Any) -> str:
         return str(value)
 
 
-def _visible_user_text(message: dict[str, Any]) -> str | None:
-    """The user-step message text harbor would emit for this record, or None.
+def _visible_user_text(message: dict[str, Any]) -> str | list[dict[str, Any]] | None:
+    """The user-step message the converter emits for this record (as JSON), or None.
 
-    Replicates harbor 0.22.0's user-content rules exactly (including the
-    finding-5 divergence: a ``{"type": "text", "text": <non-str>}`` block is
-    NOT skipped — harbor json-encodes the whole block into a text part, so
-    the record still produces a visible step). Returning the text (not just
-    a bool) lets the user-step walk cross-check each pairing instead of
-    trusting position alone.
+    A block list goes through the converter's own
+    :func:`~atif_converter.domain.claude_code_conversion.user_message_content`,
+    harbor 0.22.0's user-content rules (including the finding-5 divergence: a
+    ``{"type": "text", "text": <non-str>}`` block is NOT skipped — harbor
+    json-encodes the whole block into a text part, so the record still
+    produces a visible step) plus the ``ContentPart`` list a lifted image
+    makes. Returning the message (not just a bool) lets the user-step walk
+    cross-check each pairing instead of trusting position alone.
     """
     content = message.get("content")
     if isinstance(content, str):
         return content if content.strip() else None
     if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                continue
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
-            ):
-                parts.append(block["text"])
-                continue
-            # any other block (incl. text blocks with non-str text) is
-            # stringified by harbor into a text part
-            parts.append(_stringify(block))
-        text = "\n\n".join(part for part in parts if part.strip())
-        return text or None
+        visible = user_message_content(content)
+        if isinstance(visible, list):
+            return [part.model_dump(mode="json", exclude_none=True) for part in visible]
+        return visible or None
     if content not in (None, ""):
         text = _stringify(content)
         return text if text.strip() else None

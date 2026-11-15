@@ -114,7 +114,19 @@ def test_an_inline_image_is_stored_once_and_queryable(
     trajectory = read_artifact_text(corpus / "sessions" / SESSION / "trajectory.json.zst")
     assert base64.b64encode(IMAGE).decode() not in trajectory
     digest = hashlib.sha256(IMAGE).hexdigest()
-    assert f"[image sha256:{digest} image/png {len(IMAGE)} bytes]" in trajectory
+    path = f"blobs/sha256/{digest[:2]}/{digest}.png"
+    assert f'{{"type":"image","source":{{"media_type":"image/png","path":"../../{path}"}}}}' in (
+        trajectory
+    )
+    # The part's path resolves from the session directory, where the trajectory sits.
+    assert (corpus / "sessions" / SESSION / ".." / ".." / path).read_bytes() == IMAGE
+
+    query(
+        "SELECT content_text(content) AS text FROM tool_results",
+        corpus_root=corpus,
+        fmt=OutputFormat.JSON,
+    )
+    assert json.loads(capsys.readouterr().out) == [{"text": f"[image {path} image/png]"}]
 
     query(
         "SELECT sha256, width, height, blob_path FROM images",

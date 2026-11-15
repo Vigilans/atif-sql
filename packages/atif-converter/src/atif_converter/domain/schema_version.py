@@ -152,12 +152,23 @@ History:
   ``file_id`` or a URL is ``[audio: <file_id-or-url>]``. The blob is stored
   as ``.wav``, ``.mp3``, ``.m4a``, ``.aac``, ``.ogg``, ``.flac``, ``.webm``
   or ``.aiff``; ``images`` lists no audio.
+* 18 — multimodal content keeps ATIF's native shape. A user message or tool
+  result whose block list holds an image of a type ATIF's ``ImageSource``
+  accepts, or audio of an ``AudioMediaType``, is a list of ``ContentPart``:
+  each such attachment an ``image`` / ``audio`` part whose ``source.path`` is
+  ``../../blobs/sha256/<ab>/<sha256>.<ext>`` (from the session directory),
+  each text a ``text`` part, and harbor's Claude Code suffix chunks and error
+  line ``text`` parts too. A Codex user or developer message keeps its
+  pasted ``input_image``. Every text placeholder names its blob by its path
+  below the corpus root, ``[file blobs/sha256/<ab>/<sha256>.<ext>
+  <media_type>]`` (``image`` / ``audio`` for a type with no ATIF part). A Claude
+  Code string tool result is kept verbatim, its outer whitespace included.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-CONVERTER_SCHEMA_VERSION: Final = 17
+CONVERTER_SCHEMA_VERSION: Final = 18
 
 __all__ = ["CONVERTER_SCHEMA_VERSION"]

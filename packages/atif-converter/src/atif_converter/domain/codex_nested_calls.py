@@ -29,8 +29,9 @@ The tool call
 
 The result's content is the MCP result's content blocks rendered the way the
 port renders a top-level tool output's blocks
-(:func:`~atif_converter.domain.codex_conversion.structured_output_text`), or a
-command's ``aggregated_output``.
+(:func:`~atif_converter.domain.codex_conversion.structured_output_content`:
+text, or ATIF parts when a block is an image or audio), or a command's
+``aggregated_output``.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ import json
 import shlex
 from typing import Any, Final
 
-from atif_converter.domain.codex_conversion import structured_output_text
+from atif_converter.domain.codex_conversion import structured_output_content
 
 #: Completed item types that become a nested tool call.
 NESTED_CALL_ITEM_TYPES: Final[frozenset[str]] = frozenset({"McpToolCall", "CommandExecution"})
@@ -123,24 +124,30 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else _json_text(value)
 
 
-def _result_text(result: dict[str, Any]) -> str:
-    """An MCP result's text: its ``Err``, else its content blocks, else its JSON text."""
+#: An observation result's ``content`` as the trajectory JSON holds it.
+_ContentJson = str | list[dict[str, Any]]
+
+
+def _result_content(result: dict[str, Any]) -> _ContentJson:
+    """An MCP result's content: its ``Err``, else its content blocks, else its JSON text."""
     if "Err" in result:
         return _text(result["Err"])
     content = result.get("content")
     if not isinstance(content, list):
         return _json_text(result)
-    text = structured_output_text(content)
-    if text is not None:
-        return text
+    rendered = structured_output_content(content)
+    if isinstance(rendered, list):
+        return [part.model_dump(mode="json", exclude_none=True) for part in rendered]
+    if rendered is not None:
+        return rendered
     return _json_text(content) if content else ""
 
 
-def _mcp_content(item: dict[str, Any]) -> str | None:
-    """The result's text, else the error's message (an item that failed before any result)."""
+def _mcp_content(item: dict[str, Any]) -> _ContentJson | None:
+    """The result's content, else the error's message (an item that failed before any result)."""
     result = item.get("result")
     if isinstance(result, dict):
-        return _result_text(result)
+        return _result_content(result)
     error = item.get("error")
     message = error.get("message") if isinstance(error, dict) else None
     if isinstance(message, str):
@@ -148,7 +155,7 @@ def _mcp_content(item: dict[str, Any]) -> str | None:
     return None if error is None else _text(error)
 
 
-def nested_result_content(item: dict[str, Any]) -> str | None:
+def nested_result_content(item: dict[str, Any]) -> _ContentJson | None:
     """The observation content of one nested item: its MCP result or command output."""
     if item.get("type") == "CommandExecution":
         output = item.get("aggregated_output")

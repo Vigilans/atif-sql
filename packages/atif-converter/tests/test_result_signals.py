@@ -27,7 +27,7 @@ from harbor_oracle import (
     parity_diffs,
     require_harbor_private_api,
 )
-from subagent_fixtures import PASTED_PNG, READ_PNG
+from subagent_fixtures import PASTED_PNG, READ_PNG, blob_part, blob_placeholder
 
 from atif_converter.application.convert_and_audit import convert_and_audit
 from atif_converter.application.convert_codex import convert_codex_and_audit
@@ -212,7 +212,13 @@ class TestImagesByReference:
         text = json.dumps(result.trajectory)
         for data in (READ_PNG, PASTED_PNG):
             assert base64.b64encode(data).decode() not in text
-        assert f"[image sha256:{_sha(READ_PNG)} image/png {len(READ_PNG)} bytes]" in text
+        content = _result(result.trajectory, "toolu_RA")["content"]
+        assert content[0] == blob_part(READ_PNG)
+        # The toolUseResult copy is named by its placeholder, after the image part.
+        assert [part["type"] for part in content] == ["image", "text"]
+        assert content[1]["text"].startswith("[metadata] ")
+        assert blob_placeholder(READ_PNG) in content[1]["text"]
+        assert "enrichment_truncated_at_step" not in result.trajectory.get("extra", {})
         assert result.validation_errors == ()
 
     def test_blobs_are_deduplicated_by_content(self, parallel_subagent_session: Path) -> None:
@@ -247,7 +253,10 @@ class TestImagesByReference:
         ]
         assert len(pasted) == 1
         step = pasted[0]
-        assert step["message"].startswith("see this screenshot\n\n[image sha256:")
+        assert step["message"] == [
+            {"type": "text", "text": "see this screenshot"},
+            blob_part(PASTED_PNG),
+        ]
         assert [(i["sha256"], i["width"], i["height"]) for i in step["extra"]["images"]] == [
             (_sha(PASTED_PNG), 5, 4)
         ]
@@ -281,9 +290,7 @@ class TestImagesByReference:
         index = extract_claude_code_blobs([record], BlobCollector())
         file_value = record["toolUseResult"]["file"]
         assert "base64" not in file_value
-        assert (
-            file_value["blob"] == f"[image sha256:{_sha(READ_PNG)} image/png {len(READ_PNG)} bytes]"
-        )
+        assert file_value["blob"] == blob_placeholder(READ_PNG)
         assert [ref.sha256 for ref in index.by_tool_call_id["t"]] == [_sha(READ_PNG)]
 
 

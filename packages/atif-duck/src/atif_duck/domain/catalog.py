@@ -515,8 +515,8 @@ DESCRIPTIONS: dict[str, str] = {
         "tool_use_id). is_error is the flag the agent recorded, exit_code the process "
         "exit code where the transcript states one (Claude Code states it only for a "
         "failed Bash call), interrupted is Bash's interrupted flag; NULL means not "
-        "stated. Inline images are replaced in content by [image sha256:<hash> <media> "
-        "<n> bytes] and listed in images."
+        "stated. content is a JSON string or a ContentPart array (content_text(content) "
+        "renders it as text)."
     ),
     "todo_events": "Every TodoWrite snapshot item with status and snapshot index.",
     "todo_state_current": "Latest todo status per (session_id, subject).",

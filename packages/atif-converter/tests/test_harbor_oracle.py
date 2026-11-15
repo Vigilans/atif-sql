@@ -21,6 +21,7 @@ from harbor_oracle import (
     harbor_claude_code_trajectory,
     harbor_codex_trajectory,
     load_golden,
+    parity_diffs,
     require_harbor_private_api,
     write_golden,
 )
@@ -90,3 +91,36 @@ class TestFrozenGoldens:
         live = harbor_codex_trajectory(codex_rollout)
         assert live is not None
         assert diff_paths(load_golden("codex.synthetic"), live) == []
+
+
+def _one_result(content: object) -> dict[str, object]:
+    return {"steps": [{"observation": {"results": [{"content": content}]}}]}
+
+
+class TestVerbatimResultForgiveness:
+    """A Claude Code string result ours keeps verbatim, where harbor strips it, and nothing more."""
+
+    @pytest.mark.parametrize(
+        ("harbor", "ours"),
+        [
+            ("out", "\n  out \n"),
+            ("out\n\n[stdout]\no", "out \n\n\n[stdout]\no"),
+            ("out\n\n[error] tool reported failure", " out\n\n[error] tool reported failure"),
+        ],
+        ids=["alone", "before-a-chunk", "before-the-error-line"],
+    )
+    def test_outer_whitespace_of_the_result_text_is_forgiven(self, harbor: str, ours: str) -> None:
+        assert diff_paths(_one_result(harbor), _one_result(ours)) != []
+        assert parity_diffs(_one_result(harbor), _one_result(ours)) == []
+
+    @pytest.mark.parametrize(
+        ("harbor", "ours"),
+        [
+            ("out", " outs "),
+            ("out\n\n[stdout]\no", "out\n\n[stdout]\no "),
+            ("out\n\n[stdout]\no", "out\n[stdout]\no"),
+        ],
+        ids=["other-text", "whitespace-in-a-chunk", "a-separator-lost"],
+    )
+    def test_anything_else_still_fails(self, harbor: str, ours: str) -> None:
+        assert parity_diffs(_one_result(harbor), _one_result(ours)) != []

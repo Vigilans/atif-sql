@@ -51,8 +51,9 @@ Three passes, ordered by how much they can be trusted.
 3. **User and system message steps, by position.** These carry no id anywhere:
    harbor emits one step per non-assistant message record, in file order, with
    no bundling and nothing filtered. The walk therefore pairs them 1:1 and
-   cross-checks each pairing against harbor's own text extraction. The FIRST
-   pair whose text or source disagrees stops this pass and records
+   cross-checks each pairing against the converter's own message extraction
+   (:func:`message_content`). The FIRST pair whose message or source
+   disagrees stops this pass and records
    ``trajectory.extra["enrichment_truncated_at_step"]``: once positions
    disagree, every later pairing is suspect.
 
@@ -81,7 +82,14 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from atif_converter.domain.blobs import codex_audio_text
+from atif_converter.domain.atif import ContentPart
+from atif_converter.domain.blobs import (
+    BlobCollector,
+    codex_attachment_ref,
+    codex_audio_part,
+    codex_audio_text,
+    lifted_part,
+)
 from atif_converter.domain.codex_edges import build_codex_edges
 
 if TYPE_CHECKING:
@@ -123,8 +131,10 @@ def message_text(payload: dict[str, Any]) -> str:
     which is what harbor does, and the reason a two-block developer message
     reproduces as one run-together string rather than two lines. An
     ``input_audio`` item, which harbor drops, contributes
-    :func:`~atif_converter.domain.blobs.codex_audio_text` in its place: the
-    placeholder the pre-pass writes for it, or ``[audio: <file_id-or-url>]``.
+    :func:`~atif_converter.domain.blobs.codex_audio_text` in its place: its
+    blob placeholder, or ``[audio: <file_id-or-url>]``. The converter reads an
+    assistant message by this rule and a user or developer message by
+    :func:`message_content`.
     """
     content = payload.get("content")
     if not isinstance(content, list):
@@ -142,6 +152,59 @@ def message_text(payload: dict[str, Any]) -> str:
     return "".join(parts)
 
 
+def message_content(payload: dict[str, Any]) -> str | list[ContentPart]:
+    """A user or developer message's content as its step message.
+
+    Each item is a part: its ``text``, the image or audio the pre-pass lifts
+    from it (:func:`~atif_converter.domain.blobs.codex_attachment_ref`, the
+    rule the pre-pass lifts message items by; a type with no ATIF part is its
+    placeholder text), or, for an ``input_audio`` naming only a ``file_id`` or
+    a URL, ``[audio: <file_id-or-url>]``. Any other item is dropped, as
+    harbor's ``_extract_message_text`` drops it. A message holding an image
+    or audio part is the list of parts; any other is their texts joined with
+    no separator, which is harbor's text, audio and attachment placeholders
+    aside.
+    """
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts: list[ContentPart] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        part = lifted_part(block) or _message_item_part(block)
+        if part is not None and (part.type != "text" or part.text):
+            parts.append(part)
+    if any(part.type != "text" for part in parts):
+        return parts
+    return "".join(part.text or "" for part in parts)
+
+
+def _message_item_part(block: dict[str, Any]) -> ContentPart | None:
+    """One message item's part: its ``text``, its media, or ``None`` (harbor drops it)."""
+    text = block.get("text")
+    if isinstance(text, str):
+        return ContentPart(type="text", text=text)
+    ref = codex_attachment_ref(block, BlobCollector(), tool_output=False)
+    if ref is not None:
+        return ref.content_part() or ContentPart(type="text", text=ref.placeholder())
+    if block.get("type") == "input_audio":
+        return codex_audio_part(block)
+    return None
+
+
+#: A step message as the trajectory JSON holds it: text, or ``ContentPart`` objects.
+_MessageJson = str | list[dict[str, Any]]
+
+
+def _message_json(payload: dict[str, Any]) -> _MessageJson:
+    """:func:`message_content` as the trajectory JSON holds it."""
+    content = message_content(payload)
+    if isinstance(content, str):
+        return content
+    return [part.model_dump(mode="json", exclude_none=True) for part in content]
+
+
 def _source_for_role(role: Any) -> str:
     return _ROLE_TO_SOURCE.get(role, "system") if isinstance(role, str) else "system"
 
@@ -154,8 +217,9 @@ class _RolloutIndex:
     by_call_id: dict[str, list[str]] = field(default_factory=dict)
     #: api_call_id -> assistant message / web-search record ids in that request.
     by_api_call: dict[str, list[str]] = field(default_factory=dict)
-    #: Non-assistant message records in file order: (record id, source, text).
-    non_agent_messages: list[tuple[str, str, str]] = field(default_factory=list)
+    #: Non-assistant message records in file order: (record id, source, message
+    #: as the step holds it in JSON).
+    non_agent_messages: list[tuple[str, str, _MessageJson]] = field(default_factory=list)
     #: record id or call_id -> the reasoning record it consumed.
     reasoning_for: dict[str, str] = field(default_factory=dict)
     #: ``compacted`` records seen.
@@ -224,7 +288,7 @@ def _index_rollout(
                 index.by_api_call.setdefault(current_api_call, []).append(record_id)
                 saw_model_output = True
             else:
-                index.non_agent_messages.append((record_id, source, message_text(payload)))
+                index.non_agent_messages.append((record_id, source, _message_json(payload)))
             continue
 
         if item_type == "web_search_call":
@@ -377,14 +441,14 @@ def enrich_codex_trajectory(
 
 def _attribute_non_agent_messages(
     steps: list[Any],
-    messages: list[tuple[str, str, str]],
+    messages: list[tuple[str, str, _MessageJson]],
 ) -> tuple[int | None, int]:
     """Pair user/system steps with user/developer message records, 1:1.
 
     Returns the step id the walk refused at (``None`` when every such step
     paired cleanly) and the count of message records left unconsumed. A step is
-    refused when the next unconsumed record's ATIF source or harbor-extracted
-    text disagrees with it.
+    refused when the next unconsumed record's ATIF source or extracted message
+    (:func:`message_content`) disagrees with it.
 
     THE TWO ENDS OF THE WALK FAIL DIFFERENTLY, and both have to be reported.
     Running out of RECORDS refuses the step, which is loud. Running out of
@@ -401,8 +465,8 @@ def _attribute_non_agent_messages(
             continue
         if cursor >= len(messages):
             return _step_id(step), 0
-        record_id, record_source, record_text = messages[cursor]
-        if record_source != source or record_text != (step.get("message") or ""):
+        record_id, record_source, record_message = messages[cursor]
+        if record_source != source or record_message != (step.get("message") or ""):
             return _step_id(step), len(messages) - cursor
         _attach(step, [record_id])
         cursor += 1

@@ -10,6 +10,7 @@ case too; when harbor drops the private method the direct assertions remain.
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from pathlib import Path
@@ -17,8 +18,10 @@ from typing import Any
 
 import pytest
 from harbor_oracle import harbor_claude_code_trajectory, harbor_has_private_api, parity_diffs
+from subagent_fixtures import PASTED_PNG, READ_PNG, blob_part, blob_placeholder
 
 from atif_converter.domain import claude_code_conversion, pricing
+from atif_converter.domain.blobs import BlobCollector, extract_claude_code_blobs
 from atif_converter.domain.claude_code_conversion import convert_claude_code_records
 from atif_converter.infrastructure.claude_code_converter import (
     convert_claude_code_session,
@@ -28,6 +31,12 @@ from atif_converter.infrastructure.claude_code_converter import (
 
 SID = "22222222-2222-2222-2222-222222222222"
 MODEL = "claude-test-1"
+
+
+def _base64_block(kind: str, data: bytes, media_type: str) -> dict[str, Any]:
+    """A Claude Code ``image`` / ``document`` block carrying ``data`` as base64."""
+    source = {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()}
+    return {"type": kind, "source": source}
 
 
 def _user(uuid: str, ts: str, content: Any, **extra: Any) -> dict[str, Any]:
@@ -244,6 +253,100 @@ class TestToolResults:
         assert result["content"] == "[error] tool reported failure"
         assert result["extra"]["tool_result_metadata"]["is_error"] is True
         assert result["extra"]["tool_result_is_error"] is True
+
+    @pytest.mark.parametrize(
+        ("tool_use_result", "content"),
+        [
+            (None, "\n  out \n"),
+            ({"stdout": "o"}, "\n  out \n\n\n[stdout]\no"),
+        ],
+        ids=["alone", "before-harbors-chunks"],
+    )
+    def test_a_string_result_keeps_its_whitespace(
+        self, tmp_path: Path, tool_use_result: dict[str, Any] | None, content: str
+    ) -> None:
+        """harbor strips a string result; ours keeps it as written (the oracle forgives exactly that)."""
+        extra = {} if tool_use_result is None else {"toolUseResult": tool_use_result}
+        out = _convert(
+            tmp_path,
+            [
+                _user("u1", "01", "go"),
+                _assistant(
+                    "a1", "02", [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]
+                ),
+                _user(
+                    "u2",
+                    "03",
+                    [{"type": "tool_result", "tool_use_id": "t1", "content": "\n  out \n"}],
+                    **extra,
+                ),
+            ],
+        )
+        assert out is not None
+        assert out["steps"][1]["observation"]["results"][0]["content"] == content
+
+    def test_a_lifted_image_makes_the_result_atif_parts(self) -> None:
+        """Pre-passed: the image is an image part, every other item and harbor's chunks text parts."""
+        records = [
+            _user("u1", "01", "go"),
+            _assistant("a1", "02", [{"type": "tool_use", "id": "t1", "name": "Read", "input": {}}]),
+            _user(
+                "u2",
+                "03",
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "is_error": True,
+                        "content": [
+                            {"type": "text", "text": " see "},
+                            {"type": "text", "text": "  "},
+                            _base64_block("image", READ_PNG, "image/png"),
+                            _base64_block("image", PASTED_PNG, "image/svg+xml"),
+                            _base64_block("document", b"%PDF-1", "application/pdf"),
+                            {"type": "tool_reference", "tool_name": "Grep"},
+                        ],
+                    }
+                ],
+                toolUseResult={"stdout": "o"},
+            ),
+        ]
+        extract_claude_code_blobs(records, BlobCollector())
+        out = convert_claude_code_records(records, fallback_session_id="-p")
+        assert out is not None
+        assert out.to_json_dict()["steps"][1]["observation"]["results"][0]["content"] == [
+            {"type": "text", "text": " see "},
+            blob_part(READ_PNG),
+            {"type": "text", "text": blob_placeholder(PASTED_PNG, "image/svg+xml")},
+            {"type": "text", "text": blob_placeholder(b"%PDF-1", "application/pdf")},
+            {"type": "text", "text": '{"type": "tool_reference", "tool_name": "Grep"}'},
+            {"type": "text", "text": "[stdout]\no"},
+            {"type": "text", "text": "[error] tool reported failure"},
+        ]
+
+    def test_a_lifted_image_makes_the_user_message_atif_parts(self) -> None:
+        """Pre-passed: a pasted image is an image part beside the message's texts."""
+        records = [
+            _user(
+                "u1",
+                "01",
+                [
+                    {"type": "text", "text": "look "},
+                    _base64_block("image", PASTED_PNG, "image/png"),
+                    {"type": "text", "text": " \n"},
+                    _base64_block("document", b"%PDF-1", "application/pdf"),
+                ],
+            ),
+            _assistant("a1", "02", "ok"),
+        ]
+        extract_claude_code_blobs(records, BlobCollector())
+        out = convert_claude_code_records(records, fallback_session_id="-p")
+        assert out is not None
+        assert out.to_json_dict()["steps"][0]["message"] == [
+            {"type": "text", "text": "look "},
+            blob_part(PASTED_PNG),
+            {"type": "text", "text": blob_placeholder(b"%PDF-1", "application/pdf")},
+        ]
 
     def test_empty_tool_result_leaves_call_without_observation(self, tmp_path: Path) -> None:
         """A result that formats to nothing sets output None, so the step has tool_calls but no observation."""

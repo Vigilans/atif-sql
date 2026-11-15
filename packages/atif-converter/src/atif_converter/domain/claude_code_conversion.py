@@ -75,6 +75,7 @@ from atif_converter.domain import pricing
 from atif_converter.domain.agents import AgentSource
 from atif_converter.domain.atif import (
     Agent,
+    ContentPart,
     FinalMetrics,
     Metrics,
     Observation,
@@ -84,6 +85,7 @@ from atif_converter.domain.atif import (
     ToolCall,
     Trajectory,
 )
+from atif_converter.domain.blobs import lifted_part
 
 #: The schema version harbor 0.23.0 stamps on a Claude Code trajectory.
 SCHEMA_VERSION = "ATIF-v1.7"
@@ -365,15 +367,56 @@ def _build_metrics(usage: Any) -> Metrics | None:
     )
 
 
+def _is_text_block(block: Any) -> bool:
+    """A ``{"type": "text", "text": <str>}`` block, the one harbor reads verbatim."""
+    if not isinstance(block, dict):
+        return False
+    block_type: object = block.get("type")
+    return block_type == "text" and isinstance(block.get("text"), str)
+
+
+def _tool_result_parts(content: list[Any]) -> list[ContentPart] | None:
+    """A block-list tool result as ATIF parts, when it holds an image or audio part.
+
+    Not harbor's: harbor writes every item's JSON text. An item the pre-pass
+    lifted (:func:`~atif_converter.domain.blobs.lifted_part`) is its part, a
+    ``text`` item its text, and any other item its JSON text; whitespace-only
+    texts are left out, as harbor leaves out an empty item. ``None`` when no
+    item is an image or audio part, and the result stays harbor's text.
+    """
+    parts: list[ContentPart] = []
+    has_media = False
+    for item in content:
+        media = lifted_part(item)
+        if media is not None:
+            parts.append(media)
+            has_media = True
+            continue
+        text_value = item["text"] if _is_text_block(item) else _stringify(item).strip()
+        if text_value.strip():
+            parts.append(ContentPart(type="text", text=text_value))
+    return parts if has_media else None
+
+
 def _format_tool_result(
     block: dict[str, Any], tool_use_result: Any
-) -> tuple[str | None, dict[str, Any] | None]:
+) -> tuple[str | list[ContentPart] | None, dict[str, Any] | None]:
+    """A ``tool_result`` block's observation content and harbor's metadata for it.
+
+    harbor's ``_format_tool_result``, with two departures. A string result is
+    kept verbatim where harbor strips it (it strips the joined text too, so
+    the strip is skipped there as well; every other part has no outer
+    whitespace to lose). A block-list result holding an image or audio part
+    is a list of ATIF parts (:func:`_tool_result_parts`), harbor's suffix
+    chunks and error line each one more text part.
+    """
     parts: list[str] = []
 
     content = block.get("content")
+    content_parts = _tool_result_parts(content) if isinstance(content, list) else None
     if isinstance(content, str):
         if content.strip():
-            parts.append(content.strip())
+            parts.append(content)
     elif isinstance(content, list):
         for item in content:
             text_value = _stringify(item)
@@ -420,17 +463,24 @@ def _format_tool_result(
             formatted_chunks.append(f"[metadata] {json.dumps(remaining_meta, ensure_ascii=False)}")
 
         if formatted_chunks:
-            parts.append("\n".join(chunk for chunk in formatted_chunks if chunk))
+            suffix = "\n".join(chunk for chunk in formatted_chunks if chunk)
+            parts.append(suffix)
+            if content_parts is not None:
+                content_parts.append(ContentPart(type="text", text=suffix))
 
     if block.get("is_error") is True:
         parts.append("[error] tool reported failure")
+        if content_parts is not None:
+            content_parts.append(ContentPart(type="text", text="[error] tool reported failure"))
         metadata = metadata or {}
         metadata["is_error"] = True
 
     if metadata is not None:
         metadata.setdefault("raw_tool_result", block)
 
-    result_text = "\n\n".join(part for part in parts if part).strip()
+    if content_parts is not None:
+        return content_parts, metadata
+    result_text = "\n\n".join(part for part in parts if part)
     return (result_text or None), metadata
 
 
@@ -811,6 +861,35 @@ def _normalize_tool_result_block(
         state.completed_call_ids.add(call_id)
 
 
+def user_message_content(content: list[Any]) -> str | list[ContentPart]:
+    """A user record's block-list content as its step message (``""`` when it shows none).
+
+    harbor's rule: a ``text`` block contributes its string verbatim (no
+    strip, so byte spans inside each part round-trip), a ``tool_result``
+    block nothing (it becomes an observation), and any other block its JSON
+    text; empty or whitespace-only parts are dropped and the rest joined with
+    blank lines. One departure: when a block is an image or audio part the
+    pre-pass lifted (:func:`~atif_converter.domain.blobs.lifted_part`), the
+    message is those parts in order, each kept text a ``text`` part.
+    """
+    parts: list[ContentPart] = []
+    has_media = False
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "tool_result":
+            continue
+        media = lifted_part(block)
+        if media is not None:
+            parts.append(media)
+            has_media = True
+            continue
+        text = block["text"] if _is_text_block(block) else _stringify(block)
+        if text.strip():
+            parts.append(ContentPart(type="text", text=text))
+    if has_media:
+        return parts
+    return "\n\n".join(part.text or "" for part in parts)
+
+
 def _normalize_user_event(
     event: dict[str, Any], message: dict[str, Any], state: _NormalizationState
 ) -> None:
@@ -835,41 +914,10 @@ def _normalize_user_event(
         return
 
     if isinstance(content, list):
-        text_parts: list[str] = []
         for block in content:
-            # Byte-faithful: a plain text content block contributes its
-            # inner string verbatim instead of a json-encoded dict, keeping
-            # trailing/internal whitespace intact.
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
-            ):
-                text_parts.append(block["text"])
-                continue
-
             if isinstance(block, dict) and block.get("type") == "tool_result":
                 _normalize_tool_result_block(block, event, state)
-                continue
-
-            # harbor repeats the text-block check here, after the tool_result
-            # branch; it is unreachable (the first check above already took
-            # every such block) and kept only so the upstream diff stays
-            # line-for-line.
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
-            ):
-                text_parts.append(block["text"])
-                continue
-
-            text_parts.append(_stringify(block))
-
-        # No per-part strip, so byte spans inside each part round-trip; parts
-        # that are empty or whitespace-only are still filtered so the join
-        # does not materialise separators between nothing.
-        text_message = "\n\n".join(part for part in text_parts if part.strip())
+        text_message = user_message_content(content)
         if text_message:
             state.normalized_events.append(
                 {

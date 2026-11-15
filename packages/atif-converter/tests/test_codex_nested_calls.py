@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from codex_fixtures import codex_rollout_records, write_codex_rollout
-from subagent_fixtures import READ_PNG
+from subagent_fixtures import READ_PNG, blob_part
 
 from atif_converter.application.convert_codex import convert_codex_and_audit
 from atif_converter.domain import result_signals
@@ -350,9 +350,7 @@ class TestNestedCalls:
         sha = hashlib.sha256(READ_PNG).hexdigest()
         assert [blob.ref.sha256 for blob in result.blobs] == [sha]
         nested = _result(result.trajectory, "exec-shot")
-        assert (
-            nested["content"] == f"captured\n[image sha256:{sha} image/png {len(READ_PNG)} bytes]"
-        )
+        assert nested["content"] == [{"type": "text", "text": "captured"}, blob_part(READ_PNG)]
         assert [image["sha256"] for image in nested["extra"]["images"]] == [sha]
         assert nested["extra"]["is_error"] is False
 

@@ -360,12 +360,13 @@ SELECT DISTINCT 'drop_blob' AS action, blob_sha256
 FROM (
     SELECT sha256 AS blob_sha256 FROM images
     UNION ALL
-    SELECT unnest(regexp_extract_all(text, 'sha256:([0-9a-f]{64})', 1))
+    SELECT unnest(regexp_extract_all(text, 'blobs/sha256/[0-9a-f]{2}/([0-9a-f]{64})', 1))
     FROM (SELECT message AS text FROM steps UNION ALL SELECT content::VARCHAR FROM tool_results)
 );""",
         description=(
             "Drop every attachment: each image the images view lists and each blob a "
-            "sha256 placeholder names in a message or a tool result, so none is published."
+            "blob path names in a message or a tool result (an image or audio part, or "
+            "a [file blobs/sha256/...] placeholder), so none is published."
         ),
         requires="core",
         category="filter",

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import base64
 import copy
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -39,6 +38,7 @@ from harbor_oracle import (
     harbor_has_private_api,
     parity_diffs,
 )
+from subagent_fixtures import blob_part
 
 from atif_converter.domain.blobs import BlobCollector, extract_codex_blobs
 from atif_converter.domain.codex_conversion import convert_codex_records
@@ -478,7 +478,7 @@ _PNG_BASE64 = (
 #: A few bytes of audio, base64, for the inline audio branches.
 _WAV = b"RIFF\x24\x00\x00\x00WAVEfmt "
 _WAV_BASE64 = base64.b64encode(_WAV).decode()
-_WAV_PLACEHOLDER = f"[audio sha256:{hashlib.sha256(_WAV).hexdigest()} audio/wav {len(_WAV)} bytes]"
+_WAV_PART = blob_part(_WAV, "audio/wav")
 
 
 class TestStructuredToolOutput:
@@ -549,18 +549,19 @@ class TestStructuredToolOutput:
         ],
         ids=["input_image", "mcp-image"],
     )
-    def test_an_inline_image_is_its_blob_placeholder(
+    def test_an_inline_image_is_an_image_part_naming_its_blob(
         self, tmp_path: Path, block: dict[str, Any]
     ) -> None:
-        """The one deliberate divergence: harbor saves the file, we write the blob placeholder."""
+        """The one deliberate divergence: harbor saves the file, our image part names the blob."""
         content = self._content(
             tmp_path, [{"type": "text", "text": "shot:"}, block], cross_check=False
         )
-        data = base64.b64decode(_PNG_BASE64)
-        digest = hashlib.sha256(data).hexdigest()
-        assert content == f"shot:\n[image sha256:{digest} image/png {len(data)} bytes]"
+        assert content == [
+            {"type": "text", "text": "shot:"},
+            blob_part(base64.b64decode(_PNG_BASE64)),
+        ]
 
-    def test_an_inline_image_is_the_pre_pass_placeholder(self) -> None:
+    def test_an_inline_image_is_the_pre_pass_part(self) -> None:
         """Raw and production paths agree: the converter writes what ``extract_codex_blobs`` would."""
         output = [
             {"type": "input_text", "text": "shot:"},
@@ -577,7 +578,7 @@ class TestStructuredToolOutput:
         raw = convert_codex_records(copy.deepcopy(records), fallback_session_id="s")
         lifted = copy.deepcopy(records)
         extract_codex_blobs(lifted, BlobCollector())
-        assert lifted[4]["payload"]["output"][1]["type"] == "input_text"
+        assert lifted[4]["payload"]["output"][1] == blob_part(base64.b64decode(_PNG_BASE64))
         pre_passed = convert_codex_records(lifted, fallback_session_id="s")
         assert raw is not None
         assert pre_passed is not None
@@ -592,13 +593,13 @@ class TestStructuredToolOutput:
         ],
         ids=["audio_url", "openai", "mcp-audio"],
     )
-    def test_inline_tool_output_audio_is_its_blob_placeholder(
+    def test_inline_tool_output_audio_is_an_audio_part_naming_its_blob(
         self, tmp_path: Path, block: dict[str, Any]
     ) -> None:
         content = self._content(
             tmp_path, [{"type": "text", "text": "heard:"}, block], cross_check=False
         )
-        assert content == f"heard:\n{_WAV_PLACEHOLDER}"
+        assert content == [{"type": "text", "text": "heard:"}, _WAV_PART]
 
     @pytest.mark.parametrize(
         ("block", "text"),
@@ -637,7 +638,7 @@ class TestStructuredToolOutput:
         assert content == f"heard:\n{json.dumps(block, ensure_ascii=False)}"
 
     def test_harbor_differs_only_by_the_saved_image(self, tmp_path: Path) -> None:
-        """While harbor ships the method: its image part and our placeholder are the ONLY diff."""
+        """While harbor ships the method: the two image parts' paths are the ONLY diff."""
         if not harbor_has_private_api("codex"):
             pytest.skip("harbor no longer ships Codex's private converter")
         output = [
@@ -659,16 +660,22 @@ class TestStructuredToolOutput:
         assert ours is not None
         raw = diff_paths(theirs, ours.to_json_dict())
         assert [line.split(":", 1)[0] for line in raw] == [
-            "$.steps[1].observation.results[0].content"
+            "$.steps[1].observation.results[0].content[1].source.path"
         ]
         harbor_content = theirs["steps"][1]["observation"]["results"][0]["content"]
         assert [part["type"] for part in harbor_content] == ["text", "image"]
         assert parity_diffs(theirs, ours.to_json_dict()) == []
-        # The forgiveness is narrow: another image's bytes are not forgiven.
-        tampered = copy.deepcopy(ours.to_json_dict())
-        result = tampered["steps"][1]["observation"]["results"][0]
-        result["content"] = result["content"].replace("sha256:", "sha256:0", 1)[:-1]
-        assert parity_diffs(theirs, tampered) != []
+        # The forgiveness is narrow: other bytes, another media type or other text still fail.
+        our_source = blob_part(base64.b64decode(_PNG_BASE64))["source"]
+        other_path = f"../../blobs/sha256/00/{'0' * 64}.png"
+        for index, key, value in (
+            (1, "source", {**our_source, "path": other_path}),
+            (1, "source", {**our_source, "media_type": "image/gif"}),
+            (0, "text", "shot!"),
+        ):
+            tampered = copy.deepcopy(ours.to_json_dict())
+            tampered["steps"][1]["observation"]["results"][0]["content"][index][key] = value
+            assert parity_diffs(theirs, tampered) != []
 
 
 def _audio_message(content: list[dict[str, Any]]) -> dict[str, Any]:
@@ -699,12 +706,15 @@ class TestAudio:
             for s in _steps(_convert(tmp_path, records, cross_check=False))
             if s["source"] == "user"
         ]
-        assert user["message"] == (
-            f'<audio name=[Audio #1] path="/tmp/a.wav">{_WAV_PLACEHOLDER}</audio>[audio: file-1]'
-        )
+        assert user["message"] == [
+            {"type": "text", "text": '<audio name=[Audio #1] path="/tmp/a.wav">'},
+            _WAV_PART,
+            {"type": "text", "text": "</audio>"},
+            {"type": "text", "text": "[audio: file-1]"},
+        ]
 
     def test_harbor_differs_only_by_the_audio(self, tmp_path: Path) -> None:
-        """While harbor ships the method: the audio texts are the ONLY diff, and are forgiven."""
+        """While harbor ships the method: the audio parts and texts are the ONLY diff, and are forgiven."""
         if not harbor_has_private_api("codex"):
             pytest.skip("harbor no longer ships Codex's private converter")
         inline = {"type": "input_audio", "audio_url": f"data:audio/wav;base64,{_WAV_BASE64}"}
@@ -729,24 +739,70 @@ class TestAudio:
         assert ours is not None
         ours_dict = ours.to_json_dict()
         raw = diff_paths(theirs, ours_dict)
-        assert [line.split(":", 1)[0] for line in raw] == [
-            "$.steps[0].message",
-            "$.steps[1].observation.results[0].content",
-        ]
+        paths = [line.split(":", 1)[0] for line in raw]
+        content = "$.steps[1].observation.results[0].content"
+        assert paths[0] == "$.steps[0].message"
+        assert paths[1:]
+        assert all(path.startswith(f"{content}[") for path in paths[1:])
         assert theirs["steps"][0]["message"] == "listen: "
-        assert ours_dict["steps"][0]["message"] == f"listen: {_WAV_PLACEHOLDER}"
+        assert ours_dict["steps"][0]["message"] == [
+            {"type": "text", "text": "listen: "},
+            _WAV_PART,
+        ]
         assert parity_diffs(theirs, ours_dict) == []
         # The forgiveness is narrow: other bytes, or text beyond the audio's, still fail.
-        for key, old, new in (
-            ("message", "listen: ", "listen! "),
-            ("content", "sha256:", "sha256:0"),
-            ("content", "file-1", "file-2"),
+        other_path = f"../../blobs/sha256/00/{'0' * 64}.wav"
+        for where, index, key, value in (
+            ("message", 0, "text", "listen! "),
+            ("content", 1, "source", {"media_type": "audio/wav", "path": other_path}),
+            ("content", 2, "text", "[audio: file-2]"),
         ):
             tampered = copy.deepcopy(ours_dict)
-            step = tampered["steps"][0 if key == "message" else 1]
-            holder = step if key == "message" else step["observation"]["results"][0]
-            holder[key] = holder[key].replace(old, new, 1)
+            step = tampered["steps"][0 if where == "message" else 1]
+            parts = (
+                step["message"]
+                if where == "message"
+                else step["observation"]["results"][0]["content"]
+            )
+            parts[index][key] = value
             assert parity_diffs(theirs, tampered) != []
+
+
+class TestMessageImage:
+    """harbor drops a user message's ``input_image``; ours keeps it as an image part."""
+
+    def test_a_pasted_image_is_an_image_part_and_the_only_diff(self, tmp_path: Path) -> None:
+        image = {"type": "input_image", "image_url": f"data:image/png;base64,{_PNG_BASE64}"}
+        records = [
+            _session_meta(),
+            _turn_context(),
+            _audio_message([{"type": "input_text", "text": "look: "}, image]),
+            _assistant("ok"),
+            _token_count(10, 2),
+        ]
+        ours = _convert(tmp_path, records, cross_check=False)
+        (user,) = [s for s in _steps(ours) if s["source"] == "user"]
+        assert user["message"] == [
+            {"type": "text", "text": "look: "},
+            blob_part(base64.b64decode(_PNG_BASE64)),
+        ]
+        lifted = copy.deepcopy(records)
+        extract_codex_blobs(lifted, BlobCollector())
+        pre_passed = convert_codex_records(lifted, fallback_session_id="s")
+        raw = convert_codex_records(copy.deepcopy(records), fallback_session_id="s")
+        assert raw is not None
+        assert pre_passed is not None
+        assert raw.to_json_dict() == pre_passed.to_json_dict()
+        if not harbor_has_private_api("codex"):
+            return
+        theirs = harbor_codex_trajectory(write_codex_rollout(tmp_path / "harbor", records))
+        assert theirs is not None
+        assert ours is not None
+        assert theirs["steps"][0]["message"] == "look: "
+        assert parity_diffs(theirs, ours) == []
+        tampered = copy.deepcopy(ours)
+        tampered["steps"][0]["message"][0]["text"] = "look! "
+        assert parity_diffs(theirs, tampered) != []
 
 
 class TestApiCallGrouping:

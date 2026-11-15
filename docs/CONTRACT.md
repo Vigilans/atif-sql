@@ -191,15 +191,22 @@ proofs are out of scope for the workspace.
   files only after `lake verify` for that corpus, reading every session from
   its trajectory, is clean. Dry run unless --no-dry-run. It never rewrites
   meta.json.
-- Blob store: the converter replaces every inline base64 attachment with the
-  placeholder `[image sha256:<hash> <media_type> <n> bytes]` (`[audio ...]`
-  for Codex audio, its media type normalized to ATIF's AudioMediaType;
-  `[file ...]` for anything else) and hands the bytes to the writer, which
-  stores each under blobs/sha256/<first two hex>/<hash>.<ext> BEFORE it swaps
-  in the session that references it, so a published placeholder always
-  resolves. The store is shared rather than per-session because a hash-named
-  write is idempotent: a blob two sessions share is stored once, and
-  re-converting a session rewrites nothing. Nothing collects blobs; an
+- Blob store: the converter hands the bytes of every inline base64
+  attachment to the writer, which stores each under
+  blobs/sha256/<first two hex>/<hash>.<ext> BEFORE it swaps in the session
+  that references it, so a published reference always resolves. In the
+  trajectory, an image of a type ATIF's ImageSource accepts (`image/png`,
+  `image/jpeg`, `image/gif`, `image/webp`) and audio of an AudioMediaType
+  (Codex audio, its media type normalized) are ATIF ContentPart items,
+  `{"type": "image" | "audio", "source": {"media_type": ...,
+  "path": "../../blobs/sha256/<ab>/<hash>.<ext>"}}`, the path relative to
+  the session directory the trajectory sits in. Any other attachment is the
+  text placeholder `[file blobs/sha256/<ab>/<hash>.<ext> <media_type>]`
+  (`[image ...]` or `[audio ...]` for an image or audio type with no ATIF
+  part), naming the blob by its path below the corpus root. The store is
+  shared rather than per-session because a hash-named write is idempotent:
+  a blob two sessions share is stored once, and re-converting a session
+  rewrites nothing. Nothing collects blobs; an
   unreferenced blob costs space only. The hash and extension are validated
   before either becomes a path.
 
@@ -270,18 +277,23 @@ proofs are out of scope for the workspace.
      call_id; user and system steps are positional with a text cross-check that
      stops at the first mismatch and records enrichment_truncated_at_step.
    - Attachments and typed signals (atif_converter.domain.blobs /
-     domain.result_signals), both agents: inline base64 is replaced by a blob
-     placeholder BEFORE conversion; after enrichment every
+     domain.result_signals), both agents: inline base64 is replaced by an
+     ATIF part or a blob placeholder BEFORE conversion (see Blob store); a
+     user message or tool result whose block list holds an image or audio
+     part is a ContentPart list (each text a text part, and Claude Code's
+     [stdout] / [stderr] / [metadata] chunks and error line text parts after
+     the result's own items), any other keeps its text, and a Claude Code
+     string tool result is kept verbatim; after enrichment every
      observation.results[].extra may carry is_error, exit_code, interrupted
      and images, a user step's extra may carry images, every sidechain step's
      extra carries agent_id, and trajectory.extra.subagents lists each
      subagent with its parent_tool_call_id and link_source ("meta" from the
      sidecar, "tool_result" from toolUseResult.agentId). A key absent means
      the transcript did not say; nothing is guessed. Codex audio (an
-     input_audio item, or an MCP audio block in a tool output) is its blob
-     placeholder in the message or result text, and an input_audio naming
-     only a file_id or a URL is `[audio: <file_id-or-url>]`; images lists
-     image attachments only.
+     input_audio item, or an MCP audio block in a tool output) is an audio
+     part, and an input_audio naming only a file_id or a URL is
+     `[audio: <file_id-or-url>]`; a Codex user message keeps its pasted
+     input_image as an image part; images lists image attachments only.
    - Codex code mode (domain.codex_nested_calls): each MCP call and command a
      code-mode exec script ran (an item_completed McpToolCall or
      CommandExecution item, attributed to the script by position) becomes a
@@ -291,7 +303,7 @@ proofs are out of scope for the workspace.
      carries its own is_error / exit_code. A script whose attribution is
      ambiguous emits none, and the exec result keeps the outcome folded from
      its items. The harbor port emits none, so parity is unchanged.
-   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 17) is
+   - atif_converter.domain.schema_version.CONVERTER_SCHEMA_VERSION (currently 18) is
      bumped with any change to the converter's output for the same input.
 3. Census + edges + session events are derived from RAW jsonl (never from the
    trajectory). session_events keeps, as rows and NOT as steps: Claude Code
@@ -435,18 +447,21 @@ atif-sql schema                        # static, <50ms, no duckdb bind
   content becomes "", the result's images go, and tool_result_metadata keeps
   only is_error. `drop_reasoning` (trajectory_id, step_id): reasoning_content
   goes. `drop_event` (event_seq): the session event with that seq goes.
-  `drop_blob` (blob_sha256): every images entry with that hash goes, and the
-  blob isn't published. `replace` (find, replacement): every non-empty find is
-  replaced in every string value of the trajectory (embedded trajectories and
-  extra included), the session events and the loss report, keys untouched,
-  in one pass with the longest find first. Addresses name the
+  `drop_blob` (blob_sha256): every images entry with that hash goes, every
+  image or audio part whose path names it leaves its message or content (a
+  list left empty becomes ""), and the blob isn't published. `replace`
+  (find, replacement): every non-empty find is replaced in every string
+  value of the trajectory (embedded trajectories and extra included), the
+  session events and the loss report, keys untouched, in one pass with the
+  longest find first. Addresses name the
   session as converted; trajectory_id is the step views' (an embedded
   trajectory's own id, for the root its trajectory_id or the session id).
 - Order: the converter's hidden copies go first on every filtered pass
   (raw_arguments in step.extra, step.extra.tool_call_details.* and
   tool_calls[].extra, and tool_result_metadata's raw_tool_result and
   tool_use_result), then prune and drop, then replace; only blobs the result
-  still names (an images entry or a `sha256:<hex>` placeholder) are stored.
+  still names (an images entry, or a `blobs/sha256/<ab>/<hex>` path in a part
+  or a placeholder) are stored.
   The scripts then run again over the result, and the session fails if their
   directives change a byte of it. An unknown action or column, a missing,
   mistyped or foreign parameter, an address naming nothing, a find with two

@@ -669,30 +669,49 @@ class TestCodexAudio:
         assert (report["materialized"], report["failed"]) == (1, 0), report["failures"]
         assert _stored_blob_files(tmp_path) == {f"{WAV_SHA}.wav", f"{MP3_SHA}.mp3"}
         assert _query(tmp_path, capsys, "SELECT count(*) AS n FROM images") == [{"n": 0}]
-        assert _query(
+        mp3_path = f"blobs/sha256/{MP3_SHA[:2]}/{MP3_SHA}.mp3"
+        rows = _query(
             tmp_path,
             capsys,
-            "SELECT content::VARCHAR AS content FROM tool_results WHERE tool_use_id = 'call_tts'",
-        ) == [
-            {
-                "content": json.dumps(
-                    f"spoken:\n[audio sha256:{MP3_SHA} audio/mpeg {len(MP3)} bytes]"
-                )
-            }
+            "SELECT content::VARCHAR AS content, content_text(content) AS text "
+            "FROM tool_results WHERE tool_use_id = 'call_tts'",
+        )
+        assert [json.loads(row["content"]) for row in rows] == [
+            [
+                {"type": "text", "text": "spoken:"},
+                {
+                    "type": "audio",
+                    "source": {"media_type": "audio/mpeg", "path": f"../../{mp3_path}"},
+                },
+            ]
+        ]
+        assert [row["text"] for row in rows] == [f"spoken:\n\n[audio {mp3_path} audio/mpeg]"]
+        wav_path = f"blobs/sha256/{WAV_SHA[:2]}/{WAV_SHA}.wav"
+        assert _query(tmp_path, capsys, "SELECT message FROM steps WHERE source = 'user'") == [
+            {"message": f"transcribe \n\n[audio {wav_path} audio/wav]"}
         ]
 
     def test_drop_blob_drops_the_audio_its_placeholders_name(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """The placeholder-scanning example finds the audio, drops it, and converges."""
+        """The blob-path-scanning example finds the audio, drops its parts and blobs, and converges."""
         example = next(e for e in FILTER_EXAMPLES if e.name == "drop_images_and_blobs")
         report = _materialize_codex(tmp_path, capsys, _scripts(tmp_path, example.sql))
         assert (report["materialized"], report["failed"]) == (1, 0), report["failures"]
         assert _stored_blob_files(tmp_path) == set()
-        Trajectory.model_validate(
-            json.loads(
-                read_artifact_text(
-                    tmp_path / "corpus" / "sessions" / CODEX_SESSION / "trajectory.json.zst"
-                )
+        trajectory = json.loads(
+            read_artifact_text(
+                tmp_path / "corpus" / "sessions" / CODEX_SESSION / "trajectory.json.zst"
             )
         )
+        Trajectory.model_validate(trajectory)
+        # No part names a blob that was not published.
+        assert "blobs/sha256/" not in json.dumps(trajectory)
+        user = next(step for step in trajectory["steps"] if step["source"] == "user")
+        assert user["message"] == [{"type": "text", "text": "transcribe "}]
+        results = [
+            r
+            for step in trajectory["steps"]
+            for r in (step.get("observation") or {}).get("results", [])
+        ]
+        assert [r["content"] for r in results] == [[{"type": "text", "text": "spoken:"}]]

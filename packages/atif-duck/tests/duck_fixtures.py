@@ -100,6 +100,17 @@ READ_SHA = "ab" + "0" * 62
 PASTED_SHA = "cd" + "1" * 62
 
 
+def _image_part(sha256: str) -> dict[str, Any]:
+    """The ATIF image part the converter writes for a PNG blob, its path from the session dir."""
+    return {
+        "type": "image",
+        "source": {
+            "media_type": "image/png",
+            "path": f"../../blobs/sha256/{sha256[:2]}/{sha256}.png",
+        },
+    }
+
+
 def _image_json(sha256: str, size: int, width: int, height: int) -> dict[str, Any]:
     """One ``extra.images[]`` entry, as the converter writes it."""
     return {
@@ -374,7 +385,10 @@ def _session_two() -> dict[str, Any]:
                 "step_id": 1,
                 "timestamp": "2026-08-21T09:00:00.000Z",
                 "source": "user",
-                "message": f"Tidy the docs.\n\n[image sha256:{PASTED_SHA} image/png 90 bytes]",
+                "message": [
+                    {"type": "text", "text": "Tidy the docs."},
+                    _image_part(PASTED_SHA),
+                ],
                 "extra": {
                     "is_sidechain": False,
                     "source_uuids": ["u2-1"],
@@ -406,10 +420,10 @@ def _session_two() -> dict[str, Any]:
                     "results": [
                         {
                             "source_call_id": "toolu_21",
-                            "content": (
-                                "Todos have been modified successfully\n"
-                                f"[image sha256:{READ_SHA} image/png 70 bytes]"
-                            ),
+                            "content": [
+                                {"type": "text", "text": "Todos have been modified successfully"},
+                                _image_part(READ_SHA),
+                            ],
                             "extra": {
                                 "is_error": True,
                                 "exit_code": 2,

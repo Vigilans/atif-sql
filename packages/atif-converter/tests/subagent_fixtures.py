@@ -22,6 +22,7 @@ Shaped after the record layouts Claude Code writes for subagent sessions:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import struct
 import zlib
@@ -58,6 +59,45 @@ def png_bytes(width: int, height: int) -> bytes:
 READ_PNG = png_bytes(3, 2)
 #: A second, different PNG the user pastes (5 x 4), declared as PNG.
 PASTED_PNG = png_bytes(5, 4)
+
+
+#: The stored file's extension per media type, as the blob store names it.
+_BLOB_EXTENSIONS: dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "application/pdf": "pdf",
+    "audio/wav": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "audio/aac": "aac",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+    "audio/webm": "webm",
+    "audio/aiff": "aiff",
+}
+
+
+def blob_path(data: bytes, media_type: str = "image/png") -> str:
+    """``data``'s blob path below the corpus root: ``blobs/sha256/<ab>/<sha256>.<ext>``."""
+    sha = hashlib.sha256(data).hexdigest()
+    return f"blobs/sha256/{sha[:2]}/{sha}.{_BLOB_EXTENSIONS.get(media_type, 'bin')}"
+
+
+def blob_part(data: bytes, media_type: str = "image/png") -> dict[str, Any]:
+    """The ATIF image or audio part naming ``data``'s blob from a session directory."""
+    return {
+        "type": media_type.split("/", maxsplit=1)[0],
+        "source": {"media_type": media_type, "path": f"../../{blob_path(data, media_type)}"},
+    }
+
+
+def blob_placeholder(data: bytes, media_type: str = "image/png") -> str:
+    """The text placeholder naming ``data``'s blob (``[image|audio|file <path> <media>]``)."""
+    kind = media_type.split("/", maxsplit=1)[0]
+    kind = kind if kind in {"image", "audio"} else "file"
+    return f"[{kind} {blob_path(data, media_type)} {media_type}]"
 
 
 def _b64(data: bytes) -> str:

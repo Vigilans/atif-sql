@@ -22,17 +22,23 @@ list of MCP content blocks or content items) becomes text rather than Python's
 ``str()`` of the list (harbor #3467). So is harbor 0.26.0's conversion of one
 thread: each model request takes the model its own ``turn_context`` names, and
 the final token totals keep a zero. The departures are an inline image in
-such an output, which harbor saves to a file and this pure function writes as
-its blob placeholder (:func:`_tool_output_content` says why), and Codex audio:
-harbor's ``_extract_message_text`` drops a message's ``input_audio`` and its
-tool output keeps an audio block as JSON text, where here both are the audio's
-blob placeholder or ``[audio: <file_id-or-url>]``
-(:func:`~atif_converter.domain.blobs.codex_audio_text`):
+such an output, which harbor saves to a file and this pure function names by
+its corpus blob path (:func:`_tool_output_content` says why), and Codex
+media in messages and audio in tool outputs: harbor's
+``_extract_message_text`` drops a user or developer message's ``input_image``
+and ``input_audio`` and its tool output keeps an audio block as JSON text,
+where here each is an ATIF image or audio part, or ``[audio:
+<file_id-or-url>]``
+(:func:`~atif_converter.domain.codex_enrichment.message_content`,
+:func:`~atif_converter.domain.blobs.codex_audio_part`):
 
 =================================  =========================================
 harbor 0.26.0                       here
 =================================  =========================================
-``_extract_message_text``           :func:`~atif_converter.domain.codex_enrichment.message_text`
+``_extract_message_text``           :func:`~atif_converter.domain.codex_enrichment.message_text`,
+                                    and
+                                    :func:`~atif_converter.domain.codex_enrichment.message_content`
+                                    for a user or developer message
 ``_parse_output_blob``              :func:`_parse_output_blob`
 ``_group_events_by_api_call_id``    :func:`_group_events_by_api_call_id`
 ``_metrics_from_token_count_payload``  :func:`_metrics_from_token_count_payload`
@@ -80,6 +86,7 @@ from atif_converter.domain import pricing
 from atif_converter.domain.agents import AgentSource
 from atif_converter.domain.atif import (
     Agent,
+    ContentPart,
     FinalMetrics,
     Metrics,
     Observation,
@@ -88,8 +95,13 @@ from atif_converter.domain.atif import (
     ToolCall,
     Trajectory,
 )
-from atif_converter.domain.blobs import BlobCollector, codex_audio_text, codex_tool_image_ref
-from atif_converter.domain.codex_enrichment import message_text
+from atif_converter.domain.blobs import (
+    BlobCollector,
+    codex_audio_part,
+    codex_tool_image_ref,
+    lifted_part,
+)
+from atif_converter.domain.codex_enrichment import message_content, message_text
 
 #: The schema version harbor 0.22.0 stamps on a Codex trajectory.
 _SCHEMA_VERSION = "ATIF-v1.7"
@@ -113,7 +125,7 @@ _TOOL_OUTPUT_CONTENT_TYPES = (
 _IMAGE_OMITTED = "[image omitted]"
 
 
-def _parse_output_blob(raw: Any) -> tuple[str | None, dict[str, Any] | None]:
+def _parse_output_blob(raw: Any) -> tuple[str | list[ContentPart] | None, dict[str, Any] | None]:
     """Extract the observation content and metadata from a Codex tool output.
 
     harbor 0.24.0's ``Codex._parse_output_blob`` (harbor #3467). A JSON object
@@ -148,8 +160,8 @@ def _parse_output_blob(raw: Any) -> tuple[str | None, dict[str, Any] | None]:
     return _non_object_output(raw, parsed), None
 
 
-def _non_object_output(raw: Any, parsed: Any) -> str:
-    """The text of a tool output that is not a JSON object (harbor's tail branches)."""
+def _non_object_output(raw: Any, parsed: Any) -> str | list[ContentPart]:
+    """The content of a tool output that is not a JSON object (harbor's tail branches)."""
     if _is_tool_output_content(parsed):
         return _tool_output_content(parsed)
     if isinstance(raw, str):
@@ -174,33 +186,37 @@ def _is_tool_output_content(value: Any) -> bool:
     return True
 
 
-def _tool_output_content(blocks: list[dict[str, Any]]) -> str:
-    """Tool output content blocks -> the observation's text.
+def _tool_output_content(blocks: list[dict[str, Any]]) -> str | list[ContentPart]:
+    """Tool output content blocks -> the observation's content.
 
     harbor's ``Codex._tool_output_content``: text blocks keep their text, an
-    image becomes :func:`_tool_output_image_text`, an audio block or item
-    becomes :func:`~atif_converter.domain.blobs.codex_audio_text`, and any
-    other block (a resource, encrypted content) is kept as its JSON text; the
-    parts are joined by newlines.
+    image becomes :func:`_tool_output_image_part`, an audio block or item
+    becomes :func:`~atif_converter.domain.blobs.codex_audio_part`, and any
+    other block (a resource, encrypted content) is kept as its JSON text. An
+    output holding an image or audio part is the list of parts; any other is
+    the parts' texts joined by newlines.
 
     DELIBERATE DIVERGENCE from harbor 0.24.0 for an inline image harbor can
     decode: harbor writes it to ``<logs_dir>/images/codex_<sha256[:16]>.<ext>``
-    and returns a list of content parts with an image part pointing there. This
-    converter is pure and the corpus keeps attachments in its blob store, so the
-    image becomes the blob placeholder text the pre-pass
-    (:func:`~atif_converter.domain.blobs.extract_codex_blobs`) writes for the
-    same ``input_image``, and the content stays one string. harbor keeps an
-    audio block as its JSON text, base64 and all; here inline audio is its blob
-    placeholder too, and an ``input_audio`` naming only a ``file_id`` or a URL
-    is ``[audio: <file_id-or-url>]``. Audio neither rule reads stays harbor's
+    and points its image part there. This converter is pure and the corpus
+    keeps attachments in its blob store, so the image part points at the blob
+    the pre-pass (:func:`~atif_converter.domain.blobs.extract_codex_blobs`)
+    stores for the same item, ``../../blobs/sha256/<ab>/<sha256>.<ext>`` from
+    the session directory. harbor keeps an audio block as its JSON text, base64
+    and all; here inline audio is an audio part naming its blob, and an
+    ``input_audio`` naming only a ``file_id`` or a URL is
+    ``[audio: <file_id-or-url>]``. Audio neither rule reads stays harbor's
     JSON text. The parity oracle forgives exactly these
     (``tests/harbor_oracle.py::_media_content_forgiven``).
     """
-    return "\n".join(_tool_output_block_text(block) for block in blocks)
+    parts = [_tool_output_block_part(block) for block in blocks]
+    if any(part.type != "text" for part in parts):
+        return parts
+    return "\n".join(part.text or "" for part in parts)
 
 
-def structured_output_text(value: Any) -> str | None:
-    """:func:`_tool_output_content`'s text for a list of content blocks or items, else ``None``.
+def structured_output_content(value: Any) -> str | list[ContentPart] | None:
+    """:func:`_tool_output_content` for a list of content blocks or items, else ``None``.
 
     Not part of harbor's converter: the result-signals pass renders a code-mode
     script's nested MCP result through it
@@ -210,27 +226,30 @@ def structured_output_text(value: Any) -> str | None:
     return _tool_output_content(value) if _is_tool_output_content(value) else None
 
 
-def _tool_output_block_text(block: dict[str, Any]) -> str:
+def _tool_output_block_part(block: dict[str, Any]) -> ContentPart:
+    lifted = lifted_part(block)
+    if lifted is not None:
+        return lifted
     block_type = block["type"]
     text = block.get("text")
     if block_type in _TOOL_OUTPUT_TEXT_TYPES and isinstance(text, str):
-        return text
+        return ContentPart(type="text", text=text)
     if block_type in _TOOL_OUTPUT_IMAGE_TYPES:
-        return _tool_output_image_text(block)
+        return _tool_output_image_part(block)
     if block_type in _TOOL_OUTPUT_AUDIO_TYPES:
-        audio_text = codex_audio_text(block)
-        if audio_text is not None:
-            return audio_text
-    return json.dumps(block, ensure_ascii=False)
+        audio = codex_audio_part(block)
+        if audio is not None:
+            return audio
+    return ContentPart(type="text", text=json.dumps(block, ensure_ascii=False))
 
 
-def _tool_output_image_text(block: dict[str, Any]) -> str:
-    """The text for an MCP image block or an ``input_image`` item.
+def _tool_output_image_part(block: dict[str, Any]) -> ContentPart:
+    """The part for an MCP image block or an ``input_image`` item.
 
     harbor's ``Codex._tool_output_image_part`` and ``_save_tool_output_image``,
     with the same texts for an image nobody can reference (``[image omitted]``)
     and for a remote URL (``[image: <url>]``); an inline image harbor would save
-    becomes its blob placeholder (see :func:`_tool_output_content`).
+    is an image part naming its blob (see :func:`_tool_output_content`).
     """
     if block["type"] == "image":
         data = block.get("data")
@@ -239,27 +258,28 @@ def _tool_output_image_text(block: dict[str, Any]) -> str:
         data = block.get("image_url")
         media_type = None
     if not isinstance(data, str):
-        return _IMAGE_OMITTED
+        return ContentPart(type="text", text=_IMAGE_OMITTED)
     if "://" in data and not data.startswith("data:"):
-        return f"[image: {data}]"
+        return ContentPart(type="text", text=f"[image: {data}]")
 
-    return _inline_image_text(data, media_type)
+    return _inline_image_part(data, media_type)
 
 
-def _inline_image_text(data: str, media_type: Any) -> str:
-    """An inline image's placeholder, or harbor's text when harbor would not save it.
+def _inline_image_part(data: str, media_type: Any) -> ContentPart:
+    """An inline image's part, or harbor's text when harbor would not save it.
 
     The rule is :func:`~atif_converter.domain.blobs.codex_tool_image_ref`, the
     one the pre-pass lifts the same image by, so in production the pre-pass has
-    already replaced the image with this placeholder and stored its bytes; the
+    already replaced the image with this part and stored its bytes; the
     throwaway collector here only names the bytes when the records were not
     pre-passed.
     """
     ref = codex_tool_image_ref(data, media_type, BlobCollector())
-    if ref is None:
+    part = None if ref is None else ref.content_part()
+    if part is None:
         logger.debug("Unsupported or undecodable Codex tool image: {}", media_type)
-        return _IMAGE_OMITTED
-    return ref.placeholder()
+        return ContentPart(type="text", text=_IMAGE_OMITTED)
+    return part
 
 
 def _group_events_by_api_call_id(
@@ -773,8 +793,13 @@ def _normalize_events(
                     "timestamp": timestamp,
                     "role": payload.get("role", "user"),
                     # harbor: ``_extract_message_text(content)`` when content
-                    # is a list, else "" — which is ``message_text``, audio aside.
-                    "text": message_text(payload),
+                    # is a list, else "" — which is ``message_text``, audio
+                    # aside; a user or developer message keeps its media.
+                    "text": (
+                        message_text(payload)
+                        if payload.get("role") == "assistant"
+                        else message_content(payload)
+                    ),
                     "reasoning": pending_reasoning if payload.get("role") == "assistant" else None,
                 }
             )
@@ -1078,4 +1103,4 @@ def convert_codex_records(
     )
 
 
-__all__ = ["convert_codex_records", "structured_output_text"]
+__all__ = ["convert_codex_records", "structured_output_content"]

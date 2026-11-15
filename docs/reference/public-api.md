@@ -129,7 +129,7 @@ Everything one conversion yields that the corpus writes to disk: the ATIF trajec
 loss-report dict, one already-serialized `edges.jsonl` line per raw record without trailing
 newlines (the writer owns line termination), the same for each kept non-message record of
 `session_events.jsonl`, the raw source files the converter archived, and the inline attachments
-it replaced with placeholders.
+it replaced with ATIF parts or placeholders.
 
 `packages/atif-corpus/src/atif_corpus/domain/ports.py:65-98`
 
